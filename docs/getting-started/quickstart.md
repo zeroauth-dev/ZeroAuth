@@ -89,7 +89,7 @@ curl https://zeroauth.dev/api/console/usage \
   -H "Authorization: Bearer YOUR_CONSOLE_TOKEN"
 ```
 
-## Plans {#plans}
+## Plans
 
 | Feature | Free | Starter | Growth | Enterprise |
 |---|---|---|---|---|
