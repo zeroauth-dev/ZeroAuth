@@ -4,7 +4,7 @@
 # ───────────────────────────────────────────────
 
 # ── Development Stage ─────────────────────────
-FROM node:20-alpine AS development
+FROM node:25-alpine AS development
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json* ./
@@ -20,7 +20,7 @@ EXPOSE 3000 5173
 CMD ["npx", "tsx", "watch", "src/server.ts"]
 
 # ── Test Stage ────────────────────────────────
-FROM node:20-alpine AS test
+FROM node:25-alpine AS test
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
@@ -31,7 +31,7 @@ COPY circuits/build/ ./circuits/build/
 CMD ["npm", "test"]
 
 # ── Build Stage — API ─────────────────────────
-FROM node:20-alpine AS api-build
+FROM node:25-alpine AS api-build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --ignore-scripts
@@ -40,7 +40,7 @@ COPY src/ ./src/
 RUN npm run build
 
 # ── Build Stage — Dashboard ───────────────────
-FROM node:20-alpine AS dashboard-build
+FROM node:25-alpine AS dashboard-build
 WORKDIR /app/dashboard
 COPY dashboard/package.json dashboard/package-lock.json* ./
 RUN npm ci --ignore-scripts
@@ -48,7 +48,7 @@ COPY dashboard/ ./
 RUN npm run build
 
 # ── Production Stage ──────────────────────────
-FROM node:20-alpine AS production
+FROM node:25-alpine AS production
 WORKDIR /app
 
 # Security: run as non-root
