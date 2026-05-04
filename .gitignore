@@ -1,0 +1,33 @@
+# ─── Secrets ────────────────────────────────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+PRODUCTION_CREDENTIALS.md
+
+# ─── Dependencies ───────────────────────────────────────
+node_modules/
+dashboard/node_modules/
+website/node_modules/
+
+# ─── Build output ───────────────────────────────────────
+dist/
+dashboard/build/
+dashboard/dist/
+website/build/
+website/.docusaurus/
+artifacts/
+cache/
+typechain-types/
+
+# ─── Coverage / logs ────────────────────────────────────
+coverage/
+*.log
+docs/missfont.log
+
+# ─── OS / editor ────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+*.swp
+.claude/

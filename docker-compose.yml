@@ -1,0 +1,138 @@
+services:
+  # ── Redis ────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: zeroauth-redis
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles: ['dev', 'test', 'prod']
+
+  # ── PostgreSQL ──────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: zeroauth-postgres
+    ports:
+      - '127.0.0.1:5432:5432'
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-zeroauth}
+      POSTGRES_USER: ${POSTGRES_USER:-zeroauth}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zeroauth-dev}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-zeroauth} -d ${POSTGRES_DB:-zeroauth}']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles: ['dev', 'test', 'prod']
+
+  # ── Development ──────────────────────────────
+  zeroauth-dev:
+    build:
+      context: .
+      target: development
+    container_name: zeroauth-dev
+    ports:
+      - '3000:3000'
+      - '5173:5173'
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+      - USE_REDIS_SESSIONS=true
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_HOST=postgres
+    volumes:
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./circuits/build:/app/circuits/build
+      - ./contracts:/app/contracts
+      - ./dashboard/src:/app/dashboard/src
+      - ./dashboard/dist:/app/dashboard/dist
+      - ./website/build:/app/website/build
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    profiles: ['dev']
+
+  # ── Test ─────────────────────────────────────
+  zeroauth-test:
+    build:
+      context: .
+      target: test
+    container_name: zeroauth-test
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=test
+      - USE_REDIS_SESSIONS=false
+      - POSTGRES_HOST=postgres
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    profiles: ['test']
+
+  # ── Production ───────────────────────────────
+  zeroauth-prod:
+    build:
+      context: .
+      target: production
+    container_name: zeroauth-prod
+    expose:
+      - '3000'
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - USE_REDIS_SESSIONS=true
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_HOST=postgres
+      - TRUST_PROXY=true
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/api/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles: ['prod']
+
+  # ── Caddy reverse proxy + auto TLS for zeroauth.dev ────
+  caddy:
+    image: caddy:2-alpine
+    container_name: zeroauth-caddy
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - zeroauth-prod
+    restart: unless-stopped
+    profiles: ['prod']
+
+volumes:
+  redis-data:
+  postgres-data:
+  caddy-data:
+  caddy-config:

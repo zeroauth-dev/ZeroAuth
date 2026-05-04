@@ -1,0 +1,38 @@
+# ZeroAuth — Caddy reverse proxy config for zeroauth.dev
+# Caddy provisions a real Let's Encrypt cert automatically and renews it.
+#
+# Usage on the production host:
+#   docker compose --profile prod up -d --build
+#
+# This Caddyfile is consumed by the `caddy` service in docker-compose.yml,
+# which is on the same Compose network as `zeroauth-prod`, so we reach the
+# app via its service name.
+
+zeroauth.dev, www.zeroauth.dev {
+	# Force HTTPS (Caddy does this by default; explicit for clarity).
+	encode zstd gzip
+
+	# Forward to the ZeroAuth container on :3000.
+	reverse_proxy zeroauth-prod:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+
+	# Long-lived hashed assets (Vite/Docusaurus output).
+	@hashed path_regexp hashed \.(js|css|woff2?|svg|png|jpg|webp)$
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+	# Security headers (helmet sets most, but enforce belt-and-braces here).
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "interest-cohort=()"
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

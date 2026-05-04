@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZeroAuth — Live Demo</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #06070d;
+      --bg-raised: #0d0e18;
+      --bg-surface: #131425;
+      --border: #1c1d35;
+      --text: #e8e9f0;
+      --text-secondary: #8b8da5;
+      --text-dim: #4a4c6a;
+      --cyan: #22d3ee;
+      --cyan-glow: #22d3ee40;
+      --green: #34d399;
+      --green-glow: #34d39940;
+      --red: #f87171;
+      --red-glow: #f8717140;
+      --blue: #60a5fa;
+      --purple: #a78bfa;
+      --amber: #fbbf24;
+      --sans: 'Inter', -apple-system, system-ui, sans-serif;
+      --mono: 'JetBrains Mono', 'Consolas', monospace;
+    }
+
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── Ambient BG ─── */
+    .ambient {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -20%, #22d3ee08 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 100%, #a78bfa06 0%, transparent 50%);
+    }
+    .grid-overlay {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 60px 60px;
+      opacity: 0.15;
+      mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, black 20%, transparent 70%);
+    }
+
+    /* ─── Top Bar ─── */
+    .topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 32px;
+      background: #06070dcc;
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-logo {
+      font-weight: 700; font-size: 18px; letter-spacing: -0.5px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .topbar-logo svg { width: 28px; height: 28px; }
+    .topbar-badge {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1.5px; color: var(--cyan);
+      background: #22d3ee12; border: 1px solid #22d3ee25;
+      padding: 4px 10px; border-radius: 4px;
+    }
+    .topbar-timer {
+      font-family: var(--mono); font-size: 13px; color: var(--text-dim);
+    }
+
+    /* ─── Stage Container ─── */
+    .stage {
+      position: relative; z-index: 1;
+      width: 100%; max-width: 1100px;
+      padding: 0 32px;
+      display: flex; flex-direction: column; align-items: center;
+    }
+
+    /* ─── Phases ─── */
+    .phase {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      padding: 70px 20px 60px;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.8s ease, transform 0.8s ease;
+      z-index: 1; overflow-y: auto;
+      transform: translateY(30px);
+    }
+    .phase.active {
+      opacity: 1; pointer-events: auto;
+      transform: translateY(0);
+    }
+    .phase > div {
+      width: 100%; max-width: 1000px;
+    }
+
+    /* ─── Phase 0: Opening ─── */
+    .opening { text-align: center; }
+    .opening h1 {
+      font-size: 56px; font-weight: 800; letter-spacing: -2px;
+      line-height: 1.1; margin-bottom: 16px;
+      background: linear-gradient(135deg, #e8e9f0 30%, var(--cyan) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .opening p {
+      font-size: 18px; color: var(--text-secondary); max-width: 500px;
+      margin: 0 auto 40px;
+    }
+    .start-btn {
+      font-family: var(--sans); font-size: 15px; font-weight: 600;
+      padding: 14px 36px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--cyan), #06b6d4);
+      color: #06070d; border: none; cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 0 30px var(--cyan-glow);
+    }
+    .start-btn:hover { transform: translateY(-2px); box-shadow: 0 0 50px var(--cyan-glow); }
+
+    /* ─── Phase 1: Biometric ─── */
+    .biometric-wrap { text-align: center; }
+    .phase-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 2px; color: var(--text-dim); margin-bottom: 8px;
+    }
+    .phase-title {
+      font-size: 32px; font-weight: 700; letter-spacing: -1px; margin-bottom: 40px;
+    }
+    .laptop {
+      width: 400px; height: 260px; margin: 0 auto;
+      background: var(--bg-surface); border-radius: 12px;
+      border: 1px solid var(--border); position: relative;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .laptop-screen {
+      width: 340px; height: 210px;
+      background: #0a0b14; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      position: relative; overflow: hidden;
+    }
+    .fingerprint-svg {
+      width: 120px; height: 120px;
+      opacity: 0.2; transition: opacity 1s;
+    }
+    .fingerprint-svg.scanning { opacity: 1; }
+    .fingerprint-svg .fp-path {
+      stroke: var(--cyan); stroke-width: 2; fill: none;
+      stroke-dasharray: 800; stroke-dashoffset: 800;
+      filter: drop-shadow(0 0 6px var(--cyan-glow));
+    }
+    .fingerprint-svg.scanning .fp-path {
+      animation: drawFP 2s ease forwards;
+    }
+    @keyframes drawFP {
+      to { stroke-dashoffset: 0; }
+    }
+    .scan-line {
+      position: absolute; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+      box-shadow: 0 0 20px var(--cyan);
+      top: -2px; opacity: 0;
+    }
+    .scan-line.active {
+      opacity: 1;
+      animation: scanDown 2s ease-in-out forwards;
+    }
+    @keyframes scanDown {
+      0% { top: 0; }
+      100% { top: 100%; }
+    }
+    .bio-status {
+      margin-top: 24px; font-family: var(--mono); font-size: 14px;
+      color: var(--text-dim); height: 20px;
+    }
+    .bio-status.success { color: var(--green); }
+    .laptop-base {
+      width: 460px; height: 12px; margin: 0 auto;
+      background: linear-gradient(180deg, #1a1b2e, #131425);
+      border-radius: 0 0 8px 8px;
+      border: 1px solid var(--border); border-top: none;
+    }
+
+    /* ─── Phase 2: ZKP Math ─── */
+    .zkp-wrap { text-align: center; }
+    .zkp-visual {
+      display: flex; align-items: center; justify-content: center;
+      gap: 40px; margin: 20px auto; max-width: 900px; flex-wrap: wrap;
+    }
+    .zkp-card {
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 28px 24px; min-width: 200px;
+      flex: 1; opacity: 0; transform: translateY(20px);
+      transition: all 0.6s ease;
+    }
+    .zkp-card.visible {
+      opacity: 1; transform: translateY(0);
+    }
+    .zkp-card-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1.5px; color: var(--text-dim); margin-bottom: 12px;
+    }
+    .zkp-card-value {
+      font-family: var(--mono); font-size: 18px; font-weight: 500;
+      color: var(--cyan); line-height: 1.6;
+      word-break: break-all;
+    }
+    .zkp-card-value .highlight { color: var(--green); }
+    .zkp-card-value .dimmed { color: var(--text-dim); }
+    .zkp-arrow {
+      font-size: 24px; color: var(--text-dim);
+      opacity: 0; transition: opacity 0.4s;
+    }
+    .zkp-arrow.visible { opacity: 1; }
+    .zkp-equation {
+      margin-top: 32px; padding: 20px;
+      background: var(--bg-raised); border: 1px solid var(--border);
+      border-radius: 8px; display: inline-block;
+      font-family: var(--mono); font-size: 15px; color: var(--text-secondary);
+      opacity: 0; transition: opacity 0.6s;
+    }
+    .zkp-equation.visible { opacity: 1; }
+    .zkp-equation .eq-cyan { color: var(--cyan); }
+    .zkp-equation .eq-green { color: var(--green); }
+    .zkp-equation .eq-purple { color: var(--purple); }
+
+    .proof-progress {
+      margin-top: 24px; width: 300px; height: 4px;
+      background: var(--bg-surface); border-radius: 2px;
+      margin-left: auto; margin-right: auto; overflow: hidden;
+    }
+    .proof-progress-bar {
+      height: 100%; width: 0; border-radius: 2px;
+      background: linear-gradient(90deg, var(--cyan), var(--green));
+      transition: width 1.5s ease;
+    }
+    .proof-status {
+      margin-top: 12px; font-family: var(--mono); font-size: 13px;
+      color: var(--text-dim); height: 18px;
+    }
+    .proof-status.verified { color: var(--green); }
+
+    /* ─── Phase 3: SSO Access ─── */
+    .sso-wrap { text-align: center; }
+    .sso-grid {
+      display: flex; gap: 24px; justify-content: center;
+      margin-top: 20px; flex-wrap: wrap;
+    }
+    .sso-app {
+      width: 180px; padding: 32px 24px;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: 12px; text-align: center;
+      opacity: 0; transform: scale(0.9);
+      transition: all 0.5s ease;
+    }
+    .sso-app.granted {
+      opacity: 1; transform: scale(1);
+      border-color: var(--green); box-shadow: 0 0 30px #34d39912;
+    }
+    .sso-icon {
+      width: 52px; height: 52px; margin: 0 auto 16px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 12px; font-size: 24px;
+    }
+    .sso-icon.salesforce { background: #0176d315; color: #00a1e0; }
+    .sso-icon.slack { background: #4a154b15; color: #e01e5a; }
+    .sso-icon.github { background: #f0f6fc12; color: #e8e9f0; }
+    .sso-icon.jira { background: #0052cc15; color: #2684ff; }
+    .sso-icon.aws { background: #ff990015; color: #ff9900; }
+    .sso-name {
+      font-weight: 600; font-size: 14px; margin-bottom: 6px;
+    }
+    .sso-status {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-dim); transition: color 0.3s;
+    }
+    .sso-app.granted .sso-status { color: var(--green); }
+    .sso-check {
+      display: inline-block; width: 0; overflow: hidden;
+      transition: width 0.3s;
+    }
+    .sso-app.granted .sso-check { width: 16px; }
+
+    /* ─── Phase 4: Server Log ─── */
+    .server-wrap { text-align: center; }
+    .terminal {
+      max-width: 700px; margin: 20px auto 0;
+      background: #0c0d15; border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden; text-align: left;
+    }
+    .terminal-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 16px; background: #0f1019;
+      border-bottom: 1px solid var(--border);
+    }
+    .terminal-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+    }
+    .terminal-dot.r { background: #f87171; }
+    .terminal-dot.y { background: #fbbf24; }
+    .terminal-dot.g { background: #34d399; }
+    .terminal-title {
+      font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+      margin-left: 8px;
+    }
+    .terminal-body {
+      padding: 20px; font-family: var(--mono); font-size: 13px;
+      line-height: 2; min-height: 220px;
+    }
+    .log-line {
+      opacity: 0; transform: translateX(-10px);
+      transition: all 0.4s ease;
+    }
+    .log-line.visible {
+      opacity: 1; transform: translateX(0);
+    }
+    .log-ts { color: var(--text-dim); }
+    .log-info { color: var(--blue); }
+    .log-ok { color: var(--green); }
+    .log-key { color: var(--amber); }
+    .log-null { color: var(--red); font-weight: 600; font-size: 15px; }
+    .log-dim { color: var(--text-dim); }
+
+    /* ─── Phase 5: Breach ─── */
+    .breach-wrap { text-align: center; }
+    .breach-btn {
+      font-family: var(--sans); font-size: 15px; font-weight: 600;
+      padding: 14px 36px; border-radius: 8px;
+      background: transparent; color: var(--red);
+      border: 2px solid var(--red); cursor: pointer;
+      transition: all 0.3s; margin: 16px auto;
+      display: inline-flex; align-items: center; gap: 10px;
+      position: relative; overflow: hidden;
+    }
+    .breach-btn:hover {
+      background: #f8717115; box-shadow: 0 0 40px var(--red-glow);
+    }
+    .breach-btn::before {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent, #f8717120, transparent);
+      transform: translateX(-100%);
+    }
+    .breach-btn:hover::before {
+      animation: shimmer 1s ease;
+    }
+    @keyframes shimmer {
+      to { transform: translateX(100%); }
+    }
+    .breach-result {
+      max-width: 700px; margin: 0 auto;
+      display: none;
+    }
+    .breach-result.visible {
+      display: block;
+      animation: fadeInUp 0.6s ease forwards;
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .db-table {
+      width: 100%; border-collapse: collapse;
+      font-family: var(--mono); font-size: 12px;
+      margin-top: 12px;
+    }
+    .db-table th {
+      padding: 7px 12px; text-align: left;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      color: var(--text-dim); font-weight: 500; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 1px;
+    }
+    .db-table td {
+      padding: 7px 12px; border: 1px solid var(--border);
+      background: var(--bg-raised);
+    }
+    .db-empty {
+      color: var(--red); font-weight: 500;
+      text-align: center; font-style: italic;
+    }
+    .breach-verdict {
+      margin-top: 20px; font-size: 26px; font-weight: 700;
+      color: var(--green); opacity: 0; transform: scale(0.9);
+      transition: all 0.6s;
+    }
+    .breach-verdict.visible { opacity: 1; transform: scale(1); }
+    .breach-verdict-sub {
+      font-size: 15px; color: var(--text-secondary); font-weight: 400;
+      margin-top: 6px;
+    }
+
+    /* ─── Progress Dots ─── */
+    .progress-track {
+      position: fixed; bottom: 28px; left: 50%;
+      transform: translateX(-50%); z-index: 100;
+      display: flex; gap: 8px; align-items: center;
+    }
+    .progress-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-dim); transition: all 0.4s;
+    }
+    .progress-dot.active { background: var(--cyan); box-shadow: 0 0 8px var(--cyan-glow); width: 24px; border-radius: 4px; }
+    .progress-dot.done { background: var(--green); }
+
+    /* ─── Glitch Effect ─── */
+    @keyframes glitch {
+      0%, 100% { transform: translate(0); }
+      20% { transform: translate(-3px, 2px); }
+      40% { transform: translate(3px, -2px); }
+      60% { transform: translate(-2px, -1px); }
+      80% { transform: translate(2px, 1px); }
+    }
+    .glitch { animation: glitch 0.3s ease 3; }
+
+    /* ─── Particle Canvas ─── */
+    #particles { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+
+    /* ─── Restart ─── */
+    .restart-btn {
+      font-family: var(--sans); font-size: 13px; font-weight: 500;
+      padding: 10px 24px; border-radius: 6px;
+      background: var(--bg-surface); color: var(--text-secondary);
+      border: 1px solid var(--border); cursor: pointer;
+      margin-top: 24px; transition: all 0.2s;
+    }
+    .restart-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+
+    /* ─── Pulse ring ─── */
+    @keyframes pulseRing {
+      0% { transform: scale(0.8); opacity: 1; }
+      100% { transform: scale(2.5); opacity: 0; }
+    }
+    .pulse-ring {
+      position: absolute; width: 120px; height: 120px;
+      border: 2px solid var(--cyan); border-radius: 50%;
+      top: 50%; left: 50%; margin: -60px 0 0 -60px;
+      opacity: 0; pointer-events: none;
+    }
+    .pulse-ring.active { animation: pulseRing 1.5s ease-out forwards; }
+  </style>
+</head>
+<body>
+  <div class="ambient"></div>
+  <div class="grid-overlay"></div>
+  <canvas id="particles"></canvas>
+
+  <!-- Top Bar -->
+  <div class="topbar">
+    <div class="topbar-logo">
+      <svg viewBox="0 0 32 32" fill="none">
+        <rect x="2" y="2" width="28" height="28" rx="6" stroke="#22d3ee" stroke-width="2" fill="none"/>
+        <circle cx="16" cy="14" r="5" stroke="#22d3ee" stroke-width="1.5" fill="none"/>
+        <path d="M10 26c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="#22d3ee" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+        <line x1="16" y1="3" x2="16" y2="8" stroke="#34d399" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+      </svg>
+      ZeroAuth
+    </div>
+    <span class="topbar-badge">Live Demo</span>
+    <span class="topbar-timer" id="timer">0:00</span>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-track" id="progressTrack">
+    <div class="progress-dot active" data-phase="0"></div>
+    <div class="progress-dot" data-phase="1"></div>
+    <div class="progress-dot" data-phase="2"></div>
+    <div class="progress-dot" data-phase="3"></div>
+    <div class="progress-dot" data-phase="4"></div>
+    <div class="progress-dot" data-phase="5"></div>
+  </div>
+
+  <!-- Phase 0: Opening -->
+  <div class="phase active" id="phase0">
+    <div class="opening">
+      <h1>What if a breach<br>exposed nothing?</h1>
+      <p>Watch a ZeroAuth authentication flow — from biometric scan to SSO access — where no secret ever touches a server.</p>
+      <button class="start-btn" id="startBtn">Begin Demo</button>
+    </div>
+  </div>
+
+  <!-- Phase 1: Biometric -->
+  <div class="phase" id="phase1">
+    <div class="biometric-wrap">
+      <div class="phase-label">Step 1 — Device Authentication</div>
+      <div class="phase-title">Employee opens laptop</div>
+      <div class="laptop">
+        <div class="laptop-screen">
+          <div class="pulse-ring" id="pulseRing"></div>
+          <svg class="fingerprint-svg" id="fpSvg" viewBox="0 0 100 100">
+            <path class="fp-path" d="M50 95 C25 95 10 75 10 55 C10 30 30 10 50 10 C70 10 90 30 90 55 C90 75 75 95 50 95"/>
+            <path class="fp-path" d="M50 85 C30 85 20 70 20 55 C20 35 33 20 50 20 C67 20 80 35 80 55 C80 70 70 85 50 85" style="animation-delay:0.15s"/>
+            <path class="fp-path" d="M50 75 C35 75 28 65 28 55 C28 40 38 30 50 30 C62 30 72 40 72 55 C72 65 65 75 50 75" style="animation-delay:0.3s"/>
+            <path class="fp-path" d="M50 65 C40 65 36 60 36 55 C36 46 42 40 50 40 C58 40 64 46 64 55 C64 60 60 65 50 65" style="animation-delay:0.45s"/>
+            <path class="fp-path" d="M50 56 C47 56 44 54 44 51 C44 48 47 46 50 46 C53 46 56 48 56 51 C56 54 53 56 50 56" style="animation-delay:0.6s"/>
+          </svg>
+          <div class="scan-line" id="scanLine"></div>
+        </div>
+      </div>
+      <div class="laptop-base"></div>
+      <div class="bio-status" id="bioStatus"></div>
+    </div>
+  </div>
+
+  <!-- Phase 2: ZKP Math -->
+  <div class="phase" id="phase2">
+    <div class="zkp-wrap">
+      <div class="phase-label">Step 2 — Zero-Knowledge Proof</div>
+      <div class="phase-title">Proof generated on-device</div>
+      <div class="zkp-visual">
+        <div class="zkp-card" id="zkpSecret">
+          <div class="zkp-card-label">Private Input (never leaves device)</div>
+          <div class="zkp-card-value">
+            <span class="dimmed">biometric_hash =</span><br>
+            0x7a3f<span class="highlight">...</span>e91b
+          </div>
+        </div>
+        <div class="zkp-arrow" id="zkpArrow1">→</div>
+        <div class="zkp-card" id="zkpCircuit">
+          <div class="zkp-card-label">ZK-SNARK Circuit</div>
+          <div class="zkp-card-value" id="circuitAnim">
+            <span class="dimmed">Verifying...</span>
+          </div>
+        </div>
+        <div class="zkp-arrow" id="zkpArrow2">→</div>
+        <div class="zkp-card" id="zkpProof">
+          <div class="zkp-card-label">Proof (sent to server)</div>
+          <div class="zkp-card-value">
+            <span class="dimmed">π =</span><br>
+            <span id="proofBytes">—</span>
+          </div>
+        </div>
+      </div>
+      <div class="zkp-equation" id="zkpEq">
+        <span class="eq-cyan">Verify</span>(<span class="eq-purple">π</span>, <span class="eq-green">pub_input</span>) = <span class="eq-cyan" id="eqResult">?</span>
+      </div>
+      <div class="proof-progress"><div class="proof-progress-bar" id="proofBar"></div></div>
+      <div class="proof-status" id="proofStatus"></div>
+    </div>
+  </div>
+
+  <!-- Phase 3: SSO Access -->
+  <div class="phase" id="phase3">
+    <div class="sso-wrap">
+      <div class="phase-label">Step 3 — Enterprise SSO</div>
+      <div class="phase-title">Access granted — zero credentials transmitted</div>
+      <div class="sso-grid" id="ssoGrid">
+        <div class="sso-app" data-app="salesforce">
+          <div class="sso-icon salesforce">
+            <svg width="28" height="20" viewBox="0 0 28 20" fill="currentColor"><path d="M11.7 1.5c1.2-1 2.8-1.5 4.4-1.5 2.5 0 4.7 1.4 5.8 3.5 1-.4 2-.6 3.1-.6 4.2 0 7 3.3 7 7s-2.8 7-7 7c-.5 0-1-.1-1.5-.2-1 1.8-3 3.2-5.3 3.2-1.1 0-2.2-.3-3.1-.9-.9 1.6-2.7 2.7-4.7 2.7-2.1 0-3.8-1.1-4.8-2.8-.4.1-.9.1-1.3.1C1.9 19 0 16 0 12.5s1.9-6.5 4.3-6.5c.5 0 .9.1 1.4.2C6.7 4 9 2.3 11.7 1.5z"/></svg>
+          </div>
+          <div class="sso-name">Salesforce</div>
+          <div class="sso-status"><span class="sso-check">&#10003; </span>Pending</div>
+        </div>
+        <div class="sso-app" data-app="slack">
+          <div class="sso-icon slack">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg>
+          </div>
+          <div class="sso-name">Slack</div>
+          <div class="sso-status"><span class="sso-check">&#10003; </span>Pending</div>
+        </div>
+        <div class="sso-app" data-app="github">
+          <div class="sso-icon github">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+          </div>
+          <div class="sso-name">GitHub</div>
+          <div class="sso-status"><span class="sso-check">&#10003; </span>Pending</div>
+        </div>
+        <div class="sso-app" data-app="jira">
+          <div class="sso-icon jira">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23 0H11.44a5.217 5.217 0 0 0 5.217 5.215h2.129v2.056A5.215 5.215 0 0 0 24 12.483V1.005A1.003 1.003 0 0 0 23 0z"/></svg>
+          </div>
+          <div class="sso-name">Jira</div>
+          <div class="sso-status"><span class="sso-check">&#10003; </span>Pending</div>
+        </div>
+        <div class="sso-app" data-app="aws">
+          <div class="sso-icon aws">
+            <svg width="28" height="17" viewBox="0 0 28 17" fill="currentColor"><path d="M8.1 9.6c0 .4 0 .7.1 1 .1.3.2.5.3.7.1.1 0 .3-.1.4l-.5.4c-.1.1-.2.1-.3 0-.1-.2-.3-.4-.4-.6-.1-.2-.2-.5-.4-.8-1 1.2-2.2 1.7-3.7 1.7-1.1 0-1.9-.3-2.5-.9C.1 11 0 10.3 0 9.4c0-1 .3-1.7 1-2.3s1.6-.8 2.8-.8c.4 0 .8 0 1.2.1.4.1.9.1 1.3.3V5.9c0-.8-.2-1.4-.5-1.8-.3-.3-.9-.5-1.8-.5-.4 0-.8.1-1.2.2-.4.1-.8.3-1.2.4-.2.1-.3.1-.4.1s-.1-.1-.1-.2V3.6c0-.2 0-.3.1-.3.1-.1.4-.3.9-.4.5-.2 1.1-.3 1.7-.3 1.3 0 2.3.3 2.9.9.6.6.9 1.5.9 2.7v3.4zM4.5 11c.4 0 .8-.1 1.2-.3.4-.2.8-.5 1-.9.2-.2.3-.5.3-.8V8.1c-.3-.1-.7-.2-1.1-.2-.4-.1-.8-.1-1.1-.1-.8 0-1.3.1-1.7.4-.4.3-.6.7-.6 1.2 0 .5.1.8.4 1.1.3.3.7.5 1.3.5h.3zm9.3 1.4c-.2 0-.3 0-.4-.1-.1-.1-.2-.3-.2-.5L10.5 3c-.1-.2-.1-.4-.1-.5 0-.2.1-.3.3-.3h.8c.2 0 .3 0 .4.1.1.1.1.3.2.5l1.9 7.6 1.7-7.6c.1-.3.1-.4.2-.5.1-.1.3-.1.4-.1h.7c.2 0 .3 0 .4.1.1.1.2.3.2.5l1.8 7.7L21.3 3c.1-.3.1-.4.2-.5.1-.1.3-.1.4-.1h.8c.2 0 .3.1.3.3 0 .1 0 .1 0 .2s0 .2-.1.3l-2.8 8.8c-.1.3-.1.4-.2.5-.1.1-.3.1-.4.1h-.7c-.2 0-.3 0-.4-.1-.1-.1-.2-.3-.2-.6l-1.8-7.4-1.7 7.4c-.1.3-.1.4-.2.5-.1.1-.3.1-.4.1h-.7zm14.7.3c-.6 0-1.2-.1-1.7-.2-.5-.2-.9-.3-1.1-.5-.1-.1-.2-.2-.2-.3v-.6c0-.2.1-.2.2-.2h.1c.1 0 .2.1.3.1.4.2.8.3 1.3.4.5.1.9.2 1.3.2.7 0 1.2-.1 1.6-.4.3-.2.5-.6.5-1 0-.3-.1-.6-.3-.8-.2-.2-.6-.4-1.2-.6l-1.7-.5c-.9-.3-1.5-.7-1.8-1.1-.4-.5-.5-.9-.5-1.5 0-.4.1-.8.3-1.2.2-.3.5-.6.8-.8.3-.2.7-.4 1.1-.5.4-.1.9-.2 1.3-.2.2 0 .5 0 .7.1.3 0 .5.1.7.1.2.1.4.1.5.2.2.1.3.1.4.2.1.1.2.2.2.3 0 .1.1.2.1.4v.6c0 .2-.1.2-.2.2-.1 0-.2-.1-.4-.2-.6-.3-1.3-.4-2.1-.4-.6 0-1.1.1-1.4.3-.3.2-.5.6-.5 1 0 .3.1.6.3.8.2.2.7.5 1.3.7l1.6.5c.9.3 1.4.6 1.8 1.1.3.4.5.9.5 1.5 0 .4-.1.9-.3 1.2-.2.4-.5.7-.8.9-.4.3-.7.5-1.2.6-.5.1-1 .2-1.5.2z"/></svg>
+          </div>
+          <div class="sso-name">AWS Console</div>
+          <div class="sso-status"><span class="sso-check">&#10003; </span>Pending</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 4: Server Log -->
+  <div class="phase" id="phase4">
+    <div class="server-wrap">
+      <div class="phase-label">Step 4 — Server-Side Storage</div>
+      <div class="phase-title">What does the server store?</div>
+      <div class="terminal">
+        <div class="terminal-header">
+          <div class="terminal-dot r"></div>
+          <div class="terminal-dot y"></div>
+          <div class="terminal-dot g"></div>
+          <span class="terminal-title">zeroauth-server — production</span>
+        </div>
+        <div class="terminal-body" id="terminalBody">
+          <div class="log-line" id="log0"><span class="log-ts">[09:41:03]</span> <span class="log-info">INFO</span>  ZKP: Groth16 proof received (288 bytes, protocol: groth16, curve: bn128)</div>
+          <div class="log-line" id="log1"><span class="log-ts">[09:41:03]</span> <span class="log-info">INFO</span>  ZKP: Off-chain verification... <span class="log-ok">PASS</span></div>
+          <div class="log-line" id="log2"><span class="log-ts">[09:41:03]</span> <span class="log-ok">OK</span>    Session created: {sessionId: "a7f2...d91e", provider: "zkp", expiresAt: "+1h"}</div>
+          <div class="log-line" id="log3"><span class="log-ts">[09:41:03]</span> <span class="log-key">AUDIT</span> PostgreSQL INSERT: <span class="log-null">NONE</span> <span class="log-dim">(no auth table exists by design)</span></div>
+          <div class="log-line" id="log4"><span class="log-ts">[09:41:03]</span> <span class="log-key">AUDIT</span> Redis WRITE: <span class="log-dim">sess:a7f2...d91e →</span> <span class="log-null">ephemeral token only</span></div>
+          <div class="log-line" id="log5"><span class="log-ts">[09:41:03]</span> <span class="log-key">AUDIT</span> Biometric template stored: <span class="log-null">NULL</span> <span class="log-dim">(garbage collected after hash)</span></div>
+          <div class="log-line" id="log6"><span class="log-ts">[09:41:03]</span> <span class="log-key">AUDIT</span> Private keys stored: <span class="log-null">NULL</span> <span class="log-dim">(never leave client device)</span></div>
+          <div class="log-line" id="log7"><span class="log-ts">[09:41:04]</span> <span class="log-key">AUDIT</span> Poseidon commitment on-chain: <span class="log-dim">0xC68c...3A73 (hash only, irreversible)</span></div>
+          <div class="log-line" id="log8"><span class="log-ts">[09:41:04]</span> <span class="log-dim">──── dataStored: false — Zero biometric data stored. Ever. ────</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 5: Breach Sim -->
+  <div class="phase" id="phase5">
+    <div class="breach-wrap">
+      <div class="phase-label">Step 5 — Breach Simulation</div>
+      <div class="phase-title">An attacker compromises the database</div>
+      <button class="breach-btn" id="breachBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Simulate Full Breach
+      </button>
+      <div class="breach-result" id="breachResult">
+        <div class="terminal">
+          <div class="terminal-header">
+            <div class="terminal-dot r"></div>
+            <div class="terminal-dot y"></div>
+            <div class="terminal-dot g"></div>
+            <span class="terminal-title">attacker@kali — db_exfiltrate.py</span>
+          </div>
+          <div class="terminal-body" style="padding-bottom:0">
+
+            <!-- Table 1: PostgreSQL leads table (real schema from src/services/db.ts) -->
+            <div style="color:var(--red);margin-bottom:6px;">$ psql -h zeroauth-postgres -U zeroauth -d zeroauth</div>
+            <div style="color:var(--text-dim);margin-bottom:6px;font-size:11px;">-- Attacker enumerates all tables...</div>
+            <div style="color:var(--red);margin-bottom:8px;">zeroauth=# \dt</div>
+            <table class="db-table" style="margin-bottom:16px;">
+              <thead><tr><th>Schema</th><th>Name</th><th>Type</th><th>Owner</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td style="color:var(--text-dim)">public</td>
+                  <td style="color:var(--cyan)">leads</td>
+                  <td style="color:var(--text-dim)">table</td>
+                  <td style="color:var(--text-dim)">zeroauth</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style="color:var(--text-dim);margin-bottom:6px;font-size:11px;">-- Only 1 table. No users table. No credentials table. Searching for auth data...</div>
+            <div style="color:var(--red);margin-bottom:8px;">zeroauth=# SELECT * FROM leads;</div>
+            <table class="db-table" style="margin-bottom:16px;">
+              <thead>
+                <tr>
+                  <th>id</th>
+                  <th>type</th>
+                  <th>name</th>
+                  <th>company</th>
+                  <th>email</th>
+                  <th>size</th>
+                  <th>created_at</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="color:var(--text-dim)">1</td>
+                  <td style="color:var(--text-dim)">pilot</td>
+                  <td style="color:var(--text-dim)">Jane D.</td>
+                  <td style="color:var(--text-dim)">Acme Corp</td>
+                  <td style="color:var(--text-dim)">j***@acme.com</td>
+                  <td style="color:var(--text-dim)">1000+</td>
+                  <td style="color:var(--text-dim)">2026-03-12</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style="color:var(--text-dim);margin-bottom:6px;font-size:11px;">-- Trying to find password hashes, biometric data, private keys, sessions...</div>
+            <div style="color:var(--red);margin-bottom:8px;">zeroauth=# SELECT table_name FROM information_schema.columns WHERE column_name LIKE '%password%' OR column_name LIKE '%biometric%' OR column_name LIKE '%secret%' OR column_name LIKE '%private_key%';</div>
+            <table class="db-table" style="margin-bottom:8px;">
+              <thead><tr><th>table_name</th></tr></thead>
+              <tbody>
+                <tr><td class="db-empty">( 0 rows )</td></tr>
+              </tbody>
+            </table>
+
+            <!-- Redis check -->
+            <div style="color:var(--red);margin:12px 0 6px;">$ redis-cli -h zeroauth-redis KEYS "*"</div>
+            <div style="color:var(--text-dim);margin-bottom:6px;font-size:11px;">-- Checking Redis for session secrets or cached credentials...</div>
+            <table class="db-table" style="margin-bottom:8px;">
+              <thead><tr><th>Key</th><th>Type</th><th>Value</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td style="color:var(--text-dim)">sess:a7f2...d91e</td>
+                  <td style="color:var(--text-dim)">string</td>
+                  <td style="color:var(--amber);font-size:11px;">{sessionId, provider: "zkp", expiresAt, <span style="color:var(--green)">biometricData: undefined</span>}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <!-- Blockchain check -->
+            <div style="color:var(--red);margin:12px 0 6px;">$ cast call 0xC68c...3A73 "verifyIdentity(bytes32)" 0x7a3f...e91b --rpc-url https://sepolia.base.org</div>
+            <div style="color:var(--text-dim);margin-bottom:6px;font-size:11px;">-- Querying on-chain DIDRegistry for stored identity data...</div>
+            <table class="db-table" style="margin-bottom:8px;">
+              <thead><tr><th>On-Chain Field</th><th>Value</th><th>Exploitable?</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td style="color:var(--text-dim)">biometricIDHash</td>
+                  <td style="color:var(--text-dim);font-size:11px;">0x7a3f...e91b (SHA-256, irreversible)</td>
+                  <td class="db-empty">NO</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--text-dim)">DID mapping</td>
+                  <td style="color:var(--text-dim);font-size:11px;">did:zeroauth:base:8f3a...c2d1</td>
+                  <td class="db-empty">NO</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--text-dim)">Raw biometric</td>
+                  <td class="db-empty">NEVER STORED</td>
+                  <td class="db-empty">N/A</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--text-dim)">Private key / secret</td>
+                  <td class="db-empty">NEVER STORED</td>
+                  <td class="db-empty">N/A</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style="color:var(--red);margin:16px 0 8px;font-family:var(--mono);font-size:13px;border-top:1px solid var(--border);padding-top:12px;">
+              <span style="color:var(--text-dim)">EXFIL REPORT:</span> PostgreSQL → <span style="color:var(--green)">0 credentials</span> &nbsp;|&nbsp; Redis → <span style="color:var(--green)">0 secrets</span> &nbsp;|&nbsp; Blockchain → <span style="color:var(--green)">irreversible hashes only</span>
+            </div>
+            <div style="color:var(--amber);margin-bottom:16px;font-family:var(--mono);font-size:12px;">
+              ⚠ Total exploitable records across all datastores: <span style="color:var(--red);font-weight:700;font-size:16px;">0</span>
+            </div>
+          </div>
+        </div>
+        <div class="breach-verdict" id="breachVerdict">
+          A breach exposes nothing.
+          <div class="breach-verdict-sub">No passwords. No biometrics. No keys. The vault was always empty.</div>
+        </div>
+        <button class="restart-btn" id="restartBtn">Replay Demo</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ─── Particles ───
+    const canvas = document.getElementById('particles');
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    for (let i = 0; i < 40; i++) {
+      particles.push({
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 1.5 + 0.5,
+        o: Math.random() * 0.3 + 0.05,
+      });
+    }
+
+    function drawParticles() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0) p.x = canvas.width;
+        if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height;
+        if (p.y > canvas.height) p.y = 0;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(34,211,238,${p.o})`;
+        ctx.fill();
+      });
+      requestAnimationFrame(drawParticles);
+    }
+    drawParticles();
+
+    // ─── State ───
+    let currentPhase = 0;
+    let timerStart = null;
+    let timerInterval = null;
+
+    const phases = [0,1,2,3,4,5].map(i => document.getElementById(`phase${i}`));
+    const dots = document.querySelectorAll('.progress-dot');
+
+    function goToPhase(n) {
+      phases[currentPhase].classList.remove('active');
+      dots[currentPhase].classList.remove('active');
+      dots[currentPhase].classList.add('done');
+      currentPhase = n;
+      phases[n].classList.add('active');
+      dots[n].classList.add('active');
+    }
+
+    function updateTimer() {
+      if (!timerStart) return;
+      const elapsed = Math.floor((Date.now() - timerStart) / 1000);
+      const m = Math.floor(elapsed / 60);
+      const s = String(elapsed % 60).padStart(2, '0');
+      document.getElementById('timer').textContent = `${m}:${s}`;
+    }
+
+    // ─── Phase transitions ───
+    document.getElementById('startBtn').addEventListener('click', startDemo);
+    document.getElementById('breachBtn').addEventListener('click', runBreach);
+    document.getElementById('restartBtn').addEventListener('click', () => location.reload());
+
+    async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function startDemo() {
+      timerStart = Date.now();
+      timerInterval = setInterval(updateTimer, 200);
+
+      // Phase 1: Biometric (~5s)
+      goToPhase(1);
+      await sleep(400);
+      document.getElementById('scanLine').classList.add('active');
+      document.getElementById('fpSvg').classList.add('scanning');
+      document.getElementById('pulseRing').classList.add('active');
+      document.getElementById('bioStatus').textContent = 'Scanning biometric...';
+      await sleep(2000);
+      document.getElementById('bioStatus').textContent = '✓ Identity confirmed on-device';
+      document.getElementById('bioStatus').classList.add('success');
+      await sleep(800);
+
+      // Phase 2: ZKP (~10s)
+      goToPhase(2);
+      await sleep(300);
+      document.getElementById('zkpSecret').classList.add('visible');
+      await sleep(400);
+      document.getElementById('zkpArrow1').classList.add('visible');
+      await sleep(200);
+      document.getElementById('zkpCircuit').classList.add('visible');
+
+      // Animate circuit computation
+      const circuitEl = document.getElementById('circuitAnim');
+      const circuitSteps = [
+        'Hashing witness...',
+        'Computing R1CS...',
+        'Groth16 setup...',
+        'Generating π...',
+      ];
+      for (const step of circuitSteps) {
+        circuitEl.innerHTML = `<span style="color:var(--amber)">${step}</span>`;
+        await sleep(400);
+      }
+      circuitEl.innerHTML = '<span style="color:var(--green)">✓ Circuit satisfied</span>';
+
+      await sleep(200);
+      document.getElementById('zkpArrow2').classList.add('visible');
+      await sleep(200);
+      document.getElementById('zkpProof').classList.add('visible');
+
+      // Animate proof bytes appearing
+      const proofEl = document.getElementById('proofBytes');
+      const proofHex = '0xa1b2c3...f4e5d6';
+      proofEl.textContent = '';
+      for (let i = 0; i < proofHex.length; i++) {
+        proofEl.textContent += proofHex[i];
+        await sleep(30);
+      }
+
+      await sleep(300);
+      document.getElementById('zkpEq').classList.add('visible');
+      document.getElementById('proofBar').style.width = '100%';
+      document.getElementById('proofStatus').textContent = 'Verifying proof on-chain...';
+      await sleep(1200);
+      document.getElementById('eqResult').textContent = 'TRUE ✓';
+      document.getElementById('eqResult').style.color = 'var(--green)';
+      document.getElementById('proofStatus').textContent = '✓ Proof verified — zero knowledge preserved';
+      document.getElementById('proofStatus').classList.add('verified');
+      await sleep(1000);
+
+      // Phase 3: SSO (~4s)
+      goToPhase(3);
+      const apps = document.querySelectorAll('.sso-app');
+      for (const app of apps) {
+        await sleep(300);
+        app.classList.add('granted');
+        app.querySelector('.sso-status').childNodes[1].textContent = 'Granted';
+      }
+      await sleep(800);
+
+      // Phase 4: Server Log (~5s)
+      goToPhase(4);
+      for (let i = 0; i <= 8; i++) {
+        await sleep(280);
+        document.getElementById(`log${i}`).classList.add('visible');
+      }
+      await sleep(1500);
+
+      // Phase 5: Breach
+      goToPhase(5);
+    }
+
+    async function runBreach() {
+      const btn = document.getElementById('breachBtn');
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+
+      // Screen flash
+      document.body.style.transition = 'background 0.1s';
+      document.body.style.background = '#1a0000';
+      await sleep(100);
+      document.body.style.background = '#06070d';
+      await sleep(100);
+      document.body.style.background = '#1a0000';
+      await sleep(100);
+      document.body.style.background = '#06070d';
+
+      // Glitch
+      document.querySelector('.breach-wrap .phase-title').classList.add('glitch');
+      await sleep(400);
+
+      btn.style.display = 'none';
+      document.getElementById('breachResult').classList.add('visible');
+      await sleep(800);
+      // Scroll to show the full result
+      document.getElementById('breachVerdict').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(400);
+      document.getElementById('breachVerdict').classList.add('visible');
+
+      clearInterval(timerInterval);
+    }
+  </script>
+</body>
+</html>

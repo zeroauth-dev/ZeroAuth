@@ -1,0 +1,97 @@
+import dotenv from 'dotenv';
+import path from 'path';
+
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+
+function requireEnv(key: string, fallback?: string): string {
+  const value = process.env[key] ?? fallback;
+  if (!value && process.env.NODE_ENV === 'production') {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  return value ?? '';
+}
+
+function parseCorsOrigins(): string[] {
+  const raw = process.env.CORS_ORIGINS;
+  if (raw && raw.trim().length > 0) {
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  // Fallback: derive from API_BASE_URL in prod, or use dev defaults
+  if (process.env.NODE_ENV === 'production') {
+    return [process.env.API_BASE_URL ?? 'https://zeroauth.dev'];
+  }
+  return ['http://localhost:3000', 'http://localhost:5173'];
+}
+
+export const config = {
+  nodeEnv: process.env.NODE_ENV ?? 'development',
+  port: parseInt(process.env.PORT ?? '3000', 10),
+  apiBaseUrl: process.env.API_BASE_URL ?? 'http://localhost:3000',
+  corsOrigins: parseCorsOrigins(),
+  trustProxy: process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production',
+
+  jwt: {
+    secret: requireEnv('JWT_SECRET', 'dev-secret-change-me'),
+    expiresIn: process.env.JWT_EXPIRES_IN ?? '1h',
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '7d',
+  },
+
+  saml: {
+    entryPoint: process.env.SAML_ENTRY_POINT ?? 'https://idp.example.com/sso/saml',
+    issuer: process.env.SAML_ISSUER ?? 'zeroauth-sp',
+    callbackUrl: process.env.SAML_CALLBACK_URL ?? 'http://localhost:3000/api/auth/saml/callback',
+    cert: process.env.SAML_CERT ?? '',
+  },
+
+  oidc: {
+    issuer: process.env.OIDC_ISSUER ?? 'https://accounts.google.com',
+    clientId: process.env.OIDC_CLIENT_ID ?? '',
+    clientSecret: process.env.OIDC_CLIENT_SECRET ?? '',
+    redirectUri: process.env.OIDC_REDIRECT_URI ?? 'http://localhost:3000/api/auth/oidc/callback',
+  },
+
+  session: {
+    secret: requireEnv('SESSION_SECRET', 'dev-session-secret'),
+  },
+
+  rateLimit: {
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '900000', 10),
+    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? '300', 10),
+  },
+
+  admin: {
+    apiKey: requireEnv('ADMIN_API_KEY', 'dev-admin-key'),
+  },
+
+  log: {
+    level: process.env.LOG_LEVEL ?? 'info',
+  },
+
+  blockchain: {
+    rpcUrl: process.env.BLOCKCHAIN_RPC_URL ?? 'https://sepolia.base.org',
+    chainId: parseInt(process.env.BLOCKCHAIN_CHAIN_ID ?? '84532', 10),
+    privateKey: process.env.BLOCKCHAIN_PRIVATE_KEY ?? '',
+    didRegistryAddress: process.env.DID_REGISTRY_ADDRESS ?? '',
+    verifierAddress: process.env.VERIFIER_CONTRACT_ADDRESS ?? '',
+    verifyOnChain: process.env.VERIFY_ON_CHAIN === 'true',
+  },
+
+  zkp: {
+    wasmPath: process.env.ZKP_WASM_PATH ?? 'circuits/build/identity_proof_js/identity_proof.wasm',
+    zkeyPath: process.env.ZKP_ZKEY_PATH ?? 'circuits/build/circuit_final.zkey',
+    vkeyPath: process.env.ZKP_VKEY_PATH ?? 'circuits/build/verification_key.json',
+  },
+
+  redis: {
+    url: process.env.REDIS_URL ?? 'redis://localhost:6379',
+    useRedis: process.env.USE_REDIS_SESSIONS === 'true',
+  },
+
+  postgres: {
+    host: process.env.POSTGRES_HOST ?? 'localhost',
+    port: parseInt(process.env.POSTGRES_PORT ?? '5432', 10),
+    database: process.env.POSTGRES_DB ?? 'zeroauth',
+    user: process.env.POSTGRES_USER ?? 'zeroauth',
+    password: requireEnv('POSTGRES_PASSWORD', 'zeroauth-dev'),
+  },
+} as const;

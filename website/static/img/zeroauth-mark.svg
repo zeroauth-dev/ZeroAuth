@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">ZeroAuth Mark</title>
+  <desc id="desc">Shield-like mark with the letters Z and A.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f2d23" />
+      <stop offset="100%" stop-color="#0b7a43" />
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#32d86f" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bg)" />
+  <path d="M38 34h52v10L53 84h38v10H36V84l37-40H38z" fill="url(#glow)" />
+  <path d="M87 90l-6-15H59l-6 15H41l24-54h10l24 54zm-24-25h14l-7-17z" fill="#ecfff4" opacity="0.94" />
+</svg>

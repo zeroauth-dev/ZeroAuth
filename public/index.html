@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZeroAuth — Enterprise Authentication Where a Breach Exposes Nothing</title>
+  <meta name="description" content="ZeroAuth: Zero-knowledge proof authentication for enterprises. No passwords stored. No secrets transmitted. Nothing to steal." />
+  <meta name="theme-color" content="#0a0b10" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0b10;
+      --bg-raised: #11121a;
+      --bg-surface: #161722;
+      --border: #1f2133;
+      --border-subtle: #181928;
+      --text: #e8e9ed;
+      --text-secondary: #8b8d9e;
+      --text-dim: #555770;
+      --blue: #4285F4;
+      --blue-dark: #0B57D0;
+      --blue-muted: #4285F418;
+      --green: #34d399;
+      --green-muted: #34d39915;
+      --red: #f87171;
+      --red-muted: #f8717115;
+      --sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* NAV                                                                 */
+    /* ------------------------------------------------------------------ */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(10, 11, 16, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .nav-inner {
+      max-width: 1120px; margin: 0 auto;
+      padding: 0 2rem; height: 60px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 0.625rem;
+      text-decoration: none; color: var(--text);
+      font-size: 1.125rem; font-weight: 700; letter-spacing: -0.02em;
+    }
+    .logo svg { width: 28px; height: 28px; }
+    .nav-links { display: flex; align-items: center; gap: 2rem; }
+    .nav-links a:not(.btn-nav) {
+      color: var(--text-secondary); text-decoration: none;
+      font-size: 0.8125rem; font-weight: 500;
+      transition: color 0.15s;
+    }
+    .nav-links a:not(.btn-nav):hover { color: var(--text); }
+    .btn-nav {
+      padding: 0.4375rem 1.125rem;
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 6px;
+      font-size: 0.8125rem; font-weight: 600;
+      cursor: pointer; text-decoration: none;
+      transition: background 0.15s;
+    }
+    .btn-nav:hover { background: var(--blue-dark); color: #fff; }
+
+    /* ------------------------------------------------------------------ */
+    /* LAYOUT                                                              */
+    /* ------------------------------------------------------------------ */
+    section { padding: 7rem 2rem; }
+    .container { max-width: 1120px; margin: 0 auto; }
+    .section-center { text-align: center; }
+    .section-label {
+      font-family: var(--mono);
+      font-size: 0.6875rem; font-weight: 500;
+      color: var(--blue);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 0.875rem;
+    }
+    .section-title {
+      font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+      font-weight: 700; letter-spacing: -0.025em;
+      line-height: 1.2; margin-bottom: 1rem;
+      color: var(--text);
+    }
+    .section-desc {
+      font-size: 1rem; color: var(--text-secondary);
+      max-width: 560px; line-height: 1.7;
+    }
+    .section-center .section-desc { margin: 0 auto; }
+
+    /* ------------------------------------------------------------------ */
+    /* HERO                                                                */
+    /* ------------------------------------------------------------------ */
+    .hero {
+      min-height: auto;
+      display: flex; align-items: center; justify-content: center;
+      text-align: center;
+      padding: 100px 2rem 2.5rem;
+      position: relative;
+    }
+    .hero::before {
+      content: '';
+      position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 800px; height: 500px;
+      background: radial-gradient(ellipse at center, #4285F40a 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-content {
+      position: relative; z-index: 1;
+      max-width: 780px;
+      padding: 0 1rem;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.375rem 0.875rem;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 0.75rem; font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 1.5rem;
+    }
+    .hero-badge-indicator {
+      width: 5px; height: 5px;
+      background: var(--green); border-radius: 50%;
+    }
+    .hero h1 {
+      font-size: clamp(1.75rem, 4vw, 2.75rem);
+      font-weight: 700; letter-spacing: -0.035em;
+      line-height: 1.15; margin-bottom: 0.75rem;
+    }
+    .hero h1 .em {
+      color: var(--blue);
+    }
+    .hero h1 .subdued { color: var(--text-dim); }
+    .hero-sub {
+      font-size: 0.9375rem; color: var(--text-secondary);
+      max-width: 520px; margin: 0 auto 1.25rem;
+      line-height: 1.6;
+    }
+    .hero-actions {
+      display: flex; gap: 0.75rem;
+      justify-content: center; flex-wrap: wrap;
+    }
+    .btn-primary {
+      padding: 0.625rem 1.5rem;
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 0.9375rem; font-weight: 600;
+      cursor: pointer; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: var(--blue-dark); }
+    .btn-ghost {
+      padding: 0.625rem 1.5rem;
+      background: transparent; color: var(--text-secondary);
+      border: 1px solid var(--border); border-radius: 8px;
+      font-size: 0.9375rem; font-weight: 600;
+      cursor: pointer; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      transition: all 0.15s;
+    }
+    .btn-ghost:hover { border-color: var(--text-dim); color: var(--text); }
+    .hero-metrics {
+      display: flex; justify-content: center; gap: 1.25rem;
+      margin-top: 1.75rem;
+    }
+    .metric-card {
+      flex: 1;
+      max-width: 190px;
+      padding: 1.25rem 1rem 1rem;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+    .metric-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--blue);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .metric-card:hover::before { opacity: 1; }
+    .metric-card.accent-card::before { background: var(--green); }
+    .metric-card:hover {
+      border-color: var(--blue);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 24px rgba(66, 133, 244, 0.08);
+    }
+    .metric-card.accent-card:hover {
+      border-color: var(--green);
+      box-shadow: 0 8px 24px rgba(52, 211, 153, 0.08);
+    }
+    .metric-value {
+      font-size: clamp(1.5rem, 2.5vw, 2rem); font-weight: 700;
+      font-family: var(--mono);
+      letter-spacing: -0.04em;
+      line-height: 1;
+    }
+    .metric-value.zero { color: var(--text); }
+    .metric-value.accent { color: var(--green); }
+    .metric-label {
+      font-size: 0.7rem; color: var(--text-secondary);
+      margin-top: 0.5rem; font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* HOW IT WORKS                                                        */
+    /* ------------------------------------------------------------------ */
+    .how-section { background: var(--bg-raised); }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+      margin-top: 3rem;
+    }
+    .step {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem 1.75rem;
+      transition: border-color 0.2s;
+    }
+    .step:hover { border-color: #2a2c45; }
+    .step-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 0.8125rem; font-weight: 600;
+      color: var(--blue);
+      margin-bottom: 1.25rem;
+    }
+    .step h3 {
+      font-size: 1.0625rem; font-weight: 600;
+      margin-bottom: 0.5rem; letter-spacing: -0.01em;
+    }
+    .step p {
+      font-size: 0.875rem; color: var(--text-secondary);
+      line-height: 1.65;
+    }
+    .step-code {
+      margin-top: 1.25rem;
+      padding: 0.875rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 0.6875rem;
+      color: var(--text-dim);
+      line-height: 1.85;
+      overflow-x: auto;
+    }
+    .step-code .kw { color: #c792ea; }
+    .step-code .fn { color: var(--blue); }
+    .step-code .str { color: var(--green); }
+    .step-code .cmt { color: #454760; }
+
+    /* ------------------------------------------------------------------ */
+    /* BREACH MATH                                                         */
+    /* ------------------------------------------------------------------ */
+    .math-grid {
+      display: grid;
+      grid-template-columns: 1fr 48px 1fr;
+      gap: 1.5rem;
+      margin-top: 3rem;
+      align-items: stretch;
+    }
+    .math-card {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+    }
+    .math-card.threat { border-color: #f8717120; }
+    .math-card.secure { border-color: #34d39920; }
+    .math-header {
+      display: flex; align-items: center; gap: 0.75rem;
+      margin-bottom: 1.75rem;
+      padding-bottom: 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .math-icon {
+      width: 40px; height: 40px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .math-icon svg { width: 20px; height: 20px; }
+    .math-card.threat .math-icon { background: var(--red-muted); }
+    .math-card.secure .math-icon { background: var(--green-muted); }
+    .math-card-title { font-size: 0.9375rem; font-weight: 600; }
+    .math-card-sub { font-size: 0.75rem; color: var(--text-dim); }
+    .math-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .math-row:last-of-type { border-bottom: none; }
+    .math-row-label { font-size: 0.8125rem; color: var(--text-secondary); }
+    .math-row-value {
+      font-family: var(--mono); font-weight: 500;
+      font-size: 0.8125rem;
+    }
+    .math-card.threat .math-row-value { color: var(--red); }
+    .math-card.secure .math-row-value { color: var(--green); }
+    .math-total {
+      margin-top: 1.25rem; padding-top: 1.25rem;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: baseline;
+    }
+    .math-total-label { font-size: 0.875rem; font-weight: 600; }
+    .math-total-value {
+      font-family: var(--mono); font-size: 1.5rem; font-weight: 700;
+    }
+    .math-card.threat .math-total-value { color: var(--red); }
+    .math-card.secure .math-total-value { color: var(--green); }
+    .math-divider {
+      display: flex; align-items: center; justify-content: center;
+    }
+    .math-divider span {
+      font-family: var(--mono);
+      font-size: 0.75rem; font-weight: 600;
+      color: var(--text-dim);
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 0.375rem 0.75rem;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* PATENTS                                                             */
+    /* ------------------------------------------------------------------ */
+    .patent-section { background: var(--bg-raised); }
+    .patent-grid {
+      display: flex; justify-content: center; gap: 1.5rem;
+      margin-top: 2.5rem;
+      flex-wrap: wrap;
+    }
+    .patent-card {
+      display: flex; align-items: center; gap: 1rem;
+      padding: 1.25rem 2rem;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .patent-icon-wrap {
+      width: 44px; height: 44px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .patent-icon-wrap svg { width: 20px; height: 20px; }
+    .patent-status {
+      font-size: 0.6875rem; font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.125rem;
+    }
+    .patent-status.granted { color: var(--green); }
+    .patent-name { font-size: 0.9375rem; font-weight: 600; margin-bottom: 0.0625rem; }
+    .patent-id {
+      font-family: var(--mono);
+      font-size: 0.75rem; color: var(--text-dim);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* PILOT FORM                                                          */
+    /* ------------------------------------------------------------------ */
+    .pilot-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      margin-top: 3rem;
+      align-items: start;
+    }
+    .benefit-list { padding-top: 0.5rem; }
+    .benefit {
+      display: flex; gap: 1rem;
+      margin-bottom: 1.75rem;
+    }
+    .benefit-icon {
+      width: 36px; height: 36px; flex-shrink: 0;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .benefit-icon svg { width: 16px; height: 16px; color: var(--text-dim); }
+    .benefit h4 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 0.1875rem; }
+    .benefit p { font-size: 0.8125rem; color: var(--text-secondary); line-height: 1.6; }
+
+    .form-card {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2.25rem;
+    }
+    .form-card h3 { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.375rem; }
+    .form-card .form-sub { font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 1.75rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label {
+      display: block; font-size: 0.75rem; font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 0.375rem;
+    }
+    .form-group input, .form-group select {
+      width: 100%; padding: 0.625rem 0.875rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-group input:focus, .form-group select:focus {
+      border-color: var(--blue);
+    }
+    .form-group input::placeholder { color: var(--text-dim); }
+    .form-group select {
+      cursor: pointer; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 5 5-5' stroke='%23555770' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.875rem center;
+    }
+    .form-group select option { background: var(--bg-raised); color: var(--text); }
+    .btn-submit {
+      width: 100%; padding: 0.75rem;
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 0.9375rem; font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-top: 0.25rem;
+    }
+    .btn-submit:hover { background: var(--blue-dark); }
+    .form-note {
+      text-align: center;
+      font-size: 0.6875rem; color: var(--text-dim);
+      margin-top: 0.875rem;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* WHITE PAPER                                                         */
+    /* ------------------------------------------------------------------ */
+    .wp-section { background: var(--bg-raised); }
+    .wp-card {
+      max-width: 680px;
+      margin: 3rem auto 0;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2.5rem;
+      display: flex; gap: 2rem;
+      align-items: center;
+    }
+    .wp-preview {
+      flex-shrink: 0;
+      width: 120px; height: 156px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 0.5rem;
+    }
+    .wp-preview svg { width: 32px; height: 32px; color: var(--text-dim); }
+    .wp-preview-label {
+      font-family: var(--mono);
+      font-size: 0.625rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .wp-info { flex: 1; }
+    .wp-tags { display: flex; gap: 0.375rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    .wp-tag {
+      padding: 0.1875rem 0.5rem;
+      background: var(--bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      font-size: 0.625rem;
+      color: var(--text-dim);
+      font-family: var(--mono);
+    }
+    .wp-info h3 {
+      font-size: 1.125rem; font-weight: 600;
+      margin-bottom: 0.375rem; letter-spacing: -0.01em;
+    }
+    .wp-info p {
+      font-size: 0.8125rem; color: var(--text-secondary);
+      line-height: 1.65; margin-bottom: 1.25rem;
+    }
+    .wp-form { display: flex; gap: 0.625rem; }
+    .wp-form input {
+      flex: 1; padding: 0.5625rem 0.875rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 0.8125rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .wp-form input:focus { border-color: var(--blue); }
+    .wp-form input::placeholder { color: var(--text-dim); }
+    .wp-form button {
+      padding: 0.5625rem 1.25rem;
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 0.8125rem; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .wp-form button:hover { background: var(--blue-dark); }
+
+    /* ------------------------------------------------------------------ */
+    /* FOOTER                                                              */
+    /* ------------------------------------------------------------------ */
+    footer {
+      padding: 2.5rem 2rem;
+      border-top: 1px solid var(--border-subtle);
+      text-align: center;
+    }
+    .footer-inner {
+      max-width: 1120px; margin: 0 auto;
+      display: flex; flex-direction: column; align-items: center; gap: 0.875rem;
+    }
+    .footer-brand {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.9375rem; font-weight: 600;
+      color: var(--text);
+    }
+    .footer-brand svg { width: 20px; height: 20px; }
+    .footer-links { display: flex; gap: 1.5rem; }
+    .footer-links a {
+      color: var(--text-dim); text-decoration: none;
+      font-size: 0.8125rem; transition: color 0.15s;
+    }
+    .footer-links a:hover { color: var(--text-secondary); }
+    .footer-copy { font-size: 0.75rem; color: var(--text-dim); }
+
+    /* ------------------------------------------------------------------ */
+    /* SUCCESS STATES                                                      */
+    /* ------------------------------------------------------------------ */
+    .form-success {
+      display: none;
+      text-align: center;
+      padding: 2.5rem 1rem;
+    }
+    .form-success.show { display: block; }
+    .form-success .success-check {
+      width: 48px; height: 48px;
+      margin: 0 auto 1rem;
+      background: var(--green-muted);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .form-success .success-check svg { width: 20px; height: 20px; color: var(--green); }
+    .form-success h4 { font-size: 1.0625rem; font-weight: 600; margin-bottom: 0.375rem; }
+    .form-success p { color: var(--text-secondary); font-size: 0.8125rem; }
+    .form-fields.hidden { display: none; }
+
+    /* ------------------------------------------------------------------ */
+    /* LIVE DEMO                                                           */
+    /* ------------------------------------------------------------------ */
+    .demo-section { text-align: center; background: var(--bg); position: relative; }
+    .demo-section::before {
+      content: '';
+      position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 900px; height: 400px;
+      background: radial-gradient(ellipse at center, #22d3ee06 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .demo-frame-wrap {
+      max-width: 960px; margin: 2rem auto 0;
+      border-radius: 12px; overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 0 60px rgba(34, 211, 238, 0.05), 0 20px 60px rgba(0,0,0,0.4);
+      position: relative; background: #06070d;
+    }
+    .demo-frame-wrap::before {
+      content: '';
+      position: absolute; inset: -1px; border-radius: 13px;
+      background: linear-gradient(135deg, #22d3ee20, transparent 50%, #a78bfa10);
+      z-index: -1;
+    }
+    .demo-iframe {
+      width: 100%; height: 540px; border: none; display: block;
+      border-radius: 12px;
+    }
+    .demo-cta {
+      margin-top: 1.5rem; display: flex; gap: 1rem;
+      justify-content: center; align-items: center; flex-wrap: wrap;
+    }
+    .demo-cta-link {
+      font-size: 0.8125rem; color: var(--text-secondary);
+      text-decoration: none; transition: color 0.15s;
+    }
+    .demo-cta-link:hover { color: var(--text); }
+    @media (max-width: 600px) {
+      .demo-iframe { height: 400px; }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* RESPONSIVE                                                          */
+    /* ------------------------------------------------------------------ */
+    @media (max-width: 900px) {
+      .steps { grid-template-columns: 1fr; }
+      .math-grid { grid-template-columns: 1fr; }
+      .math-divider { padding: 0.5rem 0; }
+      .pilot-grid { grid-template-columns: 1fr; gap: 2.5rem; }
+      .wp-card { flex-direction: column; text-align: center; }
+      .wp-form { flex-direction: column; }
+      .wp-tags { justify-content: center; }
+      .hero-metrics { flex-direction: column; gap: 1rem; align-items: center; }
+      .metric-card { max-width: 100%; width: 100%; }
+      .patent-grid { flex-direction: column; align-items: center; }
+    }
+    @media (max-width: 600px) {
+      section { padding: 5rem 1.25rem; }
+      .nav-links a:not(.btn-nav) { display: none; }
+      .form-card { padding: 1.5rem; }
+      .wp-card { padding: 1.75rem; }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* SCROLL REVEAL                                                       */
+    /* ------------------------------------------------------------------ */
+    .reveal {
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <div class="nav-inner">
+      <a href="#" class="logo">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="nav-g" x1="3" y1="2.5" x2="21" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4285F4"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
+          <rect x="2" y="2" width="20" height="20" rx="6" fill="url(#nav-g)"/>
+          <path d="M7.25 7.75H16.75L7.25 16.25H16.75" stroke="white" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        ZeroAuth
+      </a>
+      <div class="nav-links">
+        <a href="/docs">Docs</a>
+        <a href="#how">How It Works</a>
+        <a href="#demo">Live Demo</a>
+        <a href="#math">The Math</a>
+        <a href="#whitepaper">White Paper</a>
+        <a href="https://github.com/pulkitpareek18/ZeroAuth" target="_blank" rel="noopener">GitHub</a>
+        <a href="#pilot" class="btn-nav">Request Pilot</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-content">
+      <h1>
+        The Only Enterprise Authentication Where A Breach Exposes <span class="em">Nothing.</span><br />
+        <span class="subdued">Because There Is Nothing To Steal.</span>
+      </h1>
+      <p class="hero-sub">
+        ZeroAuth replaces stored credentials with zero-knowledge proofs. No passwords in your database. No secrets on the wire. Mathematically impossible to breach.
+      </p>
+      <div class="hero-actions">
+        <a href="/docs/getting-started/quickstart/" class="btn-primary">Get Started</a>
+        <a href="#demo" class="btn-ghost">Watch Live Demo</a>
+        <a href="#pilot" class="btn-ghost">Request Pilot Access</a>
+      </div>
+      <div class="hero-metrics">
+        <div class="metric-card">
+          <div class="metric-value zero" data-count="0">0</div>
+          <div class="metric-label">Secrets Stored</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value zero" data-count="0">0</div>
+          <div class="metric-label">Secrets Transmitted</div>
+        </div>
+        <div class="metric-card accent-card">
+          <div class="metric-value accent" data-count="100" data-suffix="%">0%</div>
+          <div class="metric-label">Mathematically Verified</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="how-section" id="how">
+    <div class="container">
+      <div class="section-label reveal">How It Works</div>
+      <h2 class="section-title reveal">Three steps. Zero secrets exposed.</h2>
+      <p class="section-desc reveal">
+        ZeroAuth uses zero-knowledge proofs to let users prove their identity without ever revealing credentials &mdash; not to your servers, not to anyone.
+      </p>
+      <div class="steps">
+        <div class="step reveal">
+          <div class="step-num">01</div>
+          <h3>User Enrolls Locally</h3>
+          <p>The user creates a credential on their own device. A cryptographic commitment is generated and stored &mdash; never the credential itself. Your server never sees the secret.</p>
+          <div class="step-code">
+            <span class="cmt">// On user's device</span><br />
+            <span class="kw">const</span> secret = <span class="fn">generateCredential</span>();<br />
+            <span class="kw">const</span> commitment = <span class="fn">poseidonHash</span>(secret);<br />
+            <span class="cmt">// Only commitment is sent to server</span><br />
+            <span class="fn">register</span>({ <span class="str">commitment</span> });
+          </div>
+        </div>
+        <div class="step reveal">
+          <div class="step-num">02</div>
+          <h3>Prove Without Revealing</h3>
+          <p>At login, a zero-knowledge proof is generated client-side. It mathematically proves the user knows the credential &mdash; without transmitting any part of it.</p>
+          <div class="step-code">
+            <span class="cmt">// Client-side proof generation</span><br />
+            <span class="kw">const</span> proof = <span class="kw">await</span> <span class="fn">groth16.prove</span>(<br />
+            &nbsp;&nbsp;circuit, { secret, commitment }<br />
+            );<br />
+            <span class="cmt">// Server verifies math, not secrets</span><br />
+            <span class="fn">authenticate</span>({ <span class="str">proof</span> });
+          </div>
+        </div>
+        <div class="step reveal">
+          <div class="step-num">03</div>
+          <h3>Verify On-Chain or Off</h3>
+          <p>Proofs are verified against the commitment using succinct verification. Works on-chain via smart contracts or off-chain with a lightweight verifier.</p>
+          <div class="step-code">
+            <span class="cmt">// Server / smart contract</span><br />
+            <span class="kw">const</span> valid = <span class="fn">groth16.verify</span>(<br />
+            &nbsp;&nbsp;verificationKey, proof, signals<br />
+            );<br />
+            <span class="cmt">// true &mdash; identity confirmed</span><br />
+            <span class="cmt">// secrets exposed: 0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LIVE DEMO -->
+  <section class="demo-section" id="demo">
+    <div class="container">
+      <div class="section-label reveal">Live Demo</div>
+      <h2 class="section-title reveal">See it in action — 60 seconds, zero secrets.</h2>
+      <p class="section-desc reveal" style="margin: 0 auto;">
+        Watch a complete authentication flow: biometric scan, ZK proof generation, SSO access, and a simulated breach that exposes nothing.
+      </p>
+      <div class="demo-frame-wrap reveal">
+        <iframe class="demo-iframe" src="/demo.html" title="ZeroAuth Live Demo" loading="lazy"></iframe>
+      </div>
+      <div class="demo-cta reveal">
+        <a href="/demo.html" target="_blank" class="demo-cta-link">Open fullscreen &#8599;</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE MATH -->
+  <section class="math-section" id="math">
+    <div class="container">
+      <div class="section-label reveal">The Math</div>
+      <h2 class="section-title reveal">What a breach actually costs.</h2>
+      <p class="section-desc reveal">
+        In 2023, Okta's breach exposed every support customer's data. Here is the same scenario with ZeroAuth.
+      </p>
+      <div class="math-grid reveal">
+        <div class="math-card threat">
+          <div class="math-header">
+            <div class="math-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <div>
+              <div class="math-card-title">Traditional Auth (Okta Breach)</div>
+              <div class="math-card-sub">October 2023</div>
+            </div>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Records exposed</span>
+            <span class="math-row-value">All support customers</span>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Incident response</span>
+            <span class="math-row-value">$2.1M+</span>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Legal &amp; regulatory</span>
+            <span class="math-row-value">$8M+</span>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Customer churn</span>
+            <span class="math-row-value">$15M+</span>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Stock price impact</span>
+            <span class="math-row-value">-11.6%</span>
+          </div>
+          <div class="math-total">
+            <span class="math-total-label">Total damage</span>
+            <span class="math-total-value">$25M+</span>
+          </div>
+        </div>
+        <div class="math-divider"><span>vs</span></div>
+        <div class="math-card secure">
+          <div class="math-header">
+            <div class="math-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div>
+              <div class="math-card-title">ZeroAuth</div>
+              <div class="math-card-sub">Same breach scenario</div>
+            </div>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Records exposed</span>
+            <span class="math-row-value">0 usable records</span>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Incident response</span>
+            <span class="math-row-value">$0</span>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Legal &amp; regulatory</span>
+            <span class="math-row-value">$0</span>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Customer churn</span>
+            <span class="math-row-value">$0</span>
+          </div>
+          <div class="math-row">
+            <span class="math-row-label">Credential reset needed</span>
+            <span class="math-row-value">None</span>
+          </div>
+          <div class="math-total">
+            <span class="math-total-label">Total damage</span>
+            <span class="math-total-value">$0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PATENTS -->
+  <section class="patent-section section-center" id="patents">
+    <div class="container">
+      <div class="section-label reveal">Intellectual Property</div>
+      <h2 class="section-title reveal">Patent-Protected Technology</h2>
+      <p class="section-desc reveal" style="margin: 0 auto;">
+        ZeroAuth's core cryptographic protocol is protected by granted and pending patents across multiple jurisdictions.
+      </p>
+      <div class="patent-grid reveal">
+        <div class="patent-card">
+          <div class="patent-icon-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+          </div>
+          <div>
+            <div class="patent-status granted">Granted</div>
+            <div class="patent-name">Indian Patent</div>
+            <div class="patent-id">202311041001</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PILOT ACCESS -->
+  <section id="pilot">
+    <div class="container">
+      <div class="section-label reveal">Get Started</div>
+      <h2 class="section-title reveal">Request Pilot Access</h2>
+      <p class="section-desc reveal">
+        We work directly with your security team to deploy ZeroAuth in your environment. No rip-and-replace required.
+      </p>
+      <div class="pilot-grid">
+        <div class="benefit-list reveal">
+          <div class="benefit">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div>
+              <h4>Zero-Trust by Default</h4>
+              <p>Your database becomes worthless to attackers. No password hashes, no tokens, no session secrets to exfiltrate.</p>
+            </div>
+          </div>
+          <div class="benefit">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </div>
+            <div>
+              <h4>Drop-In Integration</h4>
+              <p>Works alongside your existing IdP. Integrates via standard APIs and SDKs. Deploy in days, not quarters.</p>
+            </div>
+          </div>
+          <div class="benefit">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <div>
+              <h4>Compliance-Ready</h4>
+              <p>Designed for SOC 2, GDPR, and HIPAA. Less data stored means less data to govern.</p>
+            </div>
+          </div>
+          <div class="benefit">
+            <div class="benefit-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div>
+              <h4>Mathematically Proven</h4>
+              <p>Built on peer-reviewed cryptographic primitives: Groth16 proofs, Poseidon hashing, and elliptic curve pairings.</p>
+            </div>
+          </div>
+        </div>
+        <div class="form-card reveal">
+          <div class="form-fields" id="pilotFormFields">
+            <h3>Start Your Pilot</h3>
+            <p class="form-sub">We will reach out within one business day to schedule a technical walkthrough.</p>
+            <form id="pilotForm">
+              <div class="form-group">
+                <label for="pilotName">Full Name</label>
+                <input type="text" id="pilotName" name="name" placeholder="Jane Smith" required />
+              </div>
+              <div class="form-group">
+                <label for="pilotCompany">Company</label>
+                <input type="text" id="pilotCompany" name="company" placeholder="Acme Corp" required />
+              </div>
+              <div class="form-group">
+                <label for="pilotEmail">Work Email</label>
+                <input type="email" id="pilotEmail" name="email" placeholder="jane@acme.com" required />
+              </div>
+              <div class="form-group">
+                <label for="pilotSize">Employee Count</label>
+                <select id="pilotSize" name="size" required>
+                  <option value="" disabled selected>Select company size</option>
+                  <option value="1-50">1 &ndash; 50</option>
+                  <option value="51-200">51 &ndash; 200</option>
+                  <option value="201-1000">201 &ndash; 1,000</option>
+                  <option value="1001-5000">1,001 &ndash; 5,000</option>
+                  <option value="5001+">5,001+</option>
+                </select>
+              </div>
+              <button type="submit" class="btn-submit">Request Pilot Access</button>
+            </form>
+            <p class="form-note">No credit card required. Free 30-day pilot.</p>
+          </div>
+          <div class="form-success" id="pilotSuccess">
+            <div class="success-check">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <h4>Request received</h4>
+            <p>Our team will contact you within one business day to schedule your technical walkthrough.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHITE PAPER -->
+  <section class="wp-section section-center" id="whitepaper">
+    <div class="container">
+      <div class="section-label reveal">Technical Deep Dive</div>
+      <h2 class="section-title reveal">White Paper</h2>
+      <p class="section-desc reveal" style="margin: 0 auto;">
+        The cryptographic foundations, architecture, and security proofs behind ZeroAuth.
+      </p>
+      <div class="wp-card reveal">
+        <div class="wp-preview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </div>
+        <div class="wp-info">
+          <div class="wp-tags">
+            <span class="wp-tag">ZK-SNARKs</span>
+            <span class="wp-tag">Groth16</span>
+            <span class="wp-tag">Poseidon Hash</span>
+            <span class="wp-tag">Enterprise Auth</span>
+          </div>
+          <h3>ZeroAuth: Zero-Knowledge Authentication for the Enterprise</h3>
+          <p>Covers threat model analysis, protocol design, circuit architecture, on-chain and off-chain verification, and deployment strategies.</p>
+          <div id="wpFormContainer">
+            <form class="wp-form" id="wpForm">
+              <input type="email" id="wpEmail" placeholder="Enter your work email" required />
+              <button type="submit">Download PDF</button>
+            </form>
+          </div>
+          <div class="form-success" id="wpSuccess">
+            <p style="color: var(--green); font-weight: 500; font-size: 0.8125rem;">Download link sent. Check your inbox.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs><linearGradient id="ft-g" x1="3" y1="2.5" x2="21" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4285F4"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
+          <rect x="2" y="2" width="20" height="20" rx="6" fill="url(#ft-g)"/>
+          <path d="M7.25 7.75H16.75L7.25 16.25H16.75" stroke="white" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        ZeroAuth
+      </div>
+      <div class="footer-links">
+        <a href="/docs">Documentation</a>
+        <a href="/docs/reference/api-reference">API Reference</a>
+        <a href="#how">How It Works</a>
+        <a href="#whitepaper">White Paper</a>
+        <a href="https://github.com/pulkitpareek18/ZeroAuth" target="_blank" rel="noopener">GitHub</a>
+        <a href="#pilot">Request Pilot</a>
+      </div>
+      <div class="footer-copy">2026 ZeroAuth. All rights reserved. Protected by Indian Patent 202311041001.</div>
+    </div>
+  </footer>
+
+  <script>
+    // Scroll reveal
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.15, rootMargin: '0px 0px -20px 0px' });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+    // Count-up animation for hero metrics
+    function animateCount(el) {
+      const target = parseInt(el.dataset.count);
+      const suffix = el.dataset.suffix || '';
+      if (target === 0) { el.textContent = '0' + suffix; return; }
+      const duration = 1200;
+      const start = performance.now();
+      function tick(now) {
+        const progress = Math.min((now - start) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = Math.round(eased * target) + suffix;
+        if (progress < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+    const metricObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.querySelectorAll('.metric-value[data-count]').forEach(animateCount);
+          metricObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.5 });
+    const heroMetrics = document.querySelector('.hero-metrics');
+    if (heroMetrics) metricObserver.observe(heroMetrics);
+
+    // Pilot form
+    document.getElementById('pilotForm')?.addEventListener('submit', handlePilotSubmit);
+    document.getElementById('wpForm')?.addEventListener('submit', handleWpSubmit);
+
+    async function handlePilotSubmit(e) {
+      e.preventDefault();
+      const btn = e.target.querySelector('.btn-submit');
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+
+      try {
+        const res = await fetch('/api/leads/pilot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: document.getElementById('pilotName').value,
+            company: document.getElementById('pilotCompany').value,
+            email: document.getElementById('pilotEmail').value,
+            size: document.getElementById('pilotSize').value,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Submission failed');
+        }
+
+        document.getElementById('pilotFormFields').classList.add('hidden');
+        document.getElementById('pilotSuccess').classList.add('show');
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Request Pilot Access';
+        alert(err.message);
+      }
+    }
+
+    // White paper form
+    async function handleWpSubmit(e) {
+      e.preventDefault();
+      const btn = e.target.querySelector('button');
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+
+      try {
+        const res = await fetch('/api/leads/whitepaper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('wpEmail').value,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Submission failed');
+        }
+
+        document.getElementById('wpForm').style.display = 'none';
+        document.getElementById('wpSuccess').classList.add('show');
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Download PDF';
+        alert(err.message);
+      }
+    }
+  </script>
+</body>
+</html>
