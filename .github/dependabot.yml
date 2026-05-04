@@ -1,34 +1,56 @@
 version: 2
 updates:
+  # ───────────────────────────────────────────────────────────────
+  # One bundled PR per ecosystem per month, all minor + patch
+  # together. Major bumps come as separate PRs so they get reviewed
+  # individually.
+  # ───────────────────────────────────────────────────────────────
+
   - package-ecosystem: 'npm'
     directory: '/'
     schedule:
-      interval: 'weekly'
-    open-pull-requests-limit: 10
+      interval: 'monthly'
+    open-pull-requests-limit: 5
     groups:
-      types:
-        patterns: ['@types/*']
-      dev-dependencies:
-        dependency-type: 'development'
+      backend-minor-and-patch:
+        applies-to: version-updates
+        update-types: ['minor', 'patch']
 
   - package-ecosystem: 'npm'
     directory: '/dashboard'
     schedule:
-      interval: 'weekly'
-    open-pull-requests-limit: 5
+      interval: 'monthly'
+    open-pull-requests-limit: 3
+    groups:
+      dashboard-minor-and-patch:
+        applies-to: version-updates
+        update-types: ['minor', 'patch']
 
   - package-ecosystem: 'npm'
     directory: '/website'
     schedule:
-      interval: 'weekly'
-    open-pull-requests-limit: 5
+      interval: 'monthly'
+    open-pull-requests-limit: 3
+    groups:
+      website-minor-and-patch:
+        applies-to: version-updates
+        update-types: ['minor', 'patch']
 
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
       interval: 'monthly'
+    groups:
+      actions:
+        update-types: ['minor', 'patch', 'major']
 
   - package-ecosystem: 'docker'
     directory: '/'
     schedule:
       interval: 'monthly'
+    open-pull-requests-limit: 1
+    # Major Node bumps deliberately skipped — they require a full
+    # re-test of the ZKP + blockchain stack. We pin to the LTS line.
+    ignore:
+      - dependency-name: 'node'
+        update-types: ['version-update:semver-major']
