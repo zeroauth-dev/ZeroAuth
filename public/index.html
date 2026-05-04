@@ -1019,7 +1019,7 @@
             </form>
           </div>
           <div class="form-success" id="wpSuccess">
-            <p style="color: var(--green); font-weight: 500; font-size: 0.8125rem;">Download link sent. Check your inbox.</p>
+            <p style="color: var(--green); font-weight: 500; font-size: 0.8125rem;">Thanks &mdash; your download is starting. <a id="wpDownloadLink" href="/docs/whitepaper.pdf" download="ZeroAuth_Whitepaper.pdf" style="color: var(--blue); text-decoration: underline;">Click here</a> if it does not begin automatically.</p>
           </div>
         </div>
       </div>
@@ -1143,8 +1143,26 @@
           throw new Error(err.error || 'Submission failed');
         }
 
+        const data = await res.json();
+        const url = data.downloadUrl || '/docs/whitepaper.pdf';
+        const filename = data.filename || 'ZeroAuth_Whitepaper.pdf';
+
         document.getElementById('wpForm').style.display = 'none';
         document.getElementById('wpSuccess').classList.add('show');
+
+        // Trigger the actual download
+        const link = document.getElementById('wpDownloadLink');
+        if (link) {
+          link.href = url;
+          link.setAttribute('download', filename);
+        }
+        const tmp = document.createElement('a');
+        tmp.href = url;
+        tmp.setAttribute('download', filename);
+        tmp.rel = 'noopener';
+        document.body.appendChild(tmp);
+        tmp.click();
+        tmp.remove();
       } catch (err) {
         btn.disabled = false;
         btn.textContent = 'Download PDF';

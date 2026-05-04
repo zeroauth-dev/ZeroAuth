@@ -83,7 +83,12 @@ router.post('/whitepaper', async (req: Request, res: Response) => {
   }
 
   logger.info('Whitepaper lead submitted', { email: trimmedEmail });
-  res.status(201).json({ success: true, message: 'Whitepaper access granted.' });
+  res.status(201).json({
+    success: true,
+    message: 'Whitepaper access granted.',
+    downloadUrl: '/docs/whitepaper.pdf',
+    filename: 'ZeroAuth_Whitepaper.pdf',
+  });
 });
 
 /**
