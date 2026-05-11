@@ -4,6 +4,7 @@
 .env.production
 .env.*.local
 PRODUCTION_CREDENTIALS.md
+GITHUB_SECRETS.md
 
 # ─── Dependencies ───────────────────────────────────────
 node_modules/

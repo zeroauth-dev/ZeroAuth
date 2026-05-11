@@ -1,0 +1,85 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  DEPLOY_HOST: 104.207.143.14
+  DEPLOY_USER: zeroauth-deploy
+  DEPLOY_PATH: /opt/zeroauth
+  APP_URL: https://zeroauth.dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            dashboard/package-lock.json
+            website/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install dashboard dependencies
+        run: npm --prefix dashboard ci
+
+      - name: Install website dependencies
+        run: npm --prefix website ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build backend, dashboard, and docs
+        run: npm run build:all
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Add deploy host to known_hosts
+        run: ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Ensure remote path exists
+        run: ssh "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+
+      - name: Sync repository to server
+        run: |
+          rsync -az --delete \
+            --exclude '.env' \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'coverage' \
+            --exclude 'node_modules' \
+            --exclude 'dist' \
+            --exclude 'dashboard/node_modules' \
+            --exclude 'dashboard/dist' \
+            --exclude 'website/node_modules' \
+            --exclude 'website/build' \
+            --exclude 'tests' \
+            --exclude 'artifacts' \
+            --exclude 'cache' \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      - name: Run remote deploy
+        run: |
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && chmod +x scripts/deploy-remote.sh && APP_DIR='$DEPLOY_PATH' APP_URL='$APP_URL' ./scripts/deploy-remote.sh"
