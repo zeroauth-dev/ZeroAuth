@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 
 describe('Identity Service — Patent Module 214', () => {
   describe('SHA-256 Biometric Hashing (Patent Claim 3)', () => {
@@ -27,7 +27,7 @@ describe('Identity Service — Patent Module 214', () => {
 
   describe('DID Generation', () => {
     it('generates DID in correct format', () => {
-      const didSuffix = require('crypto').randomBytes(16).toString('hex');
+      const didSuffix = randomBytes(16).toString('hex');
       const did = `did:zeroauth:base:${didSuffix}`;
       expect(did).toMatch(/^did:zeroauth:base:[0-9a-f]{32}$/);
     });
@@ -35,7 +35,7 @@ describe('Identity Service — Patent Module 214', () => {
     it('generates unique DIDs', () => {
       const dids = new Set<string>();
       for (let i = 0; i < 100; i++) {
-        const didSuffix = require('crypto').randomBytes(16).toString('hex');
+        const didSuffix = randomBytes(16).toString('hex');
         dids.add(`did:zeroauth:base:${didSuffix}`);
       }
       expect(dids.size).toBe(100);

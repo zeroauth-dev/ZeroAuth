@@ -1,8 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { authenticateTenantApiKey, getTenantContext } from '../../middleware/tenant-auth';
-import { authenticateJWT } from '../../middleware/auth';
+import { authenticateTenantApiKey } from '../../middleware/tenant-auth';
 import { sessionStore } from '../../services/session-store';
-import { verifyToken } from '../../services/jwt';
+import { issueTokens, verifyToken } from '../../services/jwt';
 import { logger } from '../../services/logger';
 
 const router = Router();
@@ -106,7 +105,6 @@ router.post('/refresh',
         return;
       }
 
-      const { issueTokens } = require('../../services/jwt');
       const tokens = issueTokens({
         sub: payload.sub,
         email: payload.email,
