@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { getPool } from './db';
 import { logger } from './logger';
+import { recordAuditEvent } from './platform';
 import {
   ApiKey,
   ApiKeyCreateResult,
@@ -38,7 +39,21 @@ export async function createApiKey(
   tenantId: string,
   name: string = 'Default',
   environment: ApiKeyEnvironment = 'live',
-  scopes: ApiScope[] = ['zkp:verify', 'zkp:register', 'identity:read', 'nonce:create'],
+  scopes: ApiScope[] = [
+    'zkp:verify',
+    'zkp:register',
+    'identity:read',
+    'nonce:create',
+    'devices:read',
+    'devices:write',
+    'users:read',
+    'users:write',
+    'verifications:read',
+    'verifications:write',
+    'attendance:read',
+    'attendance:write',
+    'audit:read',
+  ],
 ): Promise<ApiKeyCreateResult> {
   const pool = getPool();
   const rawKey = generateRawKey(environment);
@@ -54,6 +69,16 @@ export async function createApiKey(
 
   const row = result.rows[0];
   logger.info('API key created', { tenantId, keyPrefix, environment });
+  void recordAuditEvent(tenantId, {
+    environment,
+    actorType: 'console',
+    action: 'api_key.created',
+    entityType: 'api_key',
+    entityId: row.id,
+    status: 'success',
+    summary: `Created ${environment} API key ${name}`,
+    metadata: { keyPrefix, scopes },
+  }).catch(() => undefined);
 
   return {
     key: rawKey,
@@ -131,6 +156,14 @@ export async function revokeApiKey(tenantId: string, keyId: string): Promise<boo
   if (result.rowCount === 0) return false;
 
   logger.info('API key revoked', { tenantId, keyId });
+  void recordAuditEvent(tenantId, {
+    actorType: 'console',
+    action: 'api_key.revoked',
+    entityType: 'api_key',
+    entityId: keyId,
+    status: 'success',
+    summary: `Revoked API key ${keyId}`,
+  }).catch(() => undefined);
   return true;
 }
 

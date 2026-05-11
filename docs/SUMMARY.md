@@ -15,7 +15,9 @@
 - Operations
   - [Deployment](operations/deployment.md)
   - [Admin Dashboard](operations/admin-dashboard.md)
+  - [Central API Delivery Plan](operations/central-api-delivery-plan.md)
 - Reference
+  - [Central API](reference/central-api.md)
   - [API Reference](reference/api-reference.md)
   - [Environment Variables](reference/environment-variables.md)
   - [Contracts and Circuit](reference/contracts-and-circuit.md)

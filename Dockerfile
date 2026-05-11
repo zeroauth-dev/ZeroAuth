@@ -47,6 +47,15 @@ RUN npm ci --ignore-scripts
 COPY dashboard/ ./
 RUN npm run build
 
+# ── Build Stage — Documentation ───────────────
+FROM node:20-alpine AS docs-build
+WORKDIR /app/website
+COPY website/package.json website/package-lock.json* ./
+RUN npm ci --ignore-scripts
+COPY website/ ./
+COPY docs/ ../docs/
+RUN npm run build
+
 # ── Production Stage ──────────────────────────
 FROM node:20-alpine AS production
 WORKDIR /app
@@ -67,8 +76,8 @@ COPY public/ ./public/
 # Copy dashboard build
 COPY --from=dashboard-build /app/dashboard/dist ./dashboard/dist
 
-# Copy pre-built documentation site
-COPY website/build/ ./website/build/
+# Copy built documentation site
+COPY --from=docs-build /app/website/build ./website/build
 
 # Copy ZKP circuit artifacts (pre-compiled)
 COPY circuits/build/verification_key.json ./circuits/build/verification_key.json

@@ -1,88 +1,110 @@
-# Platform Status & Health
+# Deployment
 
-ZeroAuth is a fully hosted API platform. There is nothing to deploy — create an account and start making API calls.
+ZeroAuth now supports a proper GitHub Actions based deployment flow for `zeroauth.dev`.
 
-## Service Health
+## Current Production Topology
 
-Check the platform status at any time:
+Production runs on a VPS at `104.207.143.14` with:
 
-```bash
-curl https://zeroauth.dev/api/health
-```
+- `zeroauth-prod` for the Node.js API and static assets
+- `zeroauth-caddy` for HTTPS termination and reverse proxy
+- `zeroauth-postgres` for tenant, API-key, usage, and central API data
+- `zeroauth-redis` for Redis-backed runtime support
 
-The health endpoint returns:
+All services are orchestrated with Docker Compose in `/opt/zeroauth`.
 
-- overall service status,
-- blockchain connection status and latest block,
-- configured contract addresses,
-- ZKP verification engine readiness,
-- Poseidon hash support status.
+## CI Workflow
 
-No authentication is required for the health endpoint.
+Workflow file: `.github/workflows/ci.yml`
 
-## Monitoring Your Usage
+Triggered on:
 
-### Current Usage
+- pull requests
+- pushes to non-`main` branches
 
-```bash
-curl https://zeroauth.dev/api/console/usage \
-  -H "Authorization: Bearer YOUR_CONSOLE_TOKEN"
-```
+What it does:
 
-Returns:
+1. installs root, dashboard, and docs dependencies
+2. runs `npm test`
+3. runs `npm run build:all`
 
-- current month's request count vs. quota,
-- rate limit configuration,
-- monthly usage history,
-- recent API calls with timestamps and endpoints.
+This is the branch protection layer.
 
-### Account Info
+## CD Workflow
 
-```bash
-curl https://zeroauth.dev/api/console/account \
-  -H "Authorization: Bearer YOUR_CONSOLE_TOKEN"
-```
+Workflow file: `.github/workflows/deploy.yml`
 
-Returns your plan tier, rate limit, monthly quota, and account status.
+Triggered on:
 
-## Rate Limit Headers
+- pushes to `main`
+- manual `workflow_dispatch`
 
-Every API response includes rate limit information:
+What it does:
 
-```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 97
-X-RateLimit-Reset: 1710412800
-X-ZeroAuth-Tenant: a1b2c3d4-...
-X-ZeroAuth-Plan: free
-```
+1. re-runs tests and builds on GitHub Actions
+2. opens an SSH session with the deploy key
+3. rsyncs the repository to `/opt/zeroauth`
+4. runs `scripts/deploy-remote.sh`
+5. validates container health and the public `/api/health` endpoint
 
-Use these headers to implement client-side rate limit awareness and backoff.
+## Required GitHub Secret
 
-## Plan Limits
+Add this repository secret:
 
-| Plan | Rate Limit (per 15 min) | Monthly Quota |
-|---|---|---|
-| Free | 100 | 1,000 |
-| Starter | 500 | 25,000 |
-| Growth | 2,000 | 250,000 |
-| Enterprise | 10,000 | Unlimited |
+- `DEPLOY_SSH_KEY`
 
-## On-Chain Infrastructure
+The private key for the VPS deploy user is expected here. The workflow uses:
 
-ZeroAuth maintains contracts on Base Sepolia L2:
+- host: `104.207.143.14`
+- user: `zeroauth-deploy`
+- path: `/opt/zeroauth`
 
-| Contract | Address |
-|---|---|
-| `DIDRegistry` | `0xC68ceB726DDB898E899080021A0B9e7994f63A73` |
-| `Groth16Verifier` | `0x58258bf549D8E8694b22B12410F24583D16e1aA4` |
+## Server-Side Deploy User
 
-Blockchain anchoring is available on Starter plans and above.
+The server should deploy through a dedicated SSH user, not a root password.
 
-## Recommended Integration Practices
+Configured deploy user:
 
-- **Monitor rate limit headers** in every response and implement exponential backoff.
-- **Use separate API keys** for different services and environments.
-- **Check usage regularly** via the console API to avoid quota surprises.
-- **Keep API keys server-side** — never expose them in client-side code.
-- **Handle errors gracefully** — see [Error Format](../reference/api-reference.md#error-format) for the standard error shape.
+- `zeroauth-deploy`
+
+Expected capabilities:
+
+- member of the `docker` group
+- write access to `/opt/zeroauth`
+- SSH key in `~/.ssh/authorized_keys`
+
+## Remote Deploy Script
+
+Script file: `scripts/deploy-remote.sh`
+
+The remote script:
+
+1. validates Docker Compose config
+2. runs `docker compose --profile prod up -d --build --remove-orphans`
+3. waits for `zeroauth-prod` to become healthy
+4. calls `https://zeroauth.dev/api/health`
+5. prunes dangling Docker images
+
+## Important Build Detail
+
+The production Docker image is now self-contained:
+
+- backend compiled inside Docker
+- dashboard built inside Docker
+- Docusaurus docs built inside Docker
+
+That means deploys no longer depend on someone manually prebuilding `website/build` on a laptop before syncing files to the server.
+
+## First-Time Setup Checklist
+
+1. Add `DEPLOY_SSH_KEY` to GitHub repository secrets.
+2. Ensure `/opt/zeroauth/.env` exists on the VPS and is not overwritten by CI/CD.
+3. Push to `main` or trigger the Deploy workflow manually.
+4. Verify [https://zeroauth.dev/api/health](https://zeroauth.dev/api/health).
+
+## Recommended Hardening
+
+- disable password SSH login once the deploy key path is confirmed
+- disable direct root SSH login and keep root for break-glass only
+- rotate any secret that was ever stored in-repo or shared insecurely
+- add branch protection so `main` only deploys after passing CI

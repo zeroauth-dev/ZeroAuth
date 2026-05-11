@@ -152,6 +152,21 @@ export type PlanTier = 'free' | 'starter' | 'growth' | 'enterprise';
 export type TenantStatus = 'active' | 'suspended' | 'deactivated';
 export type ApiKeyEnvironment = 'live' | 'test';
 export type ApiKeyStatus = 'active' | 'revoked';
+export type DeviceStatus = 'active' | 'inactive' | 'retired';
+export type TenantUserStatus = 'active' | 'inactive';
+export type VerificationMethod =
+  | 'zkp'
+  | 'fingerprint'
+  | 'face'
+  | 'depth'
+  | 'saml'
+  | 'oidc'
+  | 'manual';
+export type VerificationResult = 'pass' | 'fail' | 'challenge';
+export type AttendanceEventType = 'check_in' | 'check_out';
+export type AttendanceResult = 'accepted' | 'rejected';
+export type AuditActorType = 'api_key' | 'console' | 'device' | 'system';
+export type AuditStatus = 'success' | 'failure';
 
 export type ApiScope =
   | 'zkp:verify'
@@ -162,6 +177,15 @@ export type ApiScope =
   | 'saml:callback'
   | 'oidc:authorize'
   | 'oidc:callback'
+  | 'devices:read'
+  | 'devices:write'
+  | 'users:read'
+  | 'users:write'
+  | 'verifications:read'
+  | 'verifications:write'
+  | 'attendance:read'
+  | 'attendance:write'
+  | 'audit:read'
   | 'admin:stats'
   | 'admin:audit';
 
@@ -238,6 +262,86 @@ export interface UsageSummary {
 export interface TenantContext {
   tenant: Tenant;
   apiKey: ApiKey;
+}
+
+// ─── Central API Domain Types ────────────────────────────────────────
+
+export interface Device {
+  id: string;
+  tenant_id: string;
+  environment: ApiKeyEnvironment;
+  external_id: string;
+  name: string;
+  location_id: string | null;
+  status: DeviceStatus;
+  battery_level: number | null;
+  metadata: Record<string, unknown>;
+  last_seen_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface TenantUser {
+  id: string;
+  tenant_id: string;
+  environment: ApiKeyEnvironment;
+  external_id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  employee_code: string | null;
+  status: TenantUserStatus;
+  primary_device_id: string | null;
+  metadata: Record<string, unknown>;
+  last_verified_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface VerificationRecord {
+  id: string;
+  tenant_id: string;
+  environment: ApiKeyEnvironment;
+  user_id: string | null;
+  device_id: string | null;
+  api_key_id: string | null;
+  method: VerificationMethod;
+  result: VerificationResult;
+  reason: string | null;
+  confidence_score: number | null;
+  reference_id: string | null;
+  metadata: Record<string, unknown>;
+  occurred_at: Date;
+  created_at: Date;
+}
+
+export interface AttendanceEvent {
+  id: string;
+  tenant_id: string;
+  environment: ApiKeyEnvironment;
+  user_id: string;
+  device_id: string | null;
+  verification_id: string | null;
+  event_type: AttendanceEventType;
+  result: AttendanceResult;
+  metadata: Record<string, unknown>;
+  occurred_at: Date;
+  created_at: Date;
+}
+
+export interface AuditEvent {
+  id: number;
+  tenant_id: string;
+  environment: ApiKeyEnvironment | null;
+  actor_type: AuditActorType;
+  actor_id: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  status: AuditStatus;
+  summary: string;
+  metadata: Record<string, unknown>;
+  created_at: Date;
 }
 
 // ─── Lead Types ─────────────────────────────────────────────────────

@@ -36,12 +36,14 @@ const sidebars: SidebarsConfig = {
       items: [
         'operations/deployment',
         'operations/admin-dashboard',
+        'operations/central-api-delivery-plan',
       ],
     },
     {
       type: 'category',
       label: 'Reference',
       items: [
+        'reference/central-api',
         'reference/api-reference',
         'reference/environment-variables',
         'reference/contracts-and-circuit',

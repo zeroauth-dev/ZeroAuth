@@ -1,13 +1,56 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { config } from '../config';
 import { logger } from '../services/logger';
 import { createTenant, authenticateTenant, getTenantById, getTenantByEmail } from '../services/tenants';
 import { createApiKey, listApiKeys, revokeApiKey, countActiveKeys } from '../services/api-keys';
 import { getUsageSummary, getRecentCalls, getCurrentMonthUsage } from '../services/usage';
-import { ApiKeyEnvironment, ApiScope, PlanTier } from '../types';
+import { getConsoleOverview, listAuditEvents, recordAuditEvent } from '../services/platform';
+import { ApiKeyEnvironment, ApiScope } from '../types';
 
 const router = Router();
+
+// ─── Password policy ─────────────────────────────────────────────
+const MIN_PASSWORD_LENGTH = 12;
+const COMMON_PASSWORDS = new Set([
+  'password', 'password123', 'changeme', 'letmein', 'qwerty', 'qwerty123',
+  '12345678', '123456789', '1234567890', 'admin1234', 'welcome1', 'iloveyou',
+  'zeroauth', 'zeroauth123', 'zero-auth', 'p@ssw0rd', 'passw0rd',
+]);
+
+function validatePassword(password: unknown): string | null {
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+  if (password.length > 256) {
+    return 'Password must be at most 256 characters.';
+  }
+  const hasLetter = /[A-Za-z]/.test(password);
+  const hasDigit = /[0-9]/.test(password);
+  if (!hasLetter || !hasDigit) {
+    return 'Password must contain at least one letter and one digit.';
+  }
+  if (COMMON_PASSWORDS.has(password.toLowerCase())) {
+    return 'Password is too common. Pick something less guessable.';
+  }
+  return null;
+}
+
+// ─── Rate limits ─────────────────────────────────────────────────
+// Anti-enumeration / credential-stuffing limit on the unauthenticated auth
+// endpoints. Skipped under NODE_ENV=test so the jest suite isn't throttled.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'too_many_attempts',
+    message: 'Too many sign-up / login attempts from this IP. Try again in 15 minutes.',
+  },
+  skip: () => process.env.NODE_ENV === 'test',
+});
 
 // ─── Helper: Console JWT (for developer dashboard sessions) ──────
 
@@ -50,7 +93,7 @@ function requireConsoleAuth(req: Request, res: Response, next: any): void {
  * Create a developer account.
  * Body: { email, password, companyName? }
  */
-router.post('/signup', async (req: Request, res: Response) => {
+router.post('/signup', authLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password, companyName } = req.body;
 
@@ -59,8 +102,9 @@ router.post('/signup', async (req: Request, res: Response) => {
       return;
     }
 
-    if (typeof password !== 'string' || password.length < 8) {
-      res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      res.status(400).json({ error: 'invalid_password', message: passwordError });
       return;
     }
 
@@ -80,6 +124,15 @@ router.post('/signup', async (req: Request, res: Response) => {
     const token = issueConsoleToken(tenant.id, tenant.email);
 
     logger.info('Console: Tenant signup', { tenantId: tenant.id, email: tenant.email });
+    void recordAuditEvent(tenant.id, {
+      actorType: 'console',
+      action: 'tenant.created',
+      entityType: 'tenant',
+      entityId: tenant.id,
+      status: 'success',
+      summary: `Created tenant account for ${tenant.email}`,
+      metadata: { companyName: tenant.company_name, plan: tenant.plan },
+    }).catch(() => undefined);
 
     res.status(201).json({
       message: 'Account created successfully.',
@@ -109,7 +162,10 @@ router.post('/signup', async (req: Request, res: Response) => {
     });
   } catch (err) {
     logger.error('Console: Signup error', { error: (err as Error).message });
-    res.status(500).json({ error: 'signup_failed', message: (err as Error).message });
+    res.status(500).json({
+      error: 'signup_failed',
+      message: 'Could not create the account. Please try again or contact support.',
+    });
   }
 });
 
@@ -119,7 +175,7 @@ router.post('/signup', async (req: Request, res: Response) => {
  * Authenticate developer account.
  * Body: { email, password }
  */
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', authLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
@@ -297,6 +353,41 @@ router.get('/account', requireConsoleAuth, async (req: Request, res: Response) =
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch account.' });
+  }
+});
+
+/**
+ * GET /api/console/overview
+ *
+ * Returns the Week 1 demo viewer data for a tenant/environment.
+ */
+router.get('/overview', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = (req.query.environment === 'test' ? 'test' : 'live') as ApiKeyEnvironment;
+    const overview = await getConsoleOverview(tenantId, environment);
+    res.json(overview);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch overview.' });
+  }
+});
+
+/**
+ * GET /api/console/audit
+ *
+ * Returns recent business audit events for the selected environment.
+ */
+router.get('/audit', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = (req.query.environment === 'test' ? 'test' : 'live') as ApiKeyEnvironment;
+    const action = typeof req.query.action === 'string' ? req.query.action : undefined;
+    const status = req.query.status === 'failure' ? 'failure' : req.query.status === 'success' ? 'success' : undefined;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    const events = await listAuditEvents(tenantId, environment, { action, status, limit });
+    res.json({ environment, events });
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch audit events.' });
   }
 });
 

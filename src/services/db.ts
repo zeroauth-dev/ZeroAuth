@@ -5,6 +5,8 @@ import { logger } from './logger';
 let pool: Pool | null = null;
 
 const SCHEMA = `
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
   -- ═══════════════════════════════════════════════════════════
   -- ZeroAuth Platform Schema
   -- Hosted API model: tenants → api_keys → usage_logs
@@ -103,6 +105,115 @@ const SCHEMA = `
     UNIQUE(tenant_id, month)
   );
   CREATE INDEX IF NOT EXISTS idx_usage_monthly_tenant ON usage_monthly(tenant_id, month DESC);
+
+  -- ─── Devices ──────────────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL
+      CHECK (environment IN ('live', 'test')),
+    external_id VARCHAR(100) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    location_id VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'active'
+      CHECK (status IN ('active', 'inactive', 'retired')),
+    battery_level INT CHECK (battery_level BETWEEN 0 AND 100),
+    metadata JSONB NOT NULL DEFAULT '{}',
+    last_seen_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, environment, external_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_devices_tenant ON devices(tenant_id, environment, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(tenant_id, environment, status);
+
+  -- ─── Tenant Users / Enrollments ──────────────────────────
+  CREATE TABLE IF NOT EXISTS tenant_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL
+      CHECK (environment IN ('live', 'test')),
+    external_id VARCHAR(100) NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255),
+    phone VARCHAR(50),
+    employee_code VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'active'
+      CHECK (status IN ('active', 'inactive')),
+    primary_device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    last_verified_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, environment, external_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_tenant_users_tenant ON tenant_users(tenant_id, environment, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_tenant_users_status ON tenant_users(tenant_id, environment, status);
+
+  -- ─── Verification Events ─────────────────────────────────
+  CREATE TABLE IF NOT EXISTS verification_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL
+      CHECK (environment IN ('live', 'test')),
+    user_id UUID REFERENCES tenant_users(id) ON DELETE SET NULL,
+    device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
+    api_key_id UUID REFERENCES api_keys(id) ON DELETE SET NULL,
+    method VARCHAR(20) NOT NULL
+      CHECK (method IN ('zkp', 'fingerprint', 'face', 'depth', 'saml', 'oidc', 'manual')),
+    result VARCHAR(20) NOT NULL
+      CHECK (result IN ('pass', 'fail', 'challenge')),
+    reason VARCHAR(255),
+    confidence_score NUMERIC(5, 2),
+    reference_id VARCHAR(255),
+    metadata JSONB NOT NULL DEFAULT '{}',
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_verification_events_tenant ON verification_events(tenant_id, environment, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_verification_events_user ON verification_events(tenant_id, environment, user_id, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_verification_events_device ON verification_events(tenant_id, environment, device_id, occurred_at DESC);
+
+  -- ─── Attendance Events ───────────────────────────────────
+  CREATE TABLE IF NOT EXISTS attendance_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL
+      CHECK (environment IN ('live', 'test')),
+    user_id UUID NOT NULL REFERENCES tenant_users(id) ON DELETE CASCADE,
+    device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
+    verification_id UUID REFERENCES verification_events(id) ON DELETE SET NULL,
+    event_type VARCHAR(20) NOT NULL
+      CHECK (event_type IN ('check_in', 'check_out')),
+    result VARCHAR(20) NOT NULL
+      CHECK (result IN ('accepted', 'rejected')),
+    metadata JSONB NOT NULL DEFAULT '{}',
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_attendance_events_tenant ON attendance_events(tenant_id, environment, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_attendance_events_user ON attendance_events(tenant_id, environment, user_id, occurred_at DESC);
+
+  -- ─── Audit Events ────────────────────────────────────────
+  CREATE TABLE IF NOT EXISTS audit_events (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10)
+      CHECK (environment IN ('live', 'test')),
+    actor_type VARCHAR(20) NOT NULL
+      CHECK (actor_type IN ('api_key', 'console', 'device', 'system')),
+    actor_id VARCHAR(255),
+    action VARCHAR(100) NOT NULL,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id VARCHAR(255),
+    status VARCHAR(20) NOT NULL
+      CHECK (status IN ('success', 'failure')),
+    summary VARCHAR(255) NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_events_tenant ON audit_events(tenant_id, environment, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_audit_events_action ON audit_events(tenant_id, action, created_at DESC);
 `;
 
 export async function initDb(): Promise<void> {

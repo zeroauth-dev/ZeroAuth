@@ -2,6 +2,8 @@ node_modules
 dist
 dashboard/node_modules
 dashboard/dist
+website/node_modules
+website/build
 .env
 .git
 coverage

@@ -22,6 +22,8 @@ All `/v1/*` endpoints require an API key:
 
 Get your API key: [Quickstart -> Step 1](../getting-started/quickstart.md)
 
+For the reusable Week 1 product core, see [Central API](central-api.md).
+
 ## Response Headers
 
 Every authenticated response includes rate limit info:

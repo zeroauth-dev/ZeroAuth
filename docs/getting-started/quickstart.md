@@ -38,7 +38,34 @@ The server stores only a SHA-256 hash — the raw key is never persisted.
 
 ## Step 2: Make Your First API Call
 
-### Get a Nonce
+### Register a Device
+
+```bash
+curl -X POST https://zeroauth.dev/v1/devices \
+  -H "Authorization: Bearer za_live_YOUR_KEY_HERE" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Front Desk Attendance Unit",
+    "externalId": "iot-blr-hq-01",
+    "locationId": "blr-hq",
+    "batteryLevel": 94
+  }'
+```
+
+### Create an Enrolled User
+
+```bash
+curl -X POST https://zeroauth.dev/v1/users \
+  -H "Authorization: Bearer za_live_YOUR_KEY_HERE" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fullName": "Aditi Sharma",
+    "externalId": "emp-001",
+    "employeeCode": "ZS-001"
+  }'
+```
+
+### Get a Nonce for ZKP
 
 ```bash
 curl https://zeroauth.dev/v1/auth/zkp/nonce \
@@ -79,6 +106,35 @@ curl -X POST https://zeroauth.dev/v1/auth/zkp/verify \
     "publicSignals": ["<commitment>", "<didHash>", "<binding>"],
     "nonce": "8eb8b0db-c143-4e29-8e6c-6c26078ba2c8",
     "timestamp": "2026-03-14T10:30:00.000Z"
+  }'
+```
+
+### Record a Verification Event
+
+```bash
+curl -X POST https://zeroauth.dev/v1/verifications \
+  -H "Authorization: Bearer za_live_YOUR_KEY_HERE" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "USER_UUID",
+    "deviceId": "DEVICE_UUID",
+    "method": "zkp",
+    "result": "pass",
+    "referenceId": "attendance-attempt-1001"
+  }'
+```
+
+### Record Attendance
+
+```bash
+curl -X POST https://zeroauth.dev/v1/attendance \
+  -H "Authorization: Bearer za_live_YOUR_KEY_HERE" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "USER_UUID",
+    "deviceId": "DEVICE_UUID",
+    "verificationId": "VERIFICATION_UUID",
+    "type": "check_in"
   }'
 ```
 
@@ -130,6 +186,7 @@ X-ZeroAuth-Plan: free
 ## Next Steps
 
 - [API Reference](../reference/api-reference.md) — Full endpoint documentation
+- [Central API](../reference/central-api.md) — Devices, users, verifications, attendance, and audit
 - [API Keys Guide](./api-keys.md) — Managing keys, scopes, and environments
 - [Configuration](configuration.md) — Integration options
 - [Architecture](../concepts/architecture.md) — How ZeroAuth works under the hood
