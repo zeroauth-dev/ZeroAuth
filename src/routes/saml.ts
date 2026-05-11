@@ -1,12 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config';
+import { demoAuthOnly } from '../middleware/demo-auth-gate';
 import { issueTokens } from '../services/jwt';
 import { sessionStore } from '../services/session-store';
 import { logger } from '../services/logger';
 import { SAMLProfile, UserSession } from '../types';
 
 const router = Router();
+
+// These routes do NOT validate SAML signatures. See demo-auth-gate.ts.
+router.use(demoAuthOnly);
 
 /**
  * GET /api/auth/saml/login

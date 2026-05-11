@@ -23,12 +23,24 @@ function parseCorsOrigins(): string[] {
   return ['http://localhost:3000', 'http://localhost:5173'];
 }
 
+// Demo-auth gate: the legacy SAML/OIDC routes are not real protocol
+// implementations — they only simulate the assertion exchange. They are off
+// by default in production and must be opted into with ENABLE_DEMO_AUTH=true.
+// In development the gate defaults to on so the existing tests keep running.
+function resolveDemoAuthFlag(): boolean {
+  const raw = process.env.ENABLE_DEMO_AUTH;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return process.env.NODE_ENV !== 'production';
+}
+
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
   apiBaseUrl: process.env.API_BASE_URL ?? 'http://localhost:3000',
   corsOrigins: parseCorsOrigins(),
   trustProxy: process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production',
+  enableDemoAuth: resolveDemoAuthFlag(),
 
   jwt: {
     secret: requireEnv('JWT_SECRET', 'dev-secret-change-me'),

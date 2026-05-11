@@ -5,27 +5,52 @@ import { Tenant, PlanTier, PLAN_LIMITS } from '../types';
 
 /**
  * Hash a password using scrypt (no bcrypt dependency needed).
- * Format: salt:hash (both hex-encoded)
+ * Format: salt:hash (both hex-encoded). 16-byte salt, 64-byte derived key.
  */
 async function hashPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(16).toString('hex');
   return new Promise((resolve, reject) => {
     crypto.scrypt(password, salt, 64, (err, derivedKey) => {
-      if (err) reject(err);
+      if (err) {
+        reject(err);
+        return;
+      }
       resolve(`${salt}:${derivedKey.toString('hex')}`);
     });
   });
 }
 
 /**
- * Verify a password against a stored hash.
+ * Verify a password against a stored `salt:hash` value. Returns false (never
+ * throws) for malformed or corrupted hashes. Comparison is constant-time when
+ * the two buffers are the same length; if a stored hash has been truncated /
+ * tampered with we return false outright to avoid `timingSafeEqual`'s
+ * `RangeError` on length mismatch.
  */
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [salt, hash] = stored.split(':');
+  if (typeof stored !== 'string') return false;
+  const colonIndex = stored.indexOf(':');
+  if (colonIndex < 0) return false;
+
+  const salt = stored.slice(0, colonIndex);
+  const hashHex = stored.slice(colonIndex + 1);
+  if (!salt || !/^[0-9a-fA-F]+$/.test(hashHex) || hashHex.length % 2 !== 0) {
+    return false;
+  }
+
+  const expected = Buffer.from(hashHex, 'hex');
+
   return new Promise((resolve, reject) => {
-    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
-      if (err) reject(err);
-      resolve(crypto.timingSafeEqual(Buffer.from(hash, 'hex'), derivedKey));
+    crypto.scrypt(password, salt, expected.length, (err, derivedKey) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      if (derivedKey.length !== expected.length) {
+        resolve(false);
+        return;
+      }
+      resolve(crypto.timingSafeEqual(expected, derivedKey));
     });
   });
 }

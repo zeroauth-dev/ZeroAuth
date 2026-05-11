@@ -2,12 +2,17 @@ import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import { config } from '../config';
+import { demoAuthOnly } from '../middleware/demo-auth-gate';
 import { issueTokens } from '../services/jwt';
 import { sessionStore } from '../services/session-store';
 import { logger } from '../services/logger';
 import { UserSession } from '../types';
 
 const router = Router();
+
+// These routes do NOT exchange the auth code with a real IdP or validate
+// the ID token. See demo-auth-gate.ts.
+router.use(demoAuthOnly);
 
 // In-memory state store for CSRF protection during OIDC flow
 const pendingStates = new Map<string, { codeVerifier: string; createdAt: number }>();
@@ -132,15 +137,17 @@ router.post('/callback', (req: Request, res: Response) => {
  * Returns OIDC discovery document for ZeroAuth as an OIDC-compatible provider.
  */
 router.get('/.well-known/openid-configuration', (_req: Request, res: Response) => {
+  // NOTE: jwks_uri is intentionally omitted — ZeroAuth currently signs
+  // session JWTs with HS256 (symmetric secret). Until we publish a JWKS
+  // endpoint with the corresponding public keys we should not advertise one.
   res.json({
     issuer: config.apiBaseUrl,
     authorization_endpoint: `${config.apiBaseUrl}/api/auth/oidc/authorize`,
     token_endpoint: `${config.apiBaseUrl}/api/auth/oidc/callback`,
     userinfo_endpoint: `${config.apiBaseUrl}/api/auth/me`,
-    jwks_uri: `${config.apiBaseUrl}/api/auth/oidc/jwks`,
     response_types_supported: ['code'],
     subject_types_supported: ['public'],
-    id_token_signing_alg_values_supported: ['RS256', 'HS256'],
+    id_token_signing_alg_values_supported: ['HS256'],
     scopes_supported: ['openid', 'email', 'profile'],
     token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
     code_challenge_methods_supported: ['S256'],
