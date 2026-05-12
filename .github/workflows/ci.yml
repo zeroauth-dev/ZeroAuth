@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - dev
   workflow_dispatch:
 
 concurrency:
@@ -39,14 +40,26 @@ jobs:
       - name: Install website dependencies
         run: npm --prefix website ci
 
-      - name: Type check
+      - name: Type check (backend)
         run: npx tsc --noEmit
 
-      - name: Lint
+      - name: Lint (backend)
         run: npm run lint --if-present
 
-      - name: Run tests
+      - name: Run tests (backend)
         run: npm test
+
+      - name: Type check (dashboard)
+        run: npm --prefix dashboard run typecheck
+
+      - name: Lint (dashboard)
+        run: npm --prefix dashboard run lint
+
+      - name: Run tests (dashboard)
+        run: npm --prefix dashboard test
+
+      - name: Dep-trail audit (DP6 advisory)
+        run: ./scripts/check-dep-trail.sh advisory
 
       - name: Build backend, dashboard, and docs
         run: npm run build:all
