@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+/* ZeroAuth dashboard design tokens (Tailwind v4 CSS-first config). */
+@theme {
+  --color-bg: #0a0b10;
+  --color-bg-raised: #11121a;
+  --color-bg-surface: #161722;
+  --color-border: #1f2133;
+  --color-border-subtle: #181928;
+  --color-text: #e8e9ed;
+  --color-text-secondary: #8b8d9e;
+  --color-text-dim: #555770;
+  --color-brand: #4285F4;
+  --color-brand-dark: #0B57D0;
+  --color-success: #34d399;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Consolas", monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Scrollbar — subtle, brand-colored on hover. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 8px;
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-dim);
+}

@@ -6,8 +6,29 @@ import { logger } from '../services/logger';
 import { createTenant, authenticateTenant, getTenantById, getTenantByEmail } from '../services/tenants';
 import { createApiKey, listApiKeys, revokeApiKey, countActiveKeys } from '../services/api-keys';
 import { getUsageSummary, getRecentCalls, getCurrentMonthUsage } from '../services/usage';
-import { getConsoleOverview, listAuditEvents, recordAuditEvent } from '../services/platform';
-import { ApiKeyEnvironment, ApiScope } from '../types';
+import {
+  getConsoleOverview,
+  listAuditEvents,
+  recordAuditEvent,
+  createDevice,
+  listDevices,
+  updateDevice,
+  createTenantUser,
+  listTenantUsers,
+  updateTenantUser,
+  listVerificationEvents,
+  listAttendanceEvents,
+} from '../services/platform';
+import {
+  ApiKeyEnvironment,
+  ApiScope,
+  AttendanceEventType,
+  AttendanceResult,
+  DeviceStatus,
+  TenantUserStatus,
+  VerificationMethod,
+  VerificationResult,
+} from '../types';
 
 const router = Router();
 
@@ -388,6 +409,216 @@ router.get('/audit', requireConsoleAuth, async (req: Request, res: Response) => 
     res.json({ environment, events });
   } catch {
     res.status(500).json({ error: 'Failed to fetch audit events.' });
+  }
+});
+
+// ─── Console proxy endpoints for the platform domain ──────────────
+//
+// These exist so the dashboard can manage devices, users, verifications,
+// and attendance using the console JWT — without forcing the operator to
+// mint a tenant API key. They are thin wrappers over `platform.ts` that
+// resolve the tenant from the JWT, accept `environment=live|test` from
+// the query (defaulting to live), and pass `actorId=null` since these are
+// operator actions (no api_key_id; audit rows record `actor_type=console`).
+
+function parseEnv(value: unknown): ApiKeyEnvironment {
+  return value === 'test' ? 'test' : 'live';
+}
+
+const DEVICE_STATUSES: DeviceStatus[] = ['active', 'inactive', 'retired'];
+const USER_STATUSES: TenantUserStatus[] = ['active', 'inactive'];
+const VERIFICATION_METHODS: VerificationMethod[] = ['zkp', 'fingerprint', 'face', 'depth', 'saml', 'oidc', 'manual'];
+const VERIFICATION_RESULTS: VerificationResult[] = ['pass', 'fail', 'challenge'];
+const ATTENDANCE_TYPES: AttendanceEventType[] = ['check_in', 'check_out'];
+const ATTENDANCE_RESULTS: AttendanceResult[] = ['accepted', 'rejected'];
+
+// ─── Devices ──────────────────────────────────────────────────────
+
+router.get('/devices', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = parseEnv(req.query.environment);
+    const status = req.query.status as DeviceStatus | undefined;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    if (status && !DEVICE_STATUSES.includes(status)) {
+      res.status(400).json({ error: 'invalid_status_filter' });
+      return;
+    }
+    const devices = await listDevices(tenantId, environment, { status, limit });
+    res.json({ environment, devices });
+  } catch {
+    res.status(500).json({ error: 'device_list_failed' });
+  }
+});
+
+router.post('/devices', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = parseEnv(req.body.environment ?? req.query.environment);
+    const { name, externalId, locationId, batteryLevel, metadata } = req.body;
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      res.status(400).json({ error: 'invalid_request', message: 'name is required' });
+      return;
+    }
+    if (batteryLevel !== undefined && (!Number.isInteger(batteryLevel) || batteryLevel < 0 || batteryLevel > 100)) {
+      res.status(400).json({ error: 'invalid_request', message: 'batteryLevel must be an integer between 0 and 100' });
+      return;
+    }
+    const device = await createDevice(tenantId, environment, { name, externalId, locationId, batteryLevel, metadata });
+    res.status(201).json({ environment, device });
+  } catch (err) {
+    if ((err as Error).message.includes('duplicate key')) {
+      res.status(409).json({ error: 'device_external_id_taken' });
+      return;
+    }
+    res.status(500).json({ error: 'device_create_failed', message: (err as Error).message });
+  }
+});
+
+router.patch('/devices/:deviceId', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = parseEnv(req.body.environment ?? req.query.environment);
+    const { deviceId } = req.params;
+    const { name, locationId, batteryLevel, status, metadata, lastSeenAt } = req.body;
+    if (status && !DEVICE_STATUSES.includes(status)) {
+      res.status(400).json({ error: 'invalid_status' });
+      return;
+    }
+    if (batteryLevel !== undefined && (!Number.isInteger(batteryLevel) || batteryLevel < 0 || batteryLevel > 100)) {
+      res.status(400).json({ error: 'invalid_battery_level' });
+      return;
+    }
+    const device = await updateDevice(tenantId, environment, deviceId, { name, locationId, batteryLevel, status, metadata, lastSeenAt });
+    if (!device) {
+      res.status(404).json({ error: 'device_not_found' });
+      return;
+    }
+    res.json({ environment, device });
+  } catch (err) {
+    res.status(500).json({ error: 'device_update_failed', message: (err as Error).message });
+  }
+});
+
+// ─── Users ────────────────────────────────────────────────────────
+
+router.get('/users', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = parseEnv(req.query.environment);
+    const status = req.query.status as TenantUserStatus | undefined;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    if (status && !USER_STATUSES.includes(status)) {
+      res.status(400).json({ error: 'invalid_status_filter' });
+      return;
+    }
+    const users = await listTenantUsers(tenantId, environment, { status, limit });
+    res.json({ environment, users });
+  } catch {
+    res.status(500).json({ error: 'user_list_failed' });
+  }
+});
+
+router.post('/users', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = parseEnv(req.body.environment ?? req.query.environment);
+    const { fullName, externalId, email, phone, employeeCode, primaryDeviceId, metadata } = req.body;
+    if (!fullName || typeof fullName !== 'string' || fullName.trim().length === 0) {
+      res.status(400).json({ error: 'invalid_request', message: 'fullName is required' });
+      return;
+    }
+    const user = await createTenantUser(tenantId, environment, {
+      fullName, externalId, email, phone, employeeCode, primaryDeviceId, metadata,
+    });
+    res.status(201).json({ environment, user });
+  } catch (err) {
+    const message = (err as Error).message;
+    if (message.includes('duplicate key')) {
+      res.status(409).json({ error: 'user_external_id_taken' });
+      return;
+    }
+    if (message.includes('Device not found')) {
+      res.status(404).json({ error: 'device_not_found', message });
+      return;
+    }
+    res.status(500).json({ error: 'user_create_failed', message });
+  }
+});
+
+router.patch('/users/:userId', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = parseEnv(req.body.environment ?? req.query.environment);
+    const { userId } = req.params;
+    const { fullName, email, phone, employeeCode, status, primaryDeviceId, metadata } = req.body;
+    if (status && !USER_STATUSES.includes(status)) {
+      res.status(400).json({ error: 'invalid_status' });
+      return;
+    }
+    const user = await updateTenantUser(tenantId, environment, userId, {
+      fullName, email, phone, employeeCode, status, primaryDeviceId, metadata,
+    });
+    if (!user) {
+      res.status(404).json({ error: 'user_not_found' });
+      return;
+    }
+    res.json({ environment, user });
+  } catch (err) {
+    const message = (err as Error).message;
+    if (message.includes('Device not found')) {
+      res.status(404).json({ error: 'device_not_found', message });
+      return;
+    }
+    res.status(500).json({ error: 'user_update_failed', message });
+  }
+});
+
+// ─── Verifications (read-only on the console) ─────────────────────
+
+router.get('/verifications', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = parseEnv(req.query.environment);
+    const method = req.query.method as VerificationMethod | undefined;
+    const result = req.query.result as VerificationResult | undefined;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    if (method && !VERIFICATION_METHODS.includes(method)) {
+      res.status(400).json({ error: 'invalid_method_filter' });
+      return;
+    }
+    if (result && !VERIFICATION_RESULTS.includes(result)) {
+      res.status(400).json({ error: 'invalid_result_filter' });
+      return;
+    }
+    const verifications = await listVerificationEvents(tenantId, environment, { method, result, limit });
+    res.json({ environment, verifications });
+  } catch {
+    res.status(500).json({ error: 'verification_list_failed' });
+  }
+});
+
+// ─── Attendance (read-only on the console) ────────────────────────
+
+router.get('/attendance', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = parseEnv(req.query.environment);
+    const type = req.query.type as AttendanceEventType | undefined;
+    const result = req.query.result as AttendanceResult | undefined;
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    if (type && !ATTENDANCE_TYPES.includes(type)) {
+      res.status(400).json({ error: 'invalid_type_filter' });
+      return;
+    }
+    if (result && !ATTENDANCE_RESULTS.includes(result)) {
+      res.status(400).json({ error: 'invalid_result_filter' });
+      return;
+    }
+    const attendance = await listAttendanceEvents(tenantId, environment, { type, result, limit });
+    res.json({ environment, attendance });
+  } catch {
+    res.status(500).json({ error: 'attendance_list_failed' });
   }
 });
 

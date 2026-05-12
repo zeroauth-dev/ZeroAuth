@@ -32,6 +32,11 @@ coverage/
 *.log
 docs/missfont.log
 
+# ─── Playwright ─────────────────────────────────────────
+dashboard/playwright-report/
+dashboard/test-results/
+dashboard/.playwright/
+
 # ─── OS / editor ────────────────────────────────────────
 .DS_Store
 .vscode/
