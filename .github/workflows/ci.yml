@@ -137,6 +137,20 @@ jobs:
       - name: Install website dependencies
         run: npm --prefix website ci
 
+      - name: Diagnose TypeScript resolution
+        run: |
+          echo "=== which tsc + version ==="
+          which tsc || true
+          npx tsc --version
+          echo "=== node_modules/typescript/package.json version ==="
+          node -p "require('./node_modules/typescript/package.json').version"
+          echo "=== ignoreDeprecations valid values ==="
+          node -e "
+            const ts = require('typescript');
+            const v = ts.version;
+            console.log('TS api reports version:', v);
+          "
+
       - name: Build everything
         run: npm run build:all
 
