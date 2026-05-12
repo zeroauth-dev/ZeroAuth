@@ -21,10 +21,14 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Playwright specs live in e2e/ and use a different test API; vitest
+    // would try to evaluate them as unit tests otherwise.
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    exclude: ['node_modules', 'dist', 'e2e/**', 'playwright-report/**', 'test-results/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
-      exclude: ['node_modules', 'dist', '**/*.test.ts', '**/*.test.tsx'],
+      exclude: ['node_modules', 'dist', 'e2e/**', '**/*.test.ts', '**/*.test.tsx'],
     },
   },
 });
