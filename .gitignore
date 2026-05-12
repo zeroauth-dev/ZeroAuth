@@ -6,6 +6,12 @@
 PRODUCTION_CREDENTIALS.md
 GITHUB_SECRETS.md
 
+# Internal operator + development prompt library — do not publish.
+# This is the founder/senior-engineer playbook (patent numbers, pricing,
+# buyer-specific demos, brainstorm transcripts).
+zeroauth_prompt_suite/
+ZeroAuth_Prompt_Suite.zip
+
 # ─── Dependencies ───────────────────────────────────────
 node_modules/
 dashboard/node_modules/
