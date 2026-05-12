@@ -37,4 +37,12 @@ docs/missfont.log
 .vscode/
 .idea/
 *.swp
-.claude/
+
+# Per-developer Claude Code settings stay private, but the project-shared
+# skills, agents, hooks, and slash commands are tracked so every contributor
+# loads them on session start (DP3).
+.claude/*
+!.claude/skills/
+!.claude/agents/
+!.claude/hooks/
+!.claude/commands/
