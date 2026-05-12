@@ -33,15 +33,17 @@ collect_deps() {
   "
 }
 
-# Has an ADR file (either grandfather or per-dep)?
+# Has an ADR file (either grandfather, per-dep file, or named in any ADR body)?
 has_adr() {
   local dep="$1"
-  if [[ -f "$ADR_DIR/0000-grandfather-initial-deps.md" ]]; then
-    if grep -Fq -- "- \`$dep\`" "$ADR_DIR/0000-grandfather-initial-deps.md"; then
-      return 0
-    fi
-  fi
+  # Per-dep ADR by filename convention: NNNN-adopt-<dep>.md
   if find "$ADR_DIR" -maxdepth 1 -name "*adopt-${dep//\//-}*.md" 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  # Bundled ADR that lists the dep in its body as a backtick'd table cell or
+  # bullet (e.g. `- \`<dep>\`` or `| \`<dep>\` |`). Covers ADR-0000 (grandfather)
+  # AND ADR-0002 (dashboard stack adoption) without growing the file count.
+  if grep -Frq -- "\`$dep\`" "$ADR_DIR" 2>/dev/null; then
     return 0
   fi
   return 1
