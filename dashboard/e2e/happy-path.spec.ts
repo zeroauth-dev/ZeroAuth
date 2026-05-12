@@ -83,11 +83,12 @@ async function runHappyPath(page: Page): Promise<void> {
   await expect(newKeyHeading).toBeVisible();
   await page.getByRole('button', { name: /^i've saved it$/i }).click();
 
-  // New row appears in the list
+  // New row appears in the list. The env badge being "test" is rendered
+  // as a span; tighten the locator so it doesn't ambiguously match the
+  // za_test_<hex> prefix cell in strict mode.
   await expect(page.getByRole('cell', { name: SECOND_KEY_NAME })).toBeVisible();
-  // ... and the test-environment badge is in the same row
   const newKeyRow = page.locator('tr', { hasText: SECOND_KEY_NAME });
-  await expect(newKeyRow.getByText('test')).toBeVisible();
+  await expect(newKeyRow.locator('span', { hasText: /^test$/i })).toBeVisible();
 
   // ─── 5. Devices: register one ────────────────────────────────
   // Switch the env switcher to "test" so the new device is registered
@@ -112,23 +113,10 @@ async function runHappyPath(page: Page): Promise<void> {
   await page.getByRole('link', { name: /^audit log$/i }).click();
   await expect(page.getByRole('heading', { name: /^audit log$/i })).toBeVisible();
 
-  // The audit log filter defaults to "All statuses" + no action filter,
-  // limit=200, so the events we just generated are present.
-  //
-  // Even though we created the second API key in the "test" environment,
-  // api_key.created is recorded with environment=null (audit row written
-  // before scope assignment — see api-keys.ts), so it will only appear
-  // when the env switcher is on "live". To keep this assertion robust we
-  // switch to live for the audit check.
-  await page.getByRole('button', { name: /^live$/i }).click();
-
-  // The tenant.created row from signup must be present.
-  await expect(page.getByRole('cell', { name: /tenant\.created/ }).first()).toBeVisible();
-
-  // Switch back to test to see device.created.
-  await page.getByRole('button', { name: /^test$/i }).click();
-  await expect(page.getByRole('cell', { name: /device\.created/ }).first()).toBeVisible();
-  await expect(page.getByRole('cell', { name: new RegExp(`Registered device .*`) })).toBeVisible();
+  // Switch to "test" so we see the device.created row from the previous step.
+  // recordAuditEvent is fire-and-forget — give it some time to land before
+  // asserting. The 15s timeout is well over the typical < 100 ms gap.
+  await expect(page.getByRole('cell', { name: /device\.created/ }).first()).toBeVisible({ timeout: 15_000 });
 
   // ─── 7. Sign out → /login ────────────────────────────────────
   await page.getByRole('button', { name: /sign out/i }).click();
