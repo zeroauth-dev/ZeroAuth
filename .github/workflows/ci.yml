@@ -85,33 +85,11 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+    # NOTE: NODE_ENV is deliberately NOT set at the job level — setting
+    # NODE_ENV=production makes `npm ci` skip devDependencies (typescript,
+    # vitest, eslint, etc.), and the build then can't find tsc. We pass
+    # the server-runtime env only in the "Start backend" step below.
     env:
-      NODE_ENV: production
-      PORT: 3000
-      API_BASE_URL: http://localhost:3000
-      CORS_ORIGINS: http://localhost:3000
-      TRUST_PROXY: 'false'
-      JWT_SECRET: ci-e2e-jwt-secret-not-used-in-production-environments-only
-      SESSION_SECRET: ci-e2e-session-secret-not-used-in-production-environments-only
-      ADMIN_API_KEY: ci-e2e-admin-key
-      ENABLE_DEMO_AUTH: 'false'
-      LOG_LEVEL: warn
-      BLOCKCHAIN_RPC_URL: https://sepolia.base.org
-      BLOCKCHAIN_CHAIN_ID: '84532'
-      BLOCKCHAIN_PRIVATE_KEY: ''
-      DID_REGISTRY_ADDRESS: ''
-      VERIFIER_CONTRACT_ADDRESS: ''
-      VERIFY_ON_CHAIN: 'false'
-      ZKP_WASM_PATH: circuits/build/identity_proof_js/identity_proof.wasm
-      ZKP_ZKEY_PATH: circuits/build/circuit_final.zkey
-      ZKP_VKEY_PATH: circuits/build/verification_key.json
-      USE_REDIS_SESSIONS: 'false'
-      REDIS_URL: redis://localhost:6379
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: '5432'
-      POSTGRES_DB: zeroauth_e2e
-      POSTGRES_USER: zeroauth
-      POSTGRES_PASSWORD: zeroauth-e2e
       E2E_BASE_URL: http://localhost:3000
 
     steps:
@@ -137,20 +115,6 @@ jobs:
       - name: Install website dependencies
         run: npm --prefix website ci
 
-      - name: Diagnose TypeScript resolution
-        run: |
-          echo "=== which tsc + version ==="
-          which tsc || true
-          npx tsc --version
-          echo "=== node_modules/typescript/package.json version ==="
-          node -p "require('./node_modules/typescript/package.json').version"
-          echo "=== ignoreDeprecations valid values ==="
-          node -e "
-            const ts = require('typescript');
-            const v = ts.version;
-            console.log('TS api reports version:', v);
-          "
-
       - name: Build everything
         run: npm run build:all
 
@@ -164,6 +128,33 @@ jobs:
         run: npm --prefix dashboard run e2e:install
 
       - name: Start backend (background)
+        env:
+          NODE_ENV: production
+          PORT: 3000
+          API_BASE_URL: http://localhost:3000
+          CORS_ORIGINS: http://localhost:3000
+          TRUST_PROXY: 'false'
+          JWT_SECRET: ci-e2e-jwt-secret-not-used-in-production-environments-only
+          SESSION_SECRET: ci-e2e-session-secret-not-used-in-production-environments-only
+          ADMIN_API_KEY: ci-e2e-admin-key
+          ENABLE_DEMO_AUTH: 'false'
+          LOG_LEVEL: warn
+          BLOCKCHAIN_RPC_URL: https://sepolia.base.org
+          BLOCKCHAIN_CHAIN_ID: '84532'
+          BLOCKCHAIN_PRIVATE_KEY: ''
+          DID_REGISTRY_ADDRESS: ''
+          VERIFIER_CONTRACT_ADDRESS: ''
+          VERIFY_ON_CHAIN: 'false'
+          ZKP_WASM_PATH: circuits/build/identity_proof_js/identity_proof.wasm
+          ZKP_ZKEY_PATH: circuits/build/circuit_final.zkey
+          ZKP_VKEY_PATH: circuits/build/verification_key.json
+          USE_REDIS_SESSIONS: 'false'
+          REDIS_URL: redis://localhost:6379
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: '5432'
+          POSTGRES_DB: zeroauth_e2e
+          POSTGRES_USER: zeroauth
+          POSTGRES_PASSWORD: zeroauth-e2e
         run: |
           node dist/server.js > /tmp/server.log 2>&1 &
           echo $! > /tmp/server.pid
