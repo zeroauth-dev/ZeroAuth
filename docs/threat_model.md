@@ -96,6 +96,28 @@
 | **Mitigation** | Key is in `/opt/zeroauth/.env` only (not in git). Key was rotated once after the May 2026 review (covered in commit history). `npm run wallet:rotate` exists and is documented. Long-term: move to a multisig owner. |
 | **Test status** | Not applicable (operational concern). |
 
+### A-09 — Console JWT theft via XSS in the dashboard
+
+| | |
+|---|---|
+| **Class** | Information disclosure / EoP (STRIDE: I + E) |
+| **Surface** | Anything rendered inside the dashboard SPA at `/dashboard/*` |
+| **Description** | The console JWT lives in client memory and is replayed on every API call. If an XSS payload executes in the SPA, the attacker reads the token from memory and uses it from anywhere. |
+| **Mitigation** | (a) Strict CSP from Helmet — no `unsafe-eval`, no inline scripts beyond the existing landing-page allowance. (b) React's default escape protects against most reflected XSS. (c) **Never** introduce `dangerouslySetInnerHTML` without an ADR. (d) The console JWT is short-lived (24h) and revocable by tenant suspension. |
+| **Test status** | CSP header presence is asserted in `tests/health.test.ts` (indirectly via helmet output). **Missing:** an integration test that asserts no inline `<script>` blocks land in the dashboard build output and an integration test for `dangerouslySetInnerHTML` absence. |
+| **Audit signal** | None today. Open: log an `auth.token_reuse` event when the same `jti` is replayed from a new IP within a short window. |
+
+### A-10 — Dashboard requests leaking another tenant's data
+
+| | |
+|---|---|
+| **Class** | Elevation of privilege (STRIDE: E) |
+| **Surface** | Every `/api/console/*` route that returns tenant-owned rows |
+| **Description** | The dashboard fetches from `/api/console/overview`, `/api/console/audit`, `/api/console/usage`, `/api/console/keys`. If any of those handlers infers tenant from the request body or query rather than the JWT subject, an attacker with one valid console JWT can read another tenant's data by passing a target `tenantId`. |
+| **Mitigation** | Every console route reads `tenantId` from `(req as any).console.tenantId` (set by `verifyConsoleToken`), never from the body or query. Reviewers must check this on every PR that touches `src/routes/console.ts` or adds a new console endpoint. |
+| **Test status** | **Missing:** integration test that constructs a JWT for tenant A and probes every console route with a body / query that names tenant B's ID. |
+| **Audit signal** | All console writes log to `audit_events` already; reads don't. Open: emit `console.read` audit events for high-value reads (audit log export, usage breakdown). |
+
 ### A-08 — Inline event handler bypasses strict CSP
 
 | | |

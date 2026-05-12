@@ -45,7 +45,8 @@ Live production: <https://zeroauth.dev>. VPS at `104.207.143.14` under user `zer
 - **Error handling:** Routes return JSON `{ error: '<machine_code>', message: '<human>' }` with appropriate HTTP status. Sensitive details (DB errors, internal trace) stay in Winston, not in the response.
 - **Tests:** Jest. Unit + request-level tests in `tests/*.test.ts`. Currently 50/50 passing. Every new endpoint adds a request-level test before merge.
 - **Smart contracts:** Solidity 0.8 via Hardhat; deployed to Base Sepolia (chain 84532).
-- **Frontend:** React 19 + Vite for the dashboard; Docusaurus 3 for the docs site.
+- **Frontend (developer console / dashboard):** React 19 + Vite 7 + TypeScript strict. Routing via `react-router-dom`. Server state via `@tanstack/react-query`. Styling via Tailwind CSS + a small set of hand-written primitives (`Button`, `Input`, `Card`, `Table`, `Badge`, `Modal`, `Toast`). Unit tests with vitest + @testing-library/react. Lives in `dashboard/`, served as static files by Express at `/dashboard`. The suite's `dashboard_CLAUDE.md` calls for Next.js 15 — see [adr/0002-dashboard-stack-vite-not-nextjs.md](adr/0002-dashboard-stack-vite-not-nextjs.md) for why we deferred that migration.
+- **Frontend (marketing site):** Docusaurus 3 for the docs site at `/docs`; vanilla HTML/CSS for the landing page at `/`.
 - **Commits:** Plain English subject + body explaining "why". Conventional Commits not enforced.
 
 ## Critical language rules (enforce in PR review)
