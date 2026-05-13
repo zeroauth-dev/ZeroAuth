@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { config } from '../config';
 import { logger } from '../services/logger';
@@ -73,20 +74,62 @@ const authLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
 });
 
+// Per-tenant rate limit on authenticated console WRITE endpoints (issue #26
+// F-4). A stolen JWT can otherwise burn through the global 300/15min limiter
+// before any other tenant feels it. Keyed on the console.tenantId, not the
+// IP, so the limiter actually disincentivises the attacker class we care
+// about. Reads (GET) are unaffected.
+const consoleWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const ctx = (req as { console?: { tenantId?: string } }).console;
+    return ctx?.tenantId ?? req.ip ?? 'anonymous';
+  },
+  message: {
+    error: 'tenant_write_rate_limited',
+    message: 'Too many write requests for this tenant in the last 15 minutes. Pace your console actions or contact support.',
+  },
+  skip: () => process.env.NODE_ENV === 'test',
+});
+
 // ─── Helper: Console JWT (for developer dashboard sessions) ──────
+//
+// Tokens carry:
+//   - `aud: 'zeroauth-console'`  — verified explicitly; a console JWT must
+//     never be accepted on a /v1 endpoint and vice versa.
+//   - `iss: 'zeroauth-console'`  — issuer.
+//   - `jti: <uuid v4>`           — per-token id, makes server-side
+//     revocation possible once the Redis-backed jti allow-list lands
+//     (open ADR — see issue #26 F-5).
+//   - `type: 'console'`          — historical marker; kept until the
+//     dashboard's stored tokens have rotated past the 24h window.
+
+const CONSOLE_JWT_ISSUER = 'zeroauth-console';
+const CONSOLE_JWT_AUDIENCE = 'zeroauth-console';
 
 function issueConsoleToken(tenantId: string, email: string): string {
   return jwt.sign(
     { tenantId, email, type: 'console' },
     config.jwt.secret,
-    { expiresIn: '24h', issuer: 'zeroauth-console' },
+    {
+      expiresIn: '24h',
+      issuer: CONSOLE_JWT_ISSUER,
+      audience: CONSOLE_JWT_AUDIENCE,
+      jwtid: randomUUID(),
+    },
   );
 }
 
-function verifyConsoleToken(token: string): { tenantId: string; email: string } {
-  const payload = jwt.verify(token, config.jwt.secret, { issuer: 'zeroauth-console' }) as any;
+function verifyConsoleToken(token: string): { tenantId: string; email: string; jti?: string } {
+  const payload = jwt.verify(token, config.jwt.secret, {
+    issuer: CONSOLE_JWT_ISSUER,
+    audience: CONSOLE_JWT_AUDIENCE,
+  }) as any;
   if (payload.type !== 'console') throw new Error('Not a console token');
-  return { tenantId: payload.tenantId, email: payload.email };
+  return { tenantId: payload.tenantId, email: payload.email, jti: payload.jti };
 }
 
 /** Middleware: authenticate console session */
@@ -119,7 +162,7 @@ router.post('/signup', authLimiter, async (req: Request, res: Response) => {
     const { email, password, companyName } = req.body;
 
     if (!email || !password) {
-      res.status(400).json({ error: 'Email and password are required.' });
+      res.status(400).json({ error: 'invalid_request', message: 'Email and password are required.' });
       return;
     }
 
@@ -129,7 +172,13 @@ router.post('/signup', authLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    // Check existing
+    // F-2 (issue #26): email-enumeration via the 201/409 status-code split
+    // is a real Medium finding, but the **byte-identical** fix requires
+    // email infrastructure (return 202 always, send verification link
+    // out-of-band). We don't have email infra yet — that's tracked as a
+    // separate ADR. Until then we keep 409 and accept the leak; the
+    // interim mitigation (uniform 400) was rejected because it ALSO leaks
+    // (existing → 400, fresh → 201). See issue #26 F-2 — left open.
     const existing = await getTenantByEmail(email);
     if (existing) {
       res.status(409).json({ error: 'email_taken', message: 'An account with this email already exists.' });
@@ -201,7 +250,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      res.status(400).json({ error: 'Email and password are required.' });
+      res.status(400).json({ error: 'invalid_request', message: 'Email and password are required.' });
       return;
     }
 
@@ -252,7 +301,7 @@ router.get('/keys', requireConsoleAuth, async (req: Request, res: Response) => {
  * Create a new API key.
  * Body: { name?, environment?, scopes? }
  */
-router.post('/keys', requireConsoleAuth, async (req: Request, res: Response) => {
+router.post('/keys', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
   try {
     const { tenantId } = (req as any).console;
 
@@ -293,7 +342,7 @@ router.post('/keys', requireConsoleAuth, async (req: Request, res: Response) => 
  *
  * Revoke an API key. Irreversible.
  */
-router.delete('/keys/:keyId', requireConsoleAuth, async (req: Request, res: Response) => {
+router.delete('/keys/:keyId', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
   try {
     const { tenantId } = (req as any).console;
     const { keyId } = req.params;
@@ -404,7 +453,9 @@ router.get('/audit', requireConsoleAuth, async (req: Request, res: Response) => 
     const environment = (req.query.environment === 'test' ? 'test' : 'live') as ApiKeyEnvironment;
     const action = typeof req.query.action === 'string' ? req.query.action : undefined;
     const status = req.query.status === 'failure' ? 'failure' : req.query.status === 'success' ? 'success' : undefined;
-    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    let limit: number | undefined;
+    try { limit = parseLimit(req.query.limit); }
+    catch (e) { res.status(400).json({ error: 'invalid_limit', message: (e as Error).message }); return; }
     const events = await listAuditEvents(tenantId, environment, { action, status, limit });
     res.json({ environment, events });
   } catch {
@@ -425,6 +476,24 @@ function parseEnv(value: unknown): ApiKeyEnvironment {
   return value === 'test' ? 'test' : 'live';
 }
 
+/**
+ * Parse a `?limit=` query value into a bounded integer.
+ *
+ * Returns `undefined` when the value is missing (service layer applies its
+ * own default + sanitization). Returns the parsed value when it is a valid
+ * positive integer ≤ 1000. Throws `RangeError` for anything else (NaN,
+ * negative, zero, > 1000). Callers must catch and respond 400 — see F-6 in
+ * issue #26.
+ */
+function parseLimit(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const parsed = parseInt(String(raw), 10);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 1000) {
+    throw new RangeError('limit must be an integer between 1 and 1000');
+  }
+  return parsed;
+}
+
 const DEVICE_STATUSES: DeviceStatus[] = ['active', 'inactive', 'retired'];
 const USER_STATUSES: TenantUserStatus[] = ['active', 'inactive'];
 const VERIFICATION_METHODS: VerificationMethod[] = ['zkp', 'fingerprint', 'face', 'depth', 'saml', 'oidc', 'manual'];
@@ -439,7 +508,9 @@ router.get('/devices', requireConsoleAuth, async (req: Request, res: Response) =
     const { tenantId } = (req as any).console;
     const environment = parseEnv(req.query.environment);
     const status = req.query.status as DeviceStatus | undefined;
-    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    let limit: number | undefined;
+    try { limit = parseLimit(req.query.limit); }
+    catch (e) { res.status(400).json({ error: 'invalid_limit', message: (e as Error).message }); return; }
     if (status && !DEVICE_STATUSES.includes(status)) {
       res.status(400).json({ error: 'invalid_status_filter' });
       return;
@@ -451,9 +522,9 @@ router.get('/devices', requireConsoleAuth, async (req: Request, res: Response) =
   }
 });
 
-router.post('/devices', requireConsoleAuth, async (req: Request, res: Response) => {
+router.post('/devices', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
   try {
-    const { tenantId } = (req as any).console;
+    const { tenantId, email } = (req as any).console;
     const environment = parseEnv(req.body.environment ?? req.query.environment);
     const { name, externalId, locationId, batteryLevel, metadata } = req.body;
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
@@ -464,7 +535,12 @@ router.post('/devices', requireConsoleAuth, async (req: Request, res: Response) 
       res.status(400).json({ error: 'invalid_request', message: 'batteryLevel must be an integer between 0 and 100' });
       return;
     }
-    const device = await createDevice(tenantId, environment, { name, externalId, locationId, batteryLevel, metadata });
+    const device = await createDevice(
+      tenantId,
+      environment,
+      { name, externalId, locationId, batteryLevel, metadata },
+      { type: 'console', id: tenantId, email },
+    );
     res.status(201).json({ environment, device });
   } catch (err) {
     if ((err as Error).message.includes('duplicate key')) {
@@ -475,9 +551,9 @@ router.post('/devices', requireConsoleAuth, async (req: Request, res: Response) 
   }
 });
 
-router.patch('/devices/:deviceId', requireConsoleAuth, async (req: Request, res: Response) => {
+router.patch('/devices/:deviceId', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
   try {
-    const { tenantId } = (req as any).console;
+    const { tenantId, email } = (req as any).console;
     const environment = parseEnv(req.body.environment ?? req.query.environment);
     const { deviceId } = req.params;
     const { name, locationId, batteryLevel, status, metadata, lastSeenAt } = req.body;
@@ -489,7 +565,13 @@ router.patch('/devices/:deviceId', requireConsoleAuth, async (req: Request, res:
       res.status(400).json({ error: 'invalid_battery_level' });
       return;
     }
-    const device = await updateDevice(tenantId, environment, deviceId, { name, locationId, batteryLevel, status, metadata, lastSeenAt });
+    const device = await updateDevice(
+      tenantId,
+      environment,
+      deviceId,
+      { name, locationId, batteryLevel, status, metadata, lastSeenAt },
+      { type: 'console', id: tenantId, email },
+    );
     if (!device) {
       res.status(404).json({ error: 'device_not_found' });
       return;
@@ -507,7 +589,9 @@ router.get('/users', requireConsoleAuth, async (req: Request, res: Response) => 
     const { tenantId } = (req as any).console;
     const environment = parseEnv(req.query.environment);
     const status = req.query.status as TenantUserStatus | undefined;
-    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    let limit: number | undefined;
+    try { limit = parseLimit(req.query.limit); }
+    catch (e) { res.status(400).json({ error: 'invalid_limit', message: (e as Error).message }); return; }
     if (status && !USER_STATUSES.includes(status)) {
       res.status(400).json({ error: 'invalid_status_filter' });
       return;
@@ -519,18 +603,21 @@ router.get('/users', requireConsoleAuth, async (req: Request, res: Response) => 
   }
 });
 
-router.post('/users', requireConsoleAuth, async (req: Request, res: Response) => {
+router.post('/users', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
   try {
-    const { tenantId } = (req as any).console;
+    const { tenantId, email: operatorEmail } = (req as any).console;
     const environment = parseEnv(req.body.environment ?? req.query.environment);
     const { fullName, externalId, email, phone, employeeCode, primaryDeviceId, metadata } = req.body;
     if (!fullName || typeof fullName !== 'string' || fullName.trim().length === 0) {
       res.status(400).json({ error: 'invalid_request', message: 'fullName is required' });
       return;
     }
-    const user = await createTenantUser(tenantId, environment, {
-      fullName, externalId, email, phone, employeeCode, primaryDeviceId, metadata,
-    });
+    const user = await createTenantUser(
+      tenantId,
+      environment,
+      { fullName, externalId, email, phone, employeeCode, primaryDeviceId, metadata },
+      { type: 'console', id: tenantId, email: operatorEmail },
+    );
     res.status(201).json({ environment, user });
   } catch (err) {
     const message = (err as Error).message;
@@ -546,9 +633,9 @@ router.post('/users', requireConsoleAuth, async (req: Request, res: Response) =>
   }
 });
 
-router.patch('/users/:userId', requireConsoleAuth, async (req: Request, res: Response) => {
+router.patch('/users/:userId', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
   try {
-    const { tenantId } = (req as any).console;
+    const { tenantId, email: operatorEmail } = (req as any).console;
     const environment = parseEnv(req.body.environment ?? req.query.environment);
     const { userId } = req.params;
     const { fullName, email, phone, employeeCode, status, primaryDeviceId, metadata } = req.body;
@@ -556,9 +643,13 @@ router.patch('/users/:userId', requireConsoleAuth, async (req: Request, res: Res
       res.status(400).json({ error: 'invalid_status' });
       return;
     }
-    const user = await updateTenantUser(tenantId, environment, userId, {
-      fullName, email, phone, employeeCode, status, primaryDeviceId, metadata,
-    });
+    const user = await updateTenantUser(
+      tenantId,
+      environment,
+      userId,
+      { fullName, email, phone, employeeCode, status, primaryDeviceId, metadata },
+      { type: 'console', id: tenantId, email: operatorEmail },
+    );
     if (!user) {
       res.status(404).json({ error: 'user_not_found' });
       return;
@@ -582,7 +673,9 @@ router.get('/verifications', requireConsoleAuth, async (req: Request, res: Respo
     const environment = parseEnv(req.query.environment);
     const method = req.query.method as VerificationMethod | undefined;
     const result = req.query.result as VerificationResult | undefined;
-    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    let limit: number | undefined;
+    try { limit = parseLimit(req.query.limit); }
+    catch (e) { res.status(400).json({ error: 'invalid_limit', message: (e as Error).message }); return; }
     if (method && !VERIFICATION_METHODS.includes(method)) {
       res.status(400).json({ error: 'invalid_method_filter' });
       return;
@@ -606,7 +699,9 @@ router.get('/attendance', requireConsoleAuth, async (req: Request, res: Response
     const environment = parseEnv(req.query.environment);
     const type = req.query.type as AttendanceEventType | undefined;
     const result = req.query.result as AttendanceResult | undefined;
-    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+    let limit: number | undefined;
+    try { limit = parseLimit(req.query.limit); }
+    catch (e) { res.status(400).json({ error: 'invalid_limit', message: (e as Error).message }); return; }
     if (type && !ATTENDANCE_TYPES.includes(type)) {
       res.status(400).json({ error: 'invalid_type_filter' });
       return;

@@ -24,13 +24,12 @@ router.post('/',
         return;
       }
 
-      const device = await createDevice(tenant.id, apiKey.environment, {
-        name,
-        externalId,
-        locationId,
-        batteryLevel,
-        metadata,
-      }, apiKey.id);
+      const device = await createDevice(
+        tenant.id,
+        apiKey.environment,
+        { name, externalId, locationId, batteryLevel, metadata },
+        { type: 'api_key', id: apiKey.id },
+      );
 
       res.status(201).json({ device });
     } catch (err) {
@@ -81,14 +80,13 @@ router.patch('/:deviceId',
         return;
       }
 
-      const device = await updateDevice(tenant.id, apiKey.environment, deviceId, {
-        name,
-        locationId,
-        batteryLevel,
-        status,
-        metadata,
-        lastSeenAt,
-      }, apiKey.id);
+      const device = await updateDevice(
+        tenant.id,
+        apiKey.environment,
+        deviceId,
+        { name, locationId, batteryLevel, status, metadata, lastSeenAt },
+        { type: 'api_key', id: apiKey.id },
+      );
 
       if (!device) {
         res.status(404).json({ error: 'device_not_found' });
