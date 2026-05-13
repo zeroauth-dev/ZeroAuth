@@ -25,6 +25,31 @@ function sanitizeMetadata(metadata: unknown): Record<string, unknown> {
   return metadata as Record<string, unknown>;
 }
 
+/**
+ * Caller-provided attribution for audit-log entries.
+ *
+ * Set by route handlers; threaded through the service functions that write
+ * to `audit_events`. Per the platform audit-format spec, audit rows must
+ * record `actor_type` accurately ('api_key' for /v1 calls authenticated via
+ * tenant API key; 'console' for /api/console calls authenticated via the
+ * developer-dashboard JWT) and `metadata.actor_email` when the actor is a
+ * human operator. Issue #26 F-3 — before this plumbing landed, console-
+ * initiated rows were being mislabelled as `actor_type='api_key'` with
+ * `actor_id=NULL`.
+ */
+export interface AuditActor {
+  type: AuditActorType;
+  /** The api_keys.id (when type='api_key') or the tenant id (when type='console'). NULL is acceptable for 'system'. */
+  id?: string | null;
+  /** The operator's email when `type='console'`. Goes to `audit_events.metadata.actor_email`. */
+  email?: string | null;
+}
+
+function actorMetadata(actor?: AuditActor): Record<string, unknown> {
+  if (!actor?.email) return {};
+  return { actor_email: actor.email };
+}
+
 function sanitizeLimit(limit?: number, fallback: number = 50): number {
   if (!limit || Number.isNaN(limit)) return fallback;
   return Math.max(1, Math.min(100, Math.floor(limit)));
@@ -132,7 +157,7 @@ export async function createDevice(
     batteryLevel?: number;
     metadata?: Record<string, unknown>;
   },
-  actorId?: string | null,
+  actor?: AuditActor,
 ): Promise<Device> {
   const pool = getPool();
   const result = await pool.query(
@@ -153,14 +178,14 @@ export async function createDevice(
   const device = result.rows[0] as Device;
   void recordAuditEvent(tenantId, {
     environment,
-    actorType: 'api_key',
-    actorId,
+    actorType: actor?.type ?? 'api_key',
+    actorId: actor?.id ?? null,
     action: 'device.created',
     entityType: 'device',
     entityId: device.id,
     status: 'success',
     summary: `Registered device ${device.external_id}`,
-    metadata: { locationId: device.location_id, name: device.name },
+    metadata: { locationId: device.location_id, name: device.name, ...actorMetadata(actor) },
   }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
   return device;
@@ -199,7 +224,7 @@ export async function updateDevice(
     metadata?: Record<string, unknown>;
     lastSeenAt?: string;
   },
-  actorId?: string | null,
+  actor?: AuditActor,
 ): Promise<Device | null> {
   const pool = getPool();
   const result = await pool.query(
@@ -231,8 +256,8 @@ export async function updateDevice(
 
   void recordAuditEvent(tenantId, {
     environment,
-    actorType: 'api_key',
-    actorId,
+    actorType: actor?.type ?? 'api_key',
+    actorId: actor?.id ?? null,
     action: 'device.updated',
     entityType: 'device',
     entityId: device.id,
@@ -241,6 +266,7 @@ export async function updateDevice(
     metadata: {
       status: device.status,
       batteryLevel: device.battery_level,
+      ...actorMetadata(actor),
     },
   }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
@@ -259,7 +285,7 @@ export async function createTenantUser(
     primaryDeviceId?: string;
     metadata?: Record<string, unknown>;
   },
-  actorId?: string | null,
+  actor?: AuditActor,
 ): Promise<TenantUser> {
   const pool = getPool();
   let primaryDeviceId: string | null = null;
@@ -291,14 +317,14 @@ export async function createTenantUser(
   const user = result.rows[0] as TenantUser;
   void recordAuditEvent(tenantId, {
     environment,
-    actorType: 'api_key',
-    actorId,
+    actorType: actor?.type ?? 'api_key',
+    actorId: actor?.id ?? null,
     action: 'user.created',
     entityType: 'user',
     entityId: user.id,
     status: 'success',
     summary: `Enrolled user ${user.external_id}`,
-    metadata: { fullName: user.full_name, primaryDeviceId: user.primary_device_id },
+    metadata: { fullName: user.full_name, primaryDeviceId: user.primary_device_id, ...actorMetadata(actor) },
   }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
   return user;
@@ -338,7 +364,7 @@ export async function updateTenantUser(
     primaryDeviceId?: string;
     metadata?: Record<string, unknown>;
   },
-  actorId?: string | null,
+  actor?: AuditActor,
 ): Promise<TenantUser | null> {
   const pool = getPool();
   let primaryDeviceId: string | null = null;
@@ -380,14 +406,14 @@ export async function updateTenantUser(
 
   void recordAuditEvent(tenantId, {
     environment,
-    actorType: 'api_key',
-    actorId,
+    actorType: actor?.type ?? 'api_key',
+    actorId: actor?.id ?? null,
     action: 'user.updated',
     entityType: 'user',
     entityId: user.id,
     status: 'success',
     summary: `Updated user ${user.external_id}`,
-    metadata: { status: user.status, primaryDeviceId: user.primary_device_id },
+    metadata: { status: user.status, primaryDeviceId: user.primary_device_id, ...actorMetadata(actor) },
   }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
   return user;

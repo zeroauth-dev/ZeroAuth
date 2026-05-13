@@ -94,7 +94,7 @@ describe('Central API Routes', () => {
         locationId: 'blr-hq',
         batteryLevel: 92,
       }),
-      'key-123',
+      expect.objectContaining({ type: 'api_key', id: 'key-123' }),
     );
   });
 

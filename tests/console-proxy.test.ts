@@ -18,7 +18,12 @@ function issueToken(tenantId: string, email = 'dev@example.com'): string {
   return jwt.sign(
     { tenantId, email, type: 'console' },
     config.jwt.secret,
-    { expiresIn: '1h', issuer: 'zeroauth-console' },
+    {
+      expiresIn: '1h',
+      issuer: 'zeroauth-console',
+      audience: 'zeroauth-console',
+      jwtid: 'test-jti-' + tenantId,
+    },
   );
 }
 
@@ -87,6 +92,47 @@ describe('console proxy: /api/console/devices', () => {
     expect(res.body.error).toBe('session_expired');
   });
 
+  it('rejects a JWT with the wrong audience (F-5: aud=zeroauth-v1)', async () => {
+    // Mint a "v1" token (matching shape, wrong audience). Console routes
+    // must reject it. This is the seam that prevents accidentally accepting
+    // a tenant-API-key-class token on the console surface, and vice versa,
+    // once the v1 surface gets its own JWT layer.
+    const wrongAudToken = jwt.sign(
+      { tenantId: 'tenant-A', email: 'dev@example.com', type: 'console' },
+      config.jwt.secret,
+      { expiresIn: '1h', issuer: 'zeroauth-console', audience: 'zeroauth-v1' },
+    );
+    const res = await request(app)
+      .get('/api/console/devices')
+      .set('Authorization', `Bearer ${wrongAudToken}`);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('session_expired');
+  });
+
+  it('rejects ?limit=abc with 400 invalid_limit (F-6)', async () => {
+    const res = await request(app)
+      .get('/api/console/devices?limit=abc')
+      .set('Authorization', `Bearer ${issueToken('tenant-A')}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_limit');
+  });
+
+  it('rejects ?limit=0 with 400 invalid_limit (F-6, lower bound)', async () => {
+    const res = await request(app)
+      .get('/api/console/devices?limit=0')
+      .set('Authorization', `Bearer ${issueToken('tenant-A')}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_limit');
+  });
+
+  it('rejects ?limit=1001 with 400 invalid_limit (F-6, upper bound)', async () => {
+    const res = await request(app)
+      .get('/api/console/devices?limit=1001')
+      .set('Authorization', `Bearer ${issueToken('tenant-A')}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_limit');
+  });
+
   it('lists devices scoped to the JWT tenant + chosen environment', async () => {
     listDevices.mockResolvedValueOnce([{ id: 'dev-1', name: 'A' }]);
     const res = await request(app)
@@ -106,7 +152,12 @@ describe('console proxy: /api/console/devices', () => {
       .set('Authorization', `Bearer ${tokenA}`)
       .send({ name: 'X', tenantId: 'tenant-B', tenant_id: 'tenant-B' });
     expect(res.status).toBe(201);
-    expect(createDevice).toHaveBeenCalledWith('tenant-A', 'live', expect.objectContaining({ name: 'X' }));
+    expect(createDevice).toHaveBeenCalledWith(
+      'tenant-A',
+      'live',
+      expect.objectContaining({ name: 'X' }),
+      expect.objectContaining({ type: 'console', id: 'tenant-A', email: 'dev@example.com' }),
+    );
   });
 
   it('validates batteryLevel range', async () => {
@@ -160,7 +211,12 @@ describe('console proxy: /api/console/users', () => {
       .set('Authorization', `Bearer ${issueToken('tenant-A')}`)
       .send({ fullName: 'Alice', tenantId: 'tenant-B', environment: 'test' });
     expect(res.status).toBe(201);
-    expect(createTenantUser).toHaveBeenCalledWith('tenant-A', 'test', expect.objectContaining({ fullName: 'Alice' }));
+    expect(createTenantUser).toHaveBeenCalledWith(
+      'tenant-A',
+      'test',
+      expect.objectContaining({ fullName: 'Alice' }),
+      expect.objectContaining({ type: 'console', id: 'tenant-A', email: 'dev@example.com' }),
+    );
   });
 
   it('rejects an invalid status filter on list', async () => {
