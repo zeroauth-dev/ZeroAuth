@@ -19,15 +19,12 @@ router.post('/',
         return;
       }
 
-      const user = await createTenantUser(tenant.id, apiKey.environment, {
-        fullName,
-        externalId,
-        email,
-        phone,
-        employeeCode,
-        primaryDeviceId,
-        metadata,
-      }, apiKey.id);
+      const user = await createTenantUser(
+        tenant.id,
+        apiKey.environment,
+        { fullName, externalId, email, phone, employeeCode, primaryDeviceId, metadata },
+        { type: 'api_key', id: apiKey.id },
+      );
 
       res.status(201).json({ user });
     } catch (err) {
@@ -79,15 +76,13 @@ router.patch('/:userId',
         return;
       }
 
-      const user = await updateTenantUser(tenant.id, apiKey.environment, userId, {
-        fullName,
-        email,
-        phone,
-        employeeCode,
-        status,
-        primaryDeviceId,
-        metadata,
-      }, apiKey.id);
+      const user = await updateTenantUser(
+        tenant.id,
+        apiKey.environment,
+        userId,
+        { fullName, email, phone, employeeCode, status, primaryDeviceId, metadata },
+        { type: 'api_key', id: apiKey.id },
+      );
 
       if (!user) {
         res.status(404).json({ error: 'user_not_found' });
