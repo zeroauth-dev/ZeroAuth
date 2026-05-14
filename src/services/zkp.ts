@@ -6,57 +6,90 @@ import { logger } from './logger';
 import { Groth16Proof, ZKPVerificationRequest, ZKPVerificationResponse } from '../types';
 import { verifyProofOnChain } from './blockchain';
 
-// snarkjs loaded dynamically
-let snarkjs: any = null;
-let verificationKey: any = null;
-
 /**
  * Patent Module 216 — ZKP Verification
  *
- * Initialize the verification key at server startup.
- * The server ONLY verifies proofs — it never generates them.
- * Proof generation happens client-side using snarkjs in the browser.
+ * Two execution modes, selected by config:
+ *
+ *   1. **Verifier service (preferred).** When `config.zkp.verifierUrl` is
+ *      set, this module is a thin HTTP client to the loopback verifier
+ *      service ([verifier/README.md](../../verifier/README.md)). The
+ *      verifier loads snarkjs, holds the verification key, and runs the
+ *      Groth16 verify; this module remains responsible for replay
+ *      defense (nonce + timestamp window + signal shape) and for the
+ *      optional on-chain re-verification.
+ *
+ *   2. **Inline fallback (legacy / dev).** When `verifierUrl` is unset
+ *      this module loads snarkjs + the vkey itself, the way it always
+ *      did. Marked for removal once the verifier service ships to
+ *      production (Friday Day 5 work) — DO NOT lean on this for new
+ *      features.
+ *
+ * Either way, the server **only verifies** proofs — it never generates
+ * them. Proof generation happens client-side using snarkjs in the
+ * browser or on the IoT terminal.
+ *
+ * The split is documented in [docs/design/verifier-service-split.md](../../docs/design/verifier-service-split.md).
+ */
+
+// ─── Inline fallback state ───────────────────────────────────────────
+// Populated only when VERIFIER_URL is unset. Module-level singleton; one
+// load per process per the v0 behavior.
+
+let snarkjs: any = null;
+let verificationKey: any = null;
+let verifierServiceReady = false;
+
+function useVerifierService(): boolean {
+  return Boolean(config.zkp.verifierUrl);
+}
+
+/**
+ * Startup hook. Wires whichever mode is active.
  */
 export async function initZKP(): Promise<void> {
-  snarkjs = await import('snarkjs');
+  if (useVerifierService()) {
+    // Probe the verifier's /health endpoint at startup so a misconfigured
+    // VERIFIER_URL fails loud and early instead of on the first proof.
+    try {
+      const res = await fetch(`${config.zkp.verifierUrl}/health`, {
+        signal: AbortSignal.timeout(config.zkp.verifierTimeoutMs),
+      });
+      if (!res.ok) throw new Error(`verifier health returned ${res.status}`);
+      const body = await res.json() as { status: string; vkeyAvailable: boolean; version: string };
+      verifierServiceReady = true;
+      logger.info('ZKP: verifier service reachable', {
+        url: config.zkp.verifierUrl,
+        verifierStatus: body.status,
+        verifierVkeyAvailable: body.vkeyAvailable,
+        verifierVersion: body.version,
+      });
+    } catch (err) {
+      verifierServiceReady = false;
+      logger.error('ZKP: verifier service unreachable at startup — proofs will fail until restored', {
+        url: config.zkp.verifierUrl,
+        error: (err as Error).message,
+      });
+    }
+    return;
+  }
 
+  // Inline fallback path
+  snarkjs = await import('snarkjs');
   const vkeyPath = path.resolve(process.cwd(), config.zkp.vkeyPath);
   if (fs.existsSync(vkeyPath)) {
     const vkeyData = fs.readFileSync(vkeyPath, 'utf-8');
     verificationKey = JSON.parse(vkeyData);
-    logger.info('ZKP: Verification key loaded', { path: vkeyPath });
+    logger.info('ZKP: verification key loaded (inline fallback)', { path: vkeyPath });
   } else {
-    logger.warn('ZKP: Verification key not found — ZKP verification will use fallback mode', {
+    logger.warn('ZKP: verification key not found — inline fallback will use structural validation only', {
       path: vkeyPath,
     });
   }
 }
 
 /**
- * Verify a Groth16 proof off-chain (fast, free, ~10ms)
- *
- * Patent Claim 6: "verify the zero-knowledge proof by the server
- * without accessing the identity data"
- */
-export async function verifyProofOffChain(
-  proof: Groth16Proof,
-  publicSignals: string[],
-): Promise<boolean> {
-  if (!snarkjs || !verificationKey) {
-    throw new Error('ZKP not initialized. Call initZKP() first.');
-  }
-
-  try {
-    const result = await snarkjs.groth16.verify(verificationKey, publicSignals, proof);
-    return result;
-  } catch (err) {
-    logger.error('ZKP: Off-chain verification error', { error: (err as Error).message });
-    return false;
-  }
-}
-
-/**
- * Full biometric proof verification flow
+ * Full biometric proof verification flow.
  *
  * CRITICAL INVARIANT: Zero biometric data stored. Ever.
  * The server receives only the mathematical proof and public signals.
@@ -69,65 +102,41 @@ export async function verifyBiometricProof(
 
   // Validate required fields
   if (!proof || !publicSignals || !nonce || !timestamp) {
-    logger.warn('ZKP: Verification failed — missing required fields');
-    return {
-      verified: false,
-      sessionId: uuidv4(),
-      dataStored: false,
-      timestamp: new Date().toISOString(),
-    };
+    logger.warn('ZKP: verification failed — missing required fields');
+    return rejected();
   }
 
-  // Validate timestamp window (5 minutes)
+  // Validate timestamp window (5 minutes). Note: nonce-binding to an
+  // issued-nonces table is still an open A-02 finding; this window is
+  // necessary-but-not-sufficient.
   const proofTime = new Date(timestamp).getTime();
   const now = Date.now();
   if (isNaN(proofTime) || Math.abs(now - proofTime) > 5 * 60 * 1000) {
-    logger.warn('ZKP: Verification failed — proof timestamp out of range');
-    return {
-      verified: false,
-      sessionId: uuidv4(),
-      dataStored: false,
-      timestamp: new Date().toISOString(),
-    };
+    logger.warn('ZKP: verification failed — proof timestamp out of range');
+    return rejected();
   }
 
   // Validate nonce format (UUID v4)
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (!uuidRegex.test(nonce)) {
-    logger.warn('ZKP: Verification failed — invalid nonce format');
-    return {
-      verified: false,
-      sessionId: uuidv4(),
-      dataStored: false,
-      timestamp: new Date().toISOString(),
-    };
+    logger.warn('ZKP: verification failed — invalid nonce format');
+    return rejected();
   }
 
-  // Validate public signals format (3 elements for our circuit)
+  // Validate public signals shape (3 elements for our circuit)
   if (!Array.isArray(publicSignals) || publicSignals.length !== 3) {
-    logger.warn('ZKP: Verification failed — invalid publicSignals (expected 3 elements)');
-    return {
-      verified: false,
-      sessionId: uuidv4(),
-      dataStored: false,
-      timestamp: new Date().toISOString(),
-    };
+    logger.warn('ZKP: verification failed — invalid publicSignals (expected 3 elements)');
+    return rejected();
   }
 
-  let verified = false;
+  // ─── Step 1: Off-chain verification ─────────────────────────────
+  const verified = useVerifierService()
+    ? await verifyViaService(proof, publicSignals, nonce)
+    : await verifyInline(proof, publicSignals);
+
   let txHash: string | undefined;
 
-  // Step 1: Off-chain verification (always performed, fast)
-  if (snarkjs && verificationKey) {
-    verified = await verifyProofOffChain(proof, publicSignals);
-    logger.info(`ZKP: Off-chain Groth16 verification: ${verified ? 'PASS' : 'FAIL'}`);
-  } else {
-    // Fallback: if no verification key available (dev mode without compiled circuit)
-    logger.warn('ZKP: No verification key — using structural proof validation');
-    verified = isValidProofStructure(proof);
-  }
-
-  // Step 2: On-chain verification (optional, costs gas)
+  // ─── Step 2: Optional on-chain re-verification ──────────────────
   if (verified && config.blockchain.verifyOnChain) {
     try {
       const pA: [string, string] = [proof.pi_a[0], proof.pi_a[1]];
@@ -143,18 +152,17 @@ export async function verifyBiometricProof(
         publicSignals as [string, string, string],
       );
       if (!onChainResult) {
-        logger.warn('ZKP: On-chain verification FAILED (off-chain passed)');
-        verified = false;
-      } else {
-        logger.info('ZKP: On-chain Groth16 verification: PASS');
+        logger.warn('ZKP: on-chain verification FAILED (off-chain passed)');
+        return rejected();
       }
+      logger.info('ZKP: on-chain Groth16 verification: PASS');
     } catch (err) {
-      logger.error('ZKP: On-chain verification error', { error: (err as Error).message });
-      // Don't fail if on-chain verification has an error — off-chain is sufficient
+      // Off-chain pass is sufficient; log the on-chain error and move on.
+      logger.error('ZKP: on-chain verification error', { error: (err as Error).message });
     }
   }
 
-  logger.info(`ZKP: Biometric verification: ${verified ? 'SUCCESS' : 'FAILURE'}`, {
+  logger.info(`ZKP: biometric verification: ${verified ? 'SUCCESS' : 'FAILURE'}`, {
     nonce,
     verified,
     dataStored: false,
@@ -169,10 +177,65 @@ export async function verifyBiometricProof(
   };
 }
 
-/**
- * Structural validation for Groth16 proof shape.
- * Used as fallback when verification key is not available.
- */
+// ─── Verifier-service path ───────────────────────────────────────────
+
+async function verifyViaService(
+  proof: Groth16Proof,
+  publicSignals: string[],
+  correlationId: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${config.zkp.verifierUrl}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        proof,
+        publicSignals,
+        circuitVersion: 'v1',
+        correlationId,
+      }),
+      signal: AbortSignal.timeout(config.zkp.verifierTimeoutMs),
+    });
+    if (!res.ok) {
+      logger.error('ZKP: verifier service responded non-2xx', { status: res.status });
+      return false;
+    }
+    const body = (await res.json()) as {
+      verified: boolean;
+      structuralFallback: boolean;
+      verifierAuditId: string;
+      latencyMs: number;
+    };
+    logger.info(`ZKP: verifier service: ${body.verified ? 'PASS' : 'FAIL'}`, {
+      verifierAuditId: body.verifierAuditId,
+      latencyMs: body.latencyMs,
+      structuralFallback: body.structuralFallback,
+    });
+    return body.verified;
+  } catch (err) {
+    logger.error('ZKP: verifier service call failed', { error: (err as Error).message });
+    return false;
+  }
+}
+
+// ─── Inline fallback path (legacy) ───────────────────────────────────
+
+async function verifyInline(proof: Groth16Proof, publicSignals: string[]): Promise<boolean> {
+  if (snarkjs && verificationKey) {
+    try {
+      const result = await snarkjs.groth16.verify(verificationKey, publicSignals, proof);
+      logger.info(`ZKP: inline Groth16: ${result ? 'PASS' : 'FAIL'}`);
+      return result;
+    } catch (err) {
+      logger.error('ZKP: inline verification error', { error: (err as Error).message });
+      return false;
+    }
+  }
+  // No vkey + inline mode → fall back to structural shape check.
+  logger.warn('ZKP: no verification key — using structural proof validation');
+  return isValidProofStructure(proof);
+}
+
 function isValidProofStructure(proof: Groth16Proof): boolean {
   try {
     return (
@@ -192,18 +255,49 @@ function isValidProofStructure(proof: Groth16Proof): boolean {
   }
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────
+
+function rejected(): ZKPVerificationResponse {
+  return {
+    verified: false,
+    sessionId: uuidv4(),
+    dataStored: false,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 export function getCircuitInfo(): {
   wasmPath: string;
   vkeyAvailable: boolean;
   verifyOnChain: boolean;
+  verifierMode: 'service' | 'inline';
+  verifierUrl: string | null;
 } {
   return {
     wasmPath: config.zkp.wasmPath,
-    vkeyAvailable: verificationKey !== null,
+    // In service mode the API can't directly know the vkey state; report
+    // the last observed health signal (set in initZKP).
+    vkeyAvailable: useVerifierService() ? verifierServiceReady : verificationKey !== null,
     verifyOnChain: config.blockchain.verifyOnChain,
+    verifierMode: useVerifierService() ? 'service' : 'inline',
+    verifierUrl: useVerifierService() ? config.zkp.verifierUrl : null,
   };
 }
 
 export function isZKPReady(): boolean {
-  return snarkjs !== null;
+  return useVerifierService() ? verifierServiceReady : snarkjs !== null;
+}
+
+/**
+ * Exposed only for tests that need to verify the off-chain path without
+ * going through `verifyBiometricProof`'s validation chain. Production
+ * code should always use `verifyBiometricProof`.
+ */
+export async function verifyProofOffChain(
+  proof: Groth16Proof,
+  publicSignals: string[],
+): Promise<boolean> {
+  return useVerifierService()
+    ? verifyViaService(proof, publicSignals, uuidv4())
+    : verifyInline(proof, publicSignals);
 }
