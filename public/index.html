@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ZeroAuth — Enterprise Authentication Where a Breach Exposes Nothing</title>
-  <meta name="description" content="ZeroAuth: Zero-knowledge proof authentication for enterprises. No passwords stored. No secrets transmitted. Nothing to steal." />
+  <title>ZeroAuth — Auth API powered by Pramaan™ zero-knowledge biometric IP</title>
+  <meta name="description" content="ZeroAuth is the developer-facing auth API built on Pramaan, the patented zero-knowledge biometric identity protocol (IN202311041001). Raw biometrics never leave the device. No secrets stored. No secrets on the wire." />
+  <meta name="keywords" content="zero-knowledge proof, biometric authentication, Pramaan, ZeroAuth, Groth16, DPDP, India auth provider, decentralized identity" />
   <meta name="theme-color" content="#0a0b10" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -64,6 +65,32 @@
       font-size: 1.125rem; font-weight: 700; letter-spacing: -0.02em;
     }
     .logo svg { width: 28px; height: 28px; }
+    .powered-by {
+      display: inline-flex; align-items: center; gap: 0.3125rem;
+      padding: 0.1875rem 0.5rem;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 0.6875rem;
+      color: var(--text-secondary);
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      text-decoration: none;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .powered-by:hover { color: var(--text); border-color: var(--text-dim); }
+    .powered-by .powered-by-dot {
+      width: 5px; height: 5px;
+      background: var(--blue); border-radius: 50%;
+      animation: powered-pulse 2.6s ease-in-out infinite;
+    }
+    @keyframes powered-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(66, 133, 244, 0.4); }
+      50% { box-shadow: 0 0 0 6px rgba(66, 133, 244, 0); }
+    }
+    @media (max-width: 700px) {
+      .powered-by { display: none; }
+    }
     .nav-links { display: flex; align-items: center; gap: 1.75rem; }
     .nav-center {
       display: flex; align-items: center; gap: 1.75rem;
@@ -137,8 +164,17 @@
     .hero::before {
       content: '';
       position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-      width: 800px; height: 500px;
-      background: radial-gradient(ellipse at center, #4285F40a 0%, transparent 70%);
+      width: 1000px; height: 600px;
+      background:
+        radial-gradient(ellipse at 30% 20%, #4285F412 0%, transparent 55%),
+        radial-gradient(ellipse at 70% 20%, #a78bfa10 0%, transparent 60%),
+        radial-gradient(ellipse at 50% 60%, #22d3ee08 0%, transparent 65%);
+      pointer-events: none;
+    }
+    .hero::after {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent 0%, #4285F430 20%, #4285F430 80%, transparent 100%);
       pointer-events: none;
     }
     .hero-content {
@@ -896,14 +932,20 @@
   <!-- NAV -->
   <nav>
     <div class="nav-inner">
-      <a href="/" class="logo">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <defs><linearGradient id="nav-g" x1="3" y1="2.5" x2="21" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4285F4"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
-          <rect x="2" y="2" width="20" height="20" rx="6" fill="url(#nav-g)"/>
-          <path d="M7.25 7.75H16.75L7.25 16.25H16.75" stroke="white" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        ZeroAuth
-      </a>
+      <div style="display:flex;align-items:center;gap:0.75rem;">
+        <a href="/" class="logo">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs><linearGradient id="nav-g" x1="3" y1="2.5" x2="21" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4285F4"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
+            <rect x="2" y="2" width="20" height="20" rx="6" fill="url(#nav-g)"/>
+            <path d="M7.25 7.75H16.75L7.25 16.25H16.75" stroke="white" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          ZeroAuth
+        </a>
+        <a href="#patents" class="powered-by" title="Pramaan is the patented zero-knowledge biometric identity protocol that ZeroAuth is built on (Indian Patent IN202311041001, granted to Yushu Excellence Technologies Pvt. Ltd.)">
+          <span class="powered-by-dot"></span>
+          Powered by Pramaan™
+        </a>
+      </div>
       <div class="nav-links">
         <div class="nav-center">
           <a href="#how">Product</a>
@@ -926,15 +968,16 @@
     <div class="hero-content">
       <div class="hero-badge">
         <span class="hero-badge-indicator"></span>
-        Auth API for developers &middot; v1 live on zeroauth.dev
+        Built on Pramaan™ &middot; Indian Patent IN202311041001 (Granted)
       </div>
       <h1>
         Authentication where a breach exposes <span class="em">nothing.</span><br />
-        <span class="subdued">Drop-in API. Zero-knowledge proofs.</span>
+        <span class="subdued">Drop-in API. Zero-knowledge biometric proofs.</span>
       </h1>
       <p class="hero-sub">
-        ZeroAuth is an auth API that replaces stored credentials with zero-knowledge proofs.
-        Ship signup, login, and device attestation in minutes &mdash; with no passwords in your database and no secrets on the wire.
+        ZeroAuth is the developer-facing auth API for <strong style="color:var(--text);font-weight:600;">Pramaan</strong> &mdash; the patented zero-knowledge biometric identity protocol from Yushu Excellence Technologies.
+        Raw biometrics never leave the device. Commitments &amp; Groth16 proofs are all the server ever sees.
+        Ship signup, login, and device attestation in minutes.
       </p>
       <div class="hero-actions">
         <a href="/dashboard/signup" class="btn-primary">Start building free</a>
@@ -974,7 +1017,7 @@
           </p>
           <h3 style="margin-top:1.5rem;">2. Register a user</h3>
           <p>
-            POST a commitment from the client SDK. ZeroAuth stores the commitment &mdash; never the underlying secret.
+            POST a Poseidon commitment from the client SDK. ZeroAuth stores the commitment &mdash; never the underlying biometric.
           </p>
           <h3 style="margin-top:1.5rem;">3. Verify the proof</h3>
           <p>
@@ -1110,10 +1153,10 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
   <!-- HOW IT WORKS -->
   <section class="how-section" id="how">
     <div class="container">
-      <div class="section-label reveal">How It Works</div>
+      <div class="section-label reveal">How Pramaan Works</div>
       <h2 class="section-title reveal">Three steps. Zero secrets exposed.</h2>
       <p class="section-desc reveal">
-        ZeroAuth uses zero-knowledge proofs to let users prove their identity without ever revealing credentials &mdash; not to your servers, not to anyone.
+        ZeroAuth implements the Pramaan protocol: the user proves they hold a biometric on their device, and only a Poseidon hash commitment + a Groth16 proof ever cross the network. Raw embeddings stay in browser/app memory and are GC&rsquo;d after hashing.
       </p>
       <div class="steps">
         <div class="step reveal">
@@ -1162,9 +1205,9 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
   <section class="demo-section" id="demo">
     <div class="container">
       <div class="section-label reveal">Live Demo</div>
-      <h2 class="section-title reveal">See it in action — 60 seconds, zero secrets.</h2>
+      <h2 class="section-title reveal">See Pramaan in action &mdash; 60 seconds, zero secrets.</h2>
       <p class="section-desc reveal" style="margin: 0 auto;">
-        Watch a complete authentication flow: biometric scan, ZK proof generation, SSO access, and a simulated breach that exposes nothing.
+        Watch a complete Pramaan flow through the ZeroAuth API: biometric capture, Poseidon commitment, Groth16 proof generation on-device, server-side verification, and a simulated breach that exposes nothing.
       </p>
       <div class="demo-frame-wrap reveal">
         <iframe class="demo-iframe" src="/demo.html" title="ZeroAuth Live Demo" loading="lazy"></iframe>
@@ -1181,7 +1224,7 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
       <div class="section-label reveal">The Math</div>
       <h2 class="section-title reveal">What a breach actually costs.</h2>
       <p class="section-desc reveal">
-        In 2023, Okta's breach exposed every support customer's data. Here is the same scenario with ZeroAuth.
+        In 2023, Okta&rsquo;s breach exposed every support customer&rsquo;s data. In May 2024 an Indian Army contractor leaked 496 GB of biometric data. Here is the same scenario with Pramaan.
       </p>
       <div class="math-grid reveal">
         <div class="math-card threat">
@@ -1226,7 +1269,7 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
               <svg viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             </div>
             <div>
-              <div class="math-card-title">ZeroAuth</div>
+              <div class="math-card-title">Pramaan + ZeroAuth</div>
               <div class="math-card-sub">Same breach scenario</div>
             </div>
           </div>
@@ -1262,20 +1305,30 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
   <!-- PATENTS -->
   <section class="patent-section section-center" id="patents">
     <div class="container">
-      <div class="section-label reveal">Intellectual Property</div>
-      <h2 class="section-title reveal">Patent-Protected Technology</h2>
+      <div class="section-label reveal">Pramaan&trade; &mdash; The Underlying IP</div>
+      <h2 class="section-title reveal">ZeroAuth is the API. Pramaan is the patent.</h2>
       <p class="section-desc reveal" style="margin: 0 auto;">
-        ZeroAuth's core cryptographic protocol is protected by granted and pending patents across multiple jurisdictions.
+        Pramaan is the zero-knowledge biometric identity protocol behind every ZeroAuth verification &mdash; commitment hashing, Groth16 proof, on-chain anchoring on Base L2, and DDIL-grade offline verification. Granted to Yushu Excellence Technologies Pvt. Ltd. Read the full <a href="#whitepaper" style="color:var(--blue);text-decoration:none;">technical whitepaper&nbsp;&rarr;</a>
       </p>
       <div class="patent-grid reveal">
         <div class="patent-card">
           <div class="patent-icon-wrap">
             <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
           </div>
-          <div>
+          <div style="text-align:left;">
             <div class="patent-status granted">Granted</div>
-            <div class="patent-name">Indian Patent</div>
-            <div class="patent-id">202311041001</div>
+            <div class="patent-name">Pramaan&trade; Protocol</div>
+            <div class="patent-id">IN202311041001 &middot; India</div>
+          </div>
+        </div>
+        <div class="patent-card">
+          <div class="patent-icon-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><circle cx="12" cy="12" r="10"/></svg>
+          </div>
+          <div style="text-align:left;">
+            <div class="patent-status" style="color:var(--text-dim);">Owned by</div>
+            <div class="patent-name">Yushu Excellence Technologies Pvt. Ltd.</div>
+            <div class="patent-id">Inventors: Amit Dua, Pulkit Pareek</div>
           </div>
         </div>
       </div>
@@ -1377,23 +1430,28 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
   <section class="wp-section section-center" id="whitepaper">
     <div class="container">
       <div class="section-label reveal">Technical Deep Dive</div>
-      <h2 class="section-title reveal">White Paper</h2>
+      <h2 class="section-title reveal">Pramaan&trade; Whitepaper</h2>
       <p class="section-desc reveal" style="margin: 0 auto;">
-        The cryptographic foundations, architecture, and security proofs behind ZeroAuth.
+        25 pages on the protocol that ZeroAuth implements: architecture, cryptographic design, security analysis against 9 attack vectors, performance benchmarks, and regulatory compliance posture.
       </p>
       <div class="wp-card reveal">
         <div class="wp-preview">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          <div class="wp-preview-label">PDF &middot; 25 pp</div>
         </div>
         <div class="wp-info">
           <div class="wp-tags">
             <span class="wp-tag">ZK-SNARKs</span>
             <span class="wp-tag">Groth16</span>
-            <span class="wp-tag">Poseidon Hash</span>
-            <span class="wp-tag">Enterprise Auth</span>
+            <span class="wp-tag">Poseidon</span>
+            <span class="wp-tag">Base L2</span>
+            <span class="wp-tag">DPDP 2023</span>
+            <span class="wp-tag">DDIL</span>
           </div>
-          <h3>ZeroAuth: Zero-Knowledge Authentication for the Enterprise</h3>
-          <p>Covers threat model analysis, protocol design, circuit architecture, on-chain and off-chain verification, and deployment strategies.</p>
+          <h3>Pramaan: Zero-Knowledge Biometric Authentication</h3>
+          <p>
+            Technical architecture &amp; security analysis. Covers system design, registration + authentication + offline flows, Sybil/identity-binding model with LSH deduplication, Poseidon hash construction, Circom 2.1.9 circuit details, Groth16 proof system, on-chain anchoring on Base L2, threat analysis (server DB breach, device capture, MITM, replay, &hellip;), and a regulatory annex covering DPDP 2023, RBI Video-KYC, UIDAI independence, and GDPR.
+          </p>
           <div id="wpFormContainer">
             <form class="wp-form" id="wpForm">
               <input type="email" id="wpEmail" placeholder="Enter your work email" required />
@@ -1401,7 +1459,7 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
             </form>
           </div>
           <div class="form-success" id="wpSuccess">
-            <p style="color: var(--green); font-weight: 500; font-size: 0.8125rem;">Thanks &mdash; your download is starting. <a id="wpDownloadLink" href="/docs/whitepaper.pdf" download="ZeroAuth_Whitepaper.pdf" style="color: var(--blue); text-decoration: underline;">Click here</a> if it does not begin automatically.</p>
+            <p style="color: var(--green); font-weight: 500; font-size: 0.8125rem;">Thanks &mdash; your download is starting. <a id="wpDownloadLink" href="/docs/whitepaper.pdf" download="Pramaan_Whitepaper.pdf" style="color: var(--blue); text-decoration: underline;">Click here</a> if it does not begin automatically.</p>
           </div>
         </div>
       </div>
@@ -1421,7 +1479,7 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
             </svg>
             ZeroAuth
           </div>
-          <p class="footer-tagline">Auth API where a breach exposes nothing. Built on zero-knowledge proofs.</p>
+          <p class="footer-tagline">Auth API where a breach exposes nothing. Built on the patented <strong style="color:var(--text-secondary);font-weight:600;">Pramaan&trade;</strong> zero-knowledge biometric protocol.</p>
           <a href="https://status.zeroauth.dev" target="_blank" rel="noopener" class="footer-status">
             <span class="footer-status-dot"></span>
             All systems operational
@@ -1473,7 +1531,7 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
       </div>
 
       <div class="footer-bottom">
-        <div class="footer-copy">&copy; 2026 ZeroAuth. Open source. Protected by Indian Patent 202311041001.</div>
+        <div class="footer-copy">&copy; 2026 Yushu Excellence Technologies Pvt. Ltd. &middot; ZeroAuth is the open-source auth API for Pramaan&trade;, the granted zero-knowledge biometric protocol (Indian Patent IN202311041001).</div>
         <div class="footer-social">
           <a href="https://github.com/pulkitpareek18/ZeroAuth" target="_blank" rel="noopener" aria-label="GitHub">
             <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.95.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18.92-.26 1.91-.39 2.89-.39s1.97.13 2.89.39c2.21-1.49 3.18-1.18 3.18-1.18.62 1.58.23 2.75.11 3.04.74.81 1.18 1.84 1.18 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.68.8.56 4.57-1.52 7.85-5.83 7.85-10.91C23.5 5.65 18.35.5 12 .5z"/></svg>
@@ -1625,7 +1683,7 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
 
         const data = await res.json();
         const url = data.downloadUrl || '/docs/whitepaper.pdf';
-        const filename = data.filename || 'ZeroAuth_Whitepaper.pdf';
+        const filename = data.filename || 'Pramaan_Whitepaper.pdf';
 
         document.getElementById('wpForm').style.display = 'none';
         document.getElementById('wpSuccess').classList.add('show');

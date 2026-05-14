@@ -133,7 +133,7 @@ describe('routes/leads — POST /api/leads/whitepaper', () => {
     expect(res.body).toMatchObject({
       success: true,
       downloadUrl: '/docs/whitepaper.pdf',
-      filename: 'ZeroAuth_Whitepaper.pdf',
+      filename: 'Pramaan_Whitepaper.pdf',
     });
   });
 
