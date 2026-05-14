@@ -3,10 +3,16 @@
   "version": "2.0.0",
   "description": "Enterprise SSO Authentication API with Blockchain-Anchored Decentralized Identity — Zero biometric data stored. Ever.",
   "main": "dist/server.js",
+  "workspaces": [
+    "verifier"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
+    "verifier:dev": "npm --workspace @zeroauth/verifier run dev",
+    "verifier:build": "npm --workspace @zeroauth/verifier run build",
+    "verifier:start": "npm --workspace @zeroauth/verifier run start",
     "docs:site:start": "npm --prefix website run start -- --port 3001 --host 0.0.0.0",
     "docs:site:build": "npm --prefix website run build",
     "docs:site:serve": "npm --prefix website run serve -- --port 3001 --host 0.0.0.0",

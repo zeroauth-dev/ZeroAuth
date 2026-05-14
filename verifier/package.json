@@ -1,0 +1,27 @@
+{
+  "name": "@zeroauth/verifier",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ZeroAuth Groth16 verifier service. Loopback-only HTTP API on :3001. Accepts a proof + public signals, returns verified|not.",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "test": "echo 'no tests yet — covered by API repo integration suite'"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "snarkjs": "^0.7.6",
+    "uuid": "^9.0.0",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "@types/snarkjs": "^0.7.9",
+    "@types/uuid": "^9.0.7",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

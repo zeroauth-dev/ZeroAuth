@@ -92,6 +92,13 @@ export const config = {
     wasmPath: process.env.ZKP_WASM_PATH ?? 'circuits/build/identity_proof_js/identity_proof.wasm',
     zkeyPath: process.env.ZKP_ZKEY_PATH ?? 'circuits/build/circuit_final.zkey',
     vkeyPath: process.env.ZKP_VKEY_PATH ?? 'circuits/build/verification_key.json',
+    // B02 — the verifier service ([Plan B, TS workspace](../../verifier/README.md)).
+    // When set, src/services/zkp.ts delegates Groth16 verification over
+    // loopback HTTP instead of running snarkjs inline. Unset → inline
+    // fallback (the v0 behavior; will be removed in a follow-up once the
+    // verifier is in production).
+    verifierUrl: process.env.VERIFIER_URL ?? '',
+    verifierTimeoutMs: parseInt(process.env.VERIFIER_TIMEOUT_MS ?? '2000', 10),
   },
 
   redis: {
