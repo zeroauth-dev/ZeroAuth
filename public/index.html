@@ -1036,7 +1036,7 @@
             <button class="code-copy" type="button" data-copy="curl">Copy</button>
           </div>
           <div class="code-pane active" data-pane="curl"><pre class="code-body" id="code-curl"><span class="cmt"># 1. Register a user with a commitment</span>
-curl -X POST https://api.zeroauth.dev/v1/users/register \
+curl -X POST https://zeroauth.dev/v1/users/register \
   -H <span class="str">"Authorization: Bearer $ZEROAUTH_API_KEY"</span> \
   -H <span class="str">"Content-Type: application/json"</span> \
   -d <span class="str">'{
@@ -1045,7 +1045,7 @@ curl -X POST https://api.zeroauth.dev/v1/users/register \
   }'</span>
 
 <span class="cmt"># 2. Verify a Groth16 proof at login</span>
-curl -X POST https://api.zeroauth.dev/v1/verifications \
+curl -X POST https://zeroauth.dev/v1/verifications \
   -H <span class="str">"Authorization: Bearer $ZEROAUTH_API_KEY"</span> \
   -H <span class="str">"Content-Type: application/json"</span> \
   -d <span class="str">'{
@@ -1480,7 +1480,7 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
             ZeroAuth
           </div>
           <p class="footer-tagline">Auth API where a breach exposes nothing. Built on the patented <strong style="color:var(--text-secondary);font-weight:600;">Pramaan&trade;</strong> zero-knowledge biometric protocol.</p>
-          <a href="https://status.zeroauth.dev" target="_blank" rel="noopener" class="footer-status">
+          <a href="/api/health" target="_blank" rel="noopener" class="footer-status" title="JSON health endpoint — covers API, Postgres, Redis, and the Base Sepolia blockchain RPC. A dedicated status.zeroauth.dev page is on the roadmap.">
             <span class="footer-status-dot"></span>
             All systems operational
           </a>
@@ -1539,7 +1539,7 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
           <a href="/docs" aria-label="Documentation">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
           </a>
-          <a href="https://status.zeroauth.dev" target="_blank" rel="noopener" aria-label="Status">
+          <a href="/api/health" target="_blank" rel="noopener" aria-label="Health" title="JSON health endpoint">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           </a>
         </div>
