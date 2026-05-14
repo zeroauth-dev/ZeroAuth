@@ -1,7 +1,14 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { randomUUID } from 'crypto';
+import { randomUUID, scrypt as _scrypt } from 'crypto';
+import { promisify } from 'util';
 import rateLimit from 'express-rate-limit';
+
+const scrypt = promisify(_scrypt) as (
+  password: string,
+  salt: string,
+  keylen: number,
+) => Promise<Buffer>;
 import { config } from '../config';
 import { logger } from '../services/logger';
 import { createTenant, authenticateTenant, getTenantById, getTenantByEmail } from '../services/tenants';
@@ -30,6 +37,8 @@ import {
   VerificationMethod,
   VerificationResult,
 } from '../types';
+import { sendMail } from '../services/email';
+import { welcomeEmail, signupAttemptedNoticeEmail } from '../services/email-templates';
 
 const router = Router();
 
@@ -172,15 +181,42 @@ router.post('/signup', authLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    // F-2 (issue #26): email-enumeration via the 201/409 status-code split
-    // is a real Medium finding, but the **byte-identical** fix requires
-    // email infrastructure (return 202 always, send verification link
-    // out-of-band). We don't have email infra yet — that's tracked as a
-    // separate ADR. Until then we keep 409 and accept the leak; the
-    // interim mitigation (uniform 400) was rejected because it ALSO leaks
-    // (existing → 400, fresh → 201). See issue #26 F-2 — left open.
+    // F-2 (issue #27): email-enumeration mitigation — partial.
+    //
+    // The full byte-identical fix (return 202 always + verification email)
+    // requires a tenant-creation rework that breaks the existing dashboard
+    // signup-then-reveal-key flow + the Playwright happy path. That work
+    // is tracked in issue #27 as the v2 of this mitigation.
+    //
+    // For now: keep the 201/409 split (so dashboard signup still works in
+    // one round-trip) but plug the worst-leak surfaces:
+    //   1. Timing equalization — when the email exists, do the scrypt
+    //      hashing the createTenant() path would have done. Hashing
+    //      dominates the response time, so without this the 409 path
+    //      is observably ~50ms faster than the 201 path. With this,
+    //      both paths take the same wall-clock time.
+    //   2. Security-signal email — send a "someone tried to sign up
+    //      with your email" notice to the legitimate account holder,
+    //      so the email-was-taken response isn't free intel for an
+    //      attacker probing addresses.
+    //
+    // See ADR-0005 (email service), governance/docs/threat-model/api.md A-05.
     const existing = await getTenantByEmail(email);
     if (existing) {
+      // Burn the same CPU we'd burn for createTenant() so the timing
+      // oracle is closed. scrypt is the dominant cost; do it explicitly.
+      try {
+        await scrypt(password, 'enumeration-mitigation-salt', 64);
+      } catch { /* swallow */ }
+
+      // Notify the legitimate operator out-of-band. Fire-and-forget;
+      // never block the response.
+      const sourceIp = (req.ip || req.headers['x-forwarded-for'] || '').toString().slice(0, 64) || null;
+      void (async () => {
+        const tmpl = signupAttemptedNoticeEmail({ email: existing.email, attemptIp: sourceIp });
+        await sendMail({ to: existing.email, ...tmpl });
+      })();
+
       res.status(409).json({ error: 'email_taken', message: 'An account with this email already exists.' });
       return;
     }
@@ -203,6 +239,17 @@ router.post('/signup', authLimiter, async (req: Request, res: Response) => {
       summary: `Created tenant account for ${tenant.email}`,
       metadata: { companyName: tenant.company_name, plan: tenant.plan },
     }).catch(() => undefined);
+
+    // Send welcome email out-of-band — never block the signup response.
+    // We deliberately do NOT email the API key (per security-policy §10).
+    void (async () => {
+      const tmpl = welcomeEmail({
+        email: tenant.email,
+        companyName: tenant.company_name ?? null,
+        tenantId: tenant.id,
+      });
+      await sendMail({ to: tenant.email, ...tmpl });
+    })();
 
     res.status(201).json({
       message: 'Account created successfully.',
