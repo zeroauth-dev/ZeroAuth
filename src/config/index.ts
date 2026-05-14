@@ -113,4 +113,17 @@ export const config = {
     user: process.env.POSTGRES_USER ?? 'zeroauth',
     password: requireEnv('POSTGRES_PASSWORD', 'zeroauth-dev'),
   },
+
+  // ADR-0005 — transactional SMTP via nodemailer + Brevo.
+  // All five env vars must be set in production for emails to actually
+  // send; when SMTP_HOST is empty src/services/email.ts no-ops with a
+  // warn log instead of failing requests.
+  email: {
+    smtpHost: process.env.SMTP_HOST ?? '',
+    smtpPort: parseInt(process.env.SMTP_PORT ?? '587', 10),
+    smtpUser: process.env.SMTP_USER ?? '',
+    smtpPassword: process.env.SMTP_PASSWORD ?? '',
+    fromAddress: process.env.EMAIL_FROM ?? 'noreply@zeroauth.dev',
+    fromName: process.env.EMAIL_FROM_NAME ?? 'ZeroAuth',
+  },
 } as const;
