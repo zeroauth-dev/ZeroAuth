@@ -24,7 +24,7 @@ const FOOTER_HTML = `
     Yushu Excellence Technologies Pvt. Ltd. &middot; Indian Patent
     IN202311041001.<br/>
     Questions? Reply to this email or open an issue at
-    <a href="https://github.com/pulkitpareek18/ZeroAuth/issues" style="color:#4285F4;">github.com/pulkitpareek18/ZeroAuth/issues</a>.
+    <a href="https://github.com/zeroauth-dev/ZeroAuth/issues" style="color:#4285F4;">github.com/zeroauth-dev/ZeroAuth/issues</a>.
   </p>
 `;
 
@@ -34,7 +34,7 @@ Sent by ZeroAuth, the developer-facing API for Pramaan(TM) — the patented
 zero-knowledge biometric identity protocol. Yushu Excellence Technologies
 Pvt. Ltd. — Indian Patent IN202311041001.
 Questions? Reply to this email or open an issue at
-https://github.com/pulkitpareek18/ZeroAuth/issues
+https://github.com/zeroauth-dev/ZeroAuth/issues
 `;
 
 /**

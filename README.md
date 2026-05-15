@@ -22,9 +22,9 @@
   </p>
 
   <p>
-    <a href="https://github.com/pulkitpareek18/ZeroAuth/blob/main/LICENSE"><img src="https://img.shields.io/github/license/pulkitpareek18/ZeroAuth?color=blue" alt="License" /></a>
-    <a href="https://github.com/pulkitpareek18/ZeroAuth/stargazers"><img src="https://img.shields.io/github/stars/pulkitpareek18/ZeroAuth?style=flat" alt="Stars" /></a>
-    <a href="https://github.com/pulkitpareek18/ZeroAuth/issues"><img src="https://img.shields.io/github/issues/pulkitpareek18/ZeroAuth" alt="Issues" /></a>
+    <a href="https://github.com/zeroauth-dev/ZeroAuth/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zeroauth-dev/ZeroAuth?color=blue" alt="License" /></a>
+    <a href="https://github.com/zeroauth-dev/ZeroAuth/stargazers"><img src="https://img.shields.io/github/stars/zeroauth-dev/ZeroAuth?style=flat" alt="Stars" /></a>
+    <a href="https://github.com/zeroauth-dev/ZeroAuth/issues"><img src="https://img.shields.io/github/issues/zeroauth-dev/ZeroAuth" alt="Issues" /></a>
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="Node 20+" />
     <img src="https://img.shields.io/badge/typescript-strict-blue" alt="TypeScript strict" />
     <img src="https://img.shields.io/badge/zk-Groth16-purple" alt="Groth16" />
@@ -125,7 +125,7 @@ Full API reference at [zeroauth.dev/docs/reference/api-reference](https://zeroau
 ### Run it yourself (Docker, ~2 minutes)
 
 ```bash
-git clone https://github.com/pulkitpareek18/ZeroAuth.git
+git clone https://github.com/zeroauth-dev/ZeroAuth.git
 cd ZeroAuth
 cp .env.example .env       # generates fresh secrets via scripts/deploy.sh
 ./scripts/deploy.sh dev

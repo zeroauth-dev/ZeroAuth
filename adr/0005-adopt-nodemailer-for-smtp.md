@@ -6,9 +6,9 @@ Accepted
 
 ## Context
 
-[Issue #27](https://github.com/pulkitpareek18/ZeroAuth/issues/27) (F-2 from PR #22 security review) needs email infrastructure to close the email-enumeration finding properly. Beyond that single fix, several pending workstreams converge on "we need transactional email":
+[Issue #27](https://github.com/zeroauth-dev/ZeroAuth/issues/27) (F-2 from PR #22 security review) needs email infrastructure to close the email-enumeration finding properly. Beyond that single fix, several pending workstreams converge on "we need transactional email":
 
-- **Breach-notification procedure** in `pulkitpareek18/ZeroAuth-Governance: docs/shared/breach-notification.md` step §3 requires emailing every affected tenant within 6 hours of confirmation — currently has no implementation
+- **Breach-notification procedure** in `zeroauth-dev/ZeroAuth-Governance: docs/shared/breach-notification.md` step §3 requires emailing every affected tenant within 6 hours of confirmation — currently has no implementation
 - **Password reset flow** — entirely missing today; we ship console accounts with no recovery path
 - **Welcome email on signup** — minor UX win, plus a server-side signal that the address is real
 - **"Someone tried to sign up with your email" notice** — security signal for legitimate account holders, partial mitigation for F-2 enumeration
@@ -57,7 +57,7 @@ Adopt **`nodemailer` v8.x** (latest stable, MIT-0 licensed) as the SMTP transpor
 
 ## Threat model delta
 
-- New egress to `smtp-relay.brevo.com:587` from the API process. Update `pulkitpareek18/ZeroAuth-Governance: docs/threat-model/canonical.md` to add A-V06 (SMTP credential exfiltration / Brevo account takeover risk) — tracked as a follow-up.
+- New egress to `smtp-relay.brevo.com:587` from the API process. Update `zeroauth-dev/ZeroAuth-Governance: docs/threat-model/canonical.md` to add A-V06 (SMTP credential exfiltration / Brevo account takeover risk) — tracked as a follow-up.
 
 ## Operational notes
 
@@ -71,8 +71,8 @@ Adopt **`nodemailer` v8.x** (latest stable, MIT-0 licensed) as the SMTP transpor
 - nodemailer source: <https://github.com/nodemailer/nodemailer>
 - nodemailer license (MIT-0): <https://github.com/nodemailer/nodemailer/blob/master/LICENSE>
 - Brevo SMTP docs: <https://developers.brevo.com/docs/smtp-integration>
-- DPDP §8(7) breach-notification procedure that depends on this: `pulkitpareek18/ZeroAuth-Governance: docs/shared/breach-notification.md`
-- Issue this unblocks: <https://github.com/pulkitpareek18/ZeroAuth/issues/27>
+- DPDP §8(7) breach-notification procedure that depends on this: `zeroauth-dev/ZeroAuth-Governance: docs/shared/breach-notification.md`
+- Issue this unblocks: <https://github.com/zeroauth-dev/ZeroAuth/issues/27>
 
 ---
 

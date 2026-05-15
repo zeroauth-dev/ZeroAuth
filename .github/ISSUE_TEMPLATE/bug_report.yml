@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for taking the time to file a bug report. **Security
-        vulnerabilities should not be reported here** — see [SECURITY.md](https://github.com/pulkitpareek18/ZeroAuth/blob/main/SECURITY.md).
+        vulnerabilities should not be reported here** — see [SECURITY.md](https://github.com/zeroauth-dev/ZeroAuth/blob/main/SECURITY.md).
 
   - type: textarea
     id: description

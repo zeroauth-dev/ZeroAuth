@@ -4,7 +4,7 @@
 **Date:** 2026-05-13
 **Diff range:** `git diff 69fd27e..0c325fb` (8,652 lines across 46 files)
 **Production state at review time:** `main` @ `0d1741d` (live on `https://zeroauth.dev`); `dev` @ `876fac3`
-**Reason for retroactive review:** PR #22 touched all four security-reviewer trigger surfaces (auth, crypto, audit, tenant boundaries) and merged without the subagent running. CLAUDE.md mandates the subagent on any change to these surfaces — discipline-debt clearance, not a pre-merge gate. Tracking issue: [#26](https://github.com/pulkitpareek18/ZeroAuth/issues/26).
+**Reason for retroactive review:** PR #22 touched all four security-reviewer trigger surfaces (auth, crypto, audit, tenant boundaries) and merged without the subagent running. CLAUDE.md mandates the subagent on any change to these surfaces — discipline-debt clearance, not a pre-merge gate. Tracking issue: [#26](https://github.com/zeroauth-dev/ZeroAuth/issues/26).
 
 ---
 
