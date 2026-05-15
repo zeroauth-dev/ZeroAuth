@@ -1,9 +1,9 @@
 # Latest QA Run
 
-→ [`2026-05-14.md`](2026-05-14.md)
+→ [`2026-05-15.md`](2026-05-15.md)
 
-**Rollup:** HOLD (every demo Blocked; surrogate smokes green; production stable on `ad2a04a`)
-**Date:** 2026-05-14
-**Next run:** Friday 2026-05-15 at 09:55 IST (before the W05 review at 16:00 IST)
+**Rollup:** HOLD (every demo Blocked; surrogate smokes green; email delivery NEW + working today)
+**Date:** 2026-05-15
+**Next run:** Tuesday 2026-05-19 at 09:55 IST (W2 Day 1 — second-week metronome resumes Tue/Thu cadence)
 
 (This file is overwritten on every run. For history, see the dated files in this directory.)
