@@ -56,6 +56,62 @@ COPY website/ ./
 COPY docs/ ../docs/
 RUN npm run build
 
+# ── Build Stage — Verifier (B02 Plan B) ───────
+# The verifier is an npm workspace of the root package. We install via
+# the workspace flag (resolves against the committed root lockfile so the
+# build is reproducible) but copy only what the verifier needs to compile.
+FROM node:20-alpine AS verifier-build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+COPY verifier/package.json ./verifier/
+RUN npm ci --workspace @zeroauth/verifier --include-workspace-root=false --ignore-scripts
+COPY verifier/tsconfig.json ./verifier/
+COPY verifier/src/ ./verifier/src/
+RUN npm --workspace @zeroauth/verifier run build
+
+# ── Verifier Production Stage ─────────────────
+# Slim runtime image — just the compiled JS + production deps + the
+# verification key. No source TS, no test deps, no snarkjs build tools.
+# Bound to :3001 on the Docker network; the API container reaches it via
+# its compose service name `zeroauth-verifier`. Loopback-only is enforced
+# at the network boundary — no host port binding.
+FROM node:20-alpine AS verifier-production
+WORKDIR /app
+
+RUN addgroup -g 1001 -S zeroauth && \
+    adduser -S zeroauth -u 1001
+
+# Install verifier's prod deps in a flat node_modules. Deliberately uses
+# `npm install --omit=dev` rather than `npm ci` because the verifier
+# workspace doesn't have its own lockfile (it shares the root's via
+# npm workspaces, which complicates a single-package install). Trade-off
+# is acceptable for v0; full reproducible-build provenance is on the
+# roadmap per ADR-0005 / the verifier design doc.
+COPY verifier/package.json ./package.json
+RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
+
+# Compiled JS from the verifier-build stage
+COPY --from=verifier-build /app/verifier/dist ./dist
+
+# The Groth16 verification key — read at startup. Hard-coded absolute
+# path via VERIFIER_VKEY_PATH so cwd changes can't make the file
+# unfindable.
+COPY circuits/build/verification_key.json /app/circuits/build/verification_key.json
+
+USER zeroauth
+
+ENV NODE_ENV=production
+ENV VERIFIER_VKEY_PATH=/app/circuits/build/verification_key.json
+ENV VERIFIER_BIND=0.0.0.0
+ENV VERIFIER_PORT=3001
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+
+CMD ["node", "dist/server.js"]
+
 # ── Production Stage ──────────────────────────
 FROM node:20-alpine AS production
 WORKDIR /app
