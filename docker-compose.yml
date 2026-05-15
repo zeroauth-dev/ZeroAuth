@@ -49,6 +49,12 @@ services:
       - NODE_ENV=production
       - VERIFIER_CIRCUIT_VERSION=v1
       - LOG_LEVEL=info
+    # Persistent volume for the SQLite audit log (B02 design doc §4.3).
+    # Mounted at /app/data inside the container. Survives container
+    # restarts + image rebuilds. Backup story: snapshot the volume on
+    # deploy + nightly cron (TODO).
+    volumes:
+      - verifier-audit-data:/app/data
     restart: unless-stopped
     # 127.0.0.1 (not localhost) because alpine busybox wget hits IPv6 first
     # and the verifier binds 0.0.0.0 (IPv4 only). The Dockerfile carries
@@ -176,3 +182,4 @@ volumes:
   postgres-data:
   caddy-data:
   caddy-config:
+  verifier-audit-data:
