@@ -9,6 +9,7 @@
 import request from 'supertest';
 import { createApp } from '../src/server';
 import { initVerifier } from '../src/groth16';
+import { initAuditLog, _resetForTests } from '../src/audit-log';
 
 const validProof = {
   proof: {
@@ -24,6 +25,9 @@ const validProof = {
 beforeAll(async () => {
   // Run in structural-fallback mode — no real vkey on disk.
   await initVerifier('nonexistent.json');
+  // Audit log on an in-memory SQLite, so /verify can write rows.
+  _resetForTests();
+  initAuditLog(':memory:');
 });
 
 describe('verifier server — POST /verify', () => {
