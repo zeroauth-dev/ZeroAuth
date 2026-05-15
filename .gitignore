@@ -3,6 +3,11 @@
 .env.local
 .env.production
 .env.*.local
+# Local snapshots of /opt/zeroauth/.env taken via the runbook at
+# docs/operations/env-vars.md. Latest + per-change archival copies.
+# Contain real production credentials — never commit.
+.env.production.snapshot
+.env.production.snapshot.*
 PRODUCTION_CREDENTIALS.md
 GITHUB_SECRETS.md
 
