@@ -34,6 +34,30 @@ services:
       retries: 3
     profiles: ['dev', 'test', 'prod']
 
+  # ── Verifier (Plan B — TS, B02 Phase 2) ──────
+  # Standalone Groth16 verifier service. Loopback-only on the docker
+  # network (no host port binding). The API reaches it via the service
+  # name `zeroauth-verifier`.
+  zeroauth-verifier:
+    build:
+      context: .
+      target: verifier-production
+    container_name: zeroauth-verifier
+    expose:
+      - '3001'
+    environment:
+      - NODE_ENV=production
+      - VERIFIER_CIRCUIT_VERSION=v1
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3001/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    profiles: ['dev', 'prod']
+
   # ── Development ──────────────────────────────
   zeroauth-dev:
     build:
@@ -50,6 +74,9 @@ services:
       - USE_REDIS_SESSIONS=true
       - REDIS_URL=redis://redis:6379
       - POSTGRES_HOST=postgres
+      # B02 Phase 2 — route ZKP verifications through the verifier service.
+      - VERIFIER_URL=http://zeroauth-verifier:3001
+      - VERIFIER_TIMEOUT_MS=2000
     volumes:
       - ./src:/app/src
       - ./public:/app/public
@@ -62,6 +89,8 @@ services:
       redis:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      zeroauth-verifier:
         condition: service_healthy
     profiles: ['dev']
 
@@ -100,10 +129,18 @@ services:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_HOST=postgres
       - TRUST_PROXY=true
+      # B02 Phase 2 — production cutover. Routes /v1/auth/zkp/verify
+      # through the verifier service instead of inline snarkjs. The
+      # inline-fallback in src/services/zkp.ts stays in the binary as
+      # a safety net but is no longer the default code path in prod.
+      - VERIFIER_URL=http://zeroauth-verifier:3001
+      - VERIFIER_TIMEOUT_MS=2000
     depends_on:
       redis:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      zeroauth-verifier:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
