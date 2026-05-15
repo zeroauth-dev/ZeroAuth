@@ -87,8 +87,22 @@ RUN addgroup -g 1001 -S zeroauth && \
 # npm workspaces, which complicates a single-package install). Trade-off
 # is acceptable for v0; full reproducible-build provenance is on the
 # roadmap per ADR-0005 / the verifier design doc.
+#
+# NOTES:
+#  1. `better-sqlite3` is a native Node addon. The npm-published prebuilds
+#     don't cover alpine-linux-musl-arm64 (the VPS architecture), so
+#     prebuild-install falls back to a node-gyp source build. That needs
+#     python3 + make + g++. We install them, build, then DELETE them to
+#     keep the runtime image small (cleanup at the end of this RUN saves
+#     ~150MB).
+#  2. We allow lifecycle scripts here (no `--ignore-scripts`) because
+#     better-sqlite3's postinstall is what triggers the build. All 4
+#     other deps (express, snarkjs, uuid, winston) are JS-only.
 COPY verifier/package.json ./package.json
-RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+    && npm install --omit=dev \
+    && npm cache clean --force \
+    && apk del .build-deps
 
 # Compiled JS from the verifier-build stage
 COPY --from=verifier-build /app/verifier/dist ./dist
@@ -98,10 +112,17 @@ COPY --from=verifier-build /app/verifier/dist ./dist
 # unfindable.
 COPY circuits/build/verification_key.json /app/circuits/build/verification_key.json
 
+# Writable data directory for the SQLite audit log (B02 design doc §4.3).
+# Owned by the non-root user; mounted as a Docker volume in compose so
+# the DB survives container restarts. Without this `mkdir` here, the
+# non-root user can't create the dir at startup → service crashes.
+RUN mkdir -p /app/data && chown -R zeroauth:zeroauth /app/data
+
 USER zeroauth
 
 ENV NODE_ENV=production
 ENV VERIFIER_VKEY_PATH=/app/circuits/build/verification_key.json
+ENV VERIFIER_AUDIT_DB_PATH=/app/data/audit.db
 ENV VERIFIER_BIND=0.0.0.0
 ENV VERIFIER_PORT=3001
 

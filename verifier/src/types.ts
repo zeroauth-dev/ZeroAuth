@@ -38,4 +38,9 @@ export interface HealthResponse {
   version: string;
   vkeyAvailable: boolean;
   uptimeSeconds: number;
+  audit: {
+    rowCount: number;
+    nextSequence: number;
+    lastEntryHashPrefix: string;
+  };
 }
