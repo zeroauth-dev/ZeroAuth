@@ -60,7 +60,7 @@ This is the decision Pulkit needs to make before Thursday morning. I lay out bot
 
 ### 3.1 Plan A — full B02 (Rust verifier in its own repo)
 
-**Repo:** new `pulkitpareek18/ZeroAuth-Verifier` (public, MIT, Rust).
+**Repo:** new `zeroauth-dev/ZeroAuth-Verifier` (public, MIT, Rust).
 
 **What gets built:**
 
@@ -99,7 +99,7 @@ This is the decision Pulkit needs to make before Thursday morning. I lay out bot
 
 ### 3.2 Plan B — TypeScript split into a sub-workspace (the pragmatic shortcut)
 
-**Repo:** stays in `pulkitpareek18/ZeroAuth`. New directory `verifier/` becomes a separate npm workspace.
+**Repo:** stays in `zeroauth-dev/ZeroAuth`. New directory `verifier/` becomes a separate npm workspace.
 
 **What gets built:**
 
@@ -132,7 +132,7 @@ I need one of:
 
 - **A.** "Go Plan A (Rust separate repo)." → tomorrow I scaffold the Rust crate.
 - **B.** "Go Plan B (TypeScript workspace)." → tomorrow I peel the Node code into `verifier/`.
-- **C.** "Hold — start B02 next week as the brainstorm says, do something else Thursday." → I roll Thursday into closing PR #22's three Mediums (issue [#26](https://github.com/pulkitpareek18/ZeroAuth/issues/26)) and the W05 review prep.
+- **C.** "Hold — start B02 next week as the brainstorm says, do something else Thursday." → I roll Thursday into closing PR #22's three Mediums (issue [#26](https://github.com/zeroauth-dev/ZeroAuth/issues/26)) and the W05 review prep.
 
 If no decision by EOD Wednesday, default = C (defer).
 
@@ -307,7 +307,7 @@ Reproducibility check (the `.github/workflows/reproducible-build.yml`): build tw
 
 ### 4.7 API repo changes
 
-Inside `pulkitpareek18/ZeroAuth`:
+Inside `zeroauth-dev/ZeroAuth`:
 
 1. **`src/services/zkp.ts` shrinks** to ~40 lines. New surface:
 
@@ -339,7 +339,7 @@ Inside `pulkitpareek18/ZeroAuth`:
 
 **Thursday Day 4 — scaffold + verifier service**
 
-1. Morning: `gh repo create pulkitpareek18/ZeroAuth-Verifier --public`. Clone locally. Add `CLAUDE.md` (copying conventions from API repo).
+1. Morning: `gh repo create zeroauth-dev/ZeroAuth-Verifier --public`. Clone locally. Add `CLAUDE.md` (copying conventions from API repo).
 2. `cargo init --bin verifier-service && cargo new --lib verifier-core` workspace setup.
 3. Implement `verifier-core` with arkworks Groth16. Write unit + property tests **first**.
 4. Implement `verifier-service` HTTP shell with axum. Single `/verify` route, no audit log yet.
@@ -368,12 +368,12 @@ Inside `pulkitpareek18/ZeroAuth`:
 | Append-only | `zeroauth-verifier: tests/audit_append_only.rs` | `UPDATE verifier_events …` → SQL trigger aborts; same for DELETE |
 | Hash chain | `zeroauth-verifier: tests/hash_chain.rs` | After N writes, `verify_chain.rs` reconstructs every `entry_hash` from `prev_hash || canonical(row)`. Mutating any column breaks the chain. |
 | Reproducible build | `.github/workflows/reproducible-build.yml` | Two clean builds produce identical OCI digest |
-| API repo regression | `pulkitpareek18/ZeroAuth: tests/zkp.test.ts` | After the split, every existing test stays green |
-| End-to-end | `pulkitpareek18/ZeroAuth: dashboard/e2e/happy-path.spec.ts` | Signup → first key → verification call → audit log entry — all still works |
+| API repo regression | `zeroauth-dev/ZeroAuth: tests/zkp.test.ts` | After the split, every existing test stays green |
+| End-to-end | `zeroauth-dev/ZeroAuth: dashboard/e2e/happy-path.spec.ts` | Signup → first key → verification call → audit log entry — all still works |
 
 ### 4.10 Threat model deltas
 
-After the split, update `pulkitpareek18/ZeroAuth-Governance: docs/threat-model/`:
+After the split, update `zeroauth-dev/ZeroAuth-Governance: docs/threat-model/`:
 
 - **`canonical.md`** — A-02 (replayed proof verification) — mitigation summary updates: "issued-nonce binding lives in the verifier service, not the API"
 - **`api.md`** — A-02 section pointer changes from "primary mitigation lives in API" to "delegated to verifier"
@@ -429,7 +429,7 @@ Explicitly NOT in this design:
 1. Plan A vs B vs C — pick one.
 2. (If A:) Rust toolchain ready on dev machine? `rustc --version` ≥ 1.85.
 3. (If A:) Confirmation that the existing `circuits/identity_proof.vkey.json` is BN254-compatible — I'll verify the JSON shape Thursday morning, but if you already know, save me the half-hour.
-4. (If A:) Permission to create `pulkitpareek18/ZeroAuth-Verifier` as a public repo.
+4. (If A:) Permission to create `zeroauth-dev/ZeroAuth-Verifier` as a public repo.
 5. Acknowledgement that this work spans Thu + Fri and may bleed into Monday Week 2. The other Day 4/5 items (closing PR #22's Mediums) get re-prioritized.
 
 If no answer by EOD Wednesday: default = **C (defer to Week 2 Day 1, do PR #22 Mediums Thursday/Friday)**.

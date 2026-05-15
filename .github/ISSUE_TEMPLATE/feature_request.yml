@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         For broader proposals, consider opening a
-        [discussion](https://github.com/pulkitpareek18/ZeroAuth/discussions)
+        [discussion](https://github.com/zeroauth-dev/ZeroAuth/discussions)
         first so we can align on scope.
 
   - type: textarea

@@ -1,4 +1,4 @@
-# ADR-0004 — Split governance docs into a separate repo (`pulkitpareek18/ZeroAuth-Governance`)
+# ADR-0004 — Split governance docs into a separate repo (`zeroauth-dev/ZeroAuth-Governance`)
 
 ## Status
 
@@ -23,12 +23,12 @@ The reasons we revisited:
 
 1. **The DPDP §8(7) breach-notification procedure was unwritten.** No document anywhere named which lawyer gets called, in what time window, with what information. That's a legal-teeth gap, not a hygiene gap. It has to land somewhere; writing it in a code repo would mix legal blast radius with engineering blast radius.
 2. **Compliance mappings have multiple-regulator scope.** A DPDP / IRDAI / RBI / MeitY mapping is read by auditors and a buyer's security team. Forcing them to clone a TypeScript repo to find it is friction at exactly the wrong moment in a pilot conversation.
-3. **The canonical threat model needs a stable URL** before repo #2 (verifier, B02, Week 2) exists. If the verifier's component threat model points at `pulkitpareek18/ZeroAuth/docs/threat_model.md`, the link rots the moment we split the verifier; if it points at a governance repo, the URL is stable forever.
+3. **The canonical threat model needs a stable URL** before repo #2 (verifier, B02, Week 2) exists. If the verifier's component threat model points at `zeroauth-dev/ZeroAuth/docs/threat_model.md`, the link rots the moment we split the verifier; if it points at a governance repo, the URL is stable forever.
 4. **Two-reviewer enforcement is easier with a dedicated repo.** Path-globbed CODEOWNERS in a code repo gets bypassed under deadline pressure ("just merge the policy change inline, fix it later"). A standalone repo where every PR is *by definition* a policy change makes the discipline mechanical.
 
 ## Decision
 
-Create `pulkitpareek18/ZeroAuth-Governance` as a separate public GitHub repo with the structure from `governance_CLAUDE.md`:
+Create `zeroauth-dev/ZeroAuth-Governance` as a separate public GitHub repo with the structure from `governance_CLAUDE.md`:
 
 - `docs/shared/{security-policy, coding-standards, naming-conventions, incident-response, breach-notification}.md`
 - `docs/threat-model/{canonical, api, verifier, iot, sdk, dashboard}.md`
@@ -41,7 +41,7 @@ Create `pulkitpareek18/ZeroAuth-Governance` as a separate public GitHub repo wit
 
 The repo is **public**, CC-BY-4.0 licensed — same posture as the main `ZeroAuth` repo. The audit story benefits from open visibility.
 
-This repo (`pulkitpareek18/ZeroAuth`) keeps:
+This repo (`zeroauth-dev/ZeroAuth`) keeps:
 
 - `CLAUDE.md` — the constitution for this repo, links to the canonical shared docs
 - `docs/api_contract.md` — API-specific contract (won't move)
@@ -53,7 +53,7 @@ This repo (`pulkitpareek18/ZeroAuth`) keeps:
 
 - **Positive — DPDP §8(7) procedure now exists.** Written down, with named counsel contacts (TODO entries where contacts aren't confirmed yet). Drillable. Reviewable.
 - **Positive — auditor-friendly surface.** A buyer's security team can clone one repo and read every policy without slogging through TypeScript. The W08 evidence-pack assembler from the operational suite reads from `evidence-pack-sources/CHECKSUMS.md` cleanly.
-- **Positive — stable URLs across the 8-week build.** When B02 (verifier, Week 2), B03 (IoT, Week 3), B04 (SDK, Week 5) split out, they all link to `github.com/pulkitpareek18/ZeroAuth-Governance/blob/main/docs/threat-model/canonical.md` — that URL doesn't move.
+- **Positive — stable URLs across the 8-week build.** When B02 (verifier, Week 2), B03 (IoT, Week 3), B04 (SDK, Week 5) split out, they all link to `github.com/zeroauth-dev/ZeroAuth-Governance/blob/main/docs/threat-model/canonical.md` — that URL doesn't move.
 - **Positive — two-reviewer rule is mechanical.** CODEOWNERS in the governance repo names both Pulkit and Amit on `/docs/shared/` and `/docs/compliance/`. Counsel review is enforced manually (counsel doesn't have GitHub access) by a note in the PR description before merge.
 - **Negative — two repos to clone on a fresh dev machine.** Mitigated: `scripts/setup-dev.sh` (TODO) will clone both side by side.
 - **Negative — cross-repo links rot more easily than same-repo links.** Mitigated by `markdown-link-check` CI on every PR in both repos.
@@ -81,8 +81,8 @@ The governance repo doesn't get folded back into the API repo. The split is mono
 
 - B06 build prompt: `zeroauth_prompt_suite/04_development_suite/02_claude_code_dev/build_prompts/B06_governance_repo_bootstrap.md`
 - Governance constitution: `zeroauth_prompt_suite/04_development_suite/02_claude_code_dev/CLAUDE_md/governance_CLAUDE.md`
-- New repo: <https://github.com/pulkitpareek18/ZeroAuth-Governance>
-- Canonical threat model (new home): <https://github.com/pulkitpareek18/ZeroAuth-Governance/blob/main/docs/threat-model/canonical.md>
+- New repo: <https://github.com/zeroauth-dev/ZeroAuth-Governance>
+- Canonical threat model (new home): <https://github.com/zeroauth-dev/ZeroAuth-Governance/blob/main/docs/threat-model/canonical.md>
 - Brainstorm session on Day 3 (Wed May 13 2026) weighing collapsed vs separate repo: this conversation
 
 ---

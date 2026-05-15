@@ -86,7 +86,7 @@ If you ever consider exposing the verifier on a public interface, you MUST first
 
 1. Add caller authentication (mTLS or shared secret in a header)
 2. Add per-caller rate limiting
-3. Update the threat model component-extension at `pulkitpareek18/ZeroAuth-Governance: docs/threat-model/verifier.md`
+3. Update the threat model component-extension at `zeroauth-dev/ZeroAuth-Governance: docs/threat-model/verifier.md`
 4. Open an ADR
 
 The default loopback bind is the v0 trust model; do not change it without going through the above.
@@ -96,4 +96,4 @@ The default loopback bind is the v0 trust model; do not change it without going 
 - API repo's [`src/services/zkp.ts`](../src/services/zkp.ts) — calls this service via `VERIFIER_URL`
 - [ADR-0008] (forthcoming) — captures the TS-vs-Rust decision
 - [`docs/design/verifier-service-split.md`](../docs/design/verifier-service-split.md) — the plan-mode design doc
-- [Governance: `docs/threat-model/verifier.md`](https://github.com/pulkitpareek18/ZeroAuth-Governance/blob/main/docs/threat-model/verifier.md) — component-level threat model
+- [Governance: `docs/threat-model/verifier.md`](https://github.com/zeroauth-dev/ZeroAuth-Governance/blob/main/docs/threat-model/verifier.md) — component-level threat model

@@ -75,7 +75,7 @@ const config: Config = {
           position: 'right',
         },
         {
-          href: 'https://github.com/pulkitpareek18/ZeroAuth',
+          href: 'https://github.com/zeroauth-dev/ZeroAuth',
           label: 'GitHub',
           position: 'right',
         },
@@ -148,7 +148,7 @@ const config: Config = {
             },
             {
               label: 'GitHub',
-              href: 'https://github.com/pulkitpareek18/ZeroAuth',
+              href: 'https://github.com/zeroauth-dev/ZeroAuth',
             },
           ],
         },

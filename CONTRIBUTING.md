@@ -5,11 +5,11 @@ welcome bug reports, fixes, integrations, and ideas.
 
 ## Ways to contribute
 
-- **Found a bug?** Open an [issue](https://github.com/pulkitpareek18/ZeroAuth/issues/new).
+- **Found a bug?** Open an [issue](https://github.com/zeroauth-dev/ZeroAuth/issues/new).
   Include reproduction steps, expected vs. actual behaviour, and your
   environment (`node -v`, OS, Docker version).
 - **Have a feature in mind?** Start a
-  [discussion](https://github.com/pulkitpareek18/ZeroAuth/discussions) before
+  [discussion](https://github.com/zeroauth-dev/ZeroAuth/discussions) before
   opening a PR — we'd rather agree on direction first.
 - **Found a security vulnerability?** **Do not** open a public issue. See
   [SECURITY.md](SECURITY.md).
@@ -17,7 +17,7 @@ welcome bug reports, fixes, integrations, and ideas.
 ## Development setup
 
 ```bash
-git clone https://github.com/pulkitpareek18/ZeroAuth.git
+git clone https://github.com/zeroauth-dev/ZeroAuth.git
 cd ZeroAuth
 npm run setup                       # installs all workspaces, builds everything
 cp .env.example .env                # local env (uses Base Sepolia testnet by default)

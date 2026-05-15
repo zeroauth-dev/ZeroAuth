@@ -22,26 +22,26 @@ PRs merged to main, in order:
 
 | # | PR | Headline | Impact |
 |---|---|---|---|
-| 1 | [#22](https://github.com/pulkitpareek18/ZeroAuth/pull/22) | Central API developer console: 10 pages, 82 tests, CI gated | Dashboard live at `/dashboard/*`. Brainstorm had this in Week 6. |
-| 2 | [#24](https://github.com/pulkitpareek18/ZeroAuth/pull/24) | Dashboard `@types/node` Docker hotfix | Unblocked the build after PR #22's squash-merge surfaced a type-resolution gap. |
-| 3 | [#25](https://github.com/pulkitpareek18/ZeroAuth/pull/25) | Marketing site: product-led landing with dashboard CTAs + Quickstart | Replaced single-pilot-form layout with Sign in / Get started cluster + tabbed Quickstart. |
-| 4 | [#28](https://github.com/pulkitpareek18/ZeroAuth/pull/28) | Day 3 bundle: governance repo + qa-log + PR #22 security fixes + B02 plan | One PR for the Day 3 discipline-gap clearance. |
-| 5 | [#29](https://github.com/pulkitpareek18/ZeroAuth/pull/29) | B02 Plan B: split Groth16 verifier into `@zeroauth/verifier` workspace | Architectural seam landed. Inline fallback retained as safety net. |
-| 6 | [#30](https://github.com/pulkitpareek18/ZeroAuth/pull/30) | Test sweep — 73 → 217 tests across services, middleware, verifier package | 144 new tests in one PR. |
-| 7 | [#31](https://github.com/pulkitpareek18/ZeroAuth/pull/31) | Landing page: Pramaan IP vs ZeroAuth product split + new whitepaper | Brand pivot. Yushu Excellence Technologies + Pramaan™ patent (IN202311041001) now anchored on the site. |
-| 8 | [#32](https://github.com/pulkitpareek18/ZeroAuth/pull/32) | Landing page broken-link fixes | `status.zeroauth.dev` + `api.zeroauth.dev` cleaned up. |
-| 9 | [#33](https://github.com/pulkitpareek18/ZeroAuth/pull/33) | Email infra (Brevo SMTP via nodemailer) + F-2 partial mitigation | Welcome + signup-attempted-notice emails operating. Brevo IP allowlisting required + done. |
-| 10 | [#34](https://github.com/pulkitpareek18/ZeroAuth/pull/34) | `docs/operations/env-vars.md` runbook | Captures the `restart` vs `up -d --force-recreate` env-file gotcha + the future `PROD_ENV_FILE` GitHub secret path. |
-| 11 | [#35](https://github.com/pulkitpareek18/ZeroAuth/pull/35) | B02 Phase 2: verifier as its own container in prod | Production cutover from inline to HTTP verifier. |
-| 12 | [#36](https://github.com/pulkitpareek18/ZeroAuth/pull/36) | B02 Phase 2 hotfix: `127.0.0.1` not `localhost` in verifier healthcheck | 3-minute prod 502 caught + recovered via SSH `--no-deps` start; permanent fix via PR. Documented in the Dockerfile comment so the next operator doesn't revert. |
-| 13 | [#37](https://github.com/pulkitpareek18/ZeroAuth/pull/37) | B02 SQLite append-only audit log + hash chain in verifier | Defense in depth — verifier-local audit log independent from Postgres. |
-| 14 | [#38](https://github.com/pulkitpareek18/ZeroAuth/pull/38) | ADR-0006: verifier in TS workspace, not Rust separate repo | Formal record of Plan B decision + inline-fallback retirement timeline (2026-06-08). |
+| 1 | [#22](https://github.com/zeroauth-dev/ZeroAuth/pull/22) | Central API developer console: 10 pages, 82 tests, CI gated | Dashboard live at `/dashboard/*`. Brainstorm had this in Week 6. |
+| 2 | [#24](https://github.com/zeroauth-dev/ZeroAuth/pull/24) | Dashboard `@types/node` Docker hotfix | Unblocked the build after PR #22's squash-merge surfaced a type-resolution gap. |
+| 3 | [#25](https://github.com/zeroauth-dev/ZeroAuth/pull/25) | Marketing site: product-led landing with dashboard CTAs + Quickstart | Replaced single-pilot-form layout with Sign in / Get started cluster + tabbed Quickstart. |
+| 4 | [#28](https://github.com/zeroauth-dev/ZeroAuth/pull/28) | Day 3 bundle: governance repo + qa-log + PR #22 security fixes + B02 plan | One PR for the Day 3 discipline-gap clearance. |
+| 5 | [#29](https://github.com/zeroauth-dev/ZeroAuth/pull/29) | B02 Plan B: split Groth16 verifier into `@zeroauth/verifier` workspace | Architectural seam landed. Inline fallback retained as safety net. |
+| 6 | [#30](https://github.com/zeroauth-dev/ZeroAuth/pull/30) | Test sweep — 73 → 217 tests across services, middleware, verifier package | 144 new tests in one PR. |
+| 7 | [#31](https://github.com/zeroauth-dev/ZeroAuth/pull/31) | Landing page: Pramaan IP vs ZeroAuth product split + new whitepaper | Brand pivot. Yushu Excellence Technologies + Pramaan™ patent (IN202311041001) now anchored on the site. |
+| 8 | [#32](https://github.com/zeroauth-dev/ZeroAuth/pull/32) | Landing page broken-link fixes | `status.zeroauth.dev` + `api.zeroauth.dev` cleaned up. |
+| 9 | [#33](https://github.com/zeroauth-dev/ZeroAuth/pull/33) | Email infra (Brevo SMTP via nodemailer) + F-2 partial mitigation | Welcome + signup-attempted-notice emails operating. Brevo IP allowlisting required + done. |
+| 10 | [#34](https://github.com/zeroauth-dev/ZeroAuth/pull/34) | `docs/operations/env-vars.md` runbook | Captures the `restart` vs `up -d --force-recreate` env-file gotcha + the future `PROD_ENV_FILE` GitHub secret path. |
+| 11 | [#35](https://github.com/zeroauth-dev/ZeroAuth/pull/35) | B02 Phase 2: verifier as its own container in prod | Production cutover from inline to HTTP verifier. |
+| 12 | [#36](https://github.com/zeroauth-dev/ZeroAuth/pull/36) | B02 Phase 2 hotfix: `127.0.0.1` not `localhost` in verifier healthcheck | 3-minute prod 502 caught + recovered via SSH `--no-deps` start; permanent fix via PR. Documented in the Dockerfile comment so the next operator doesn't revert. |
+| 13 | [#37](https://github.com/zeroauth-dev/ZeroAuth/pull/37) | B02 SQLite append-only audit log + hash chain in verifier | Defense in depth — verifier-local audit log independent from Postgres. |
+| 14 | [#38](https://github.com/zeroauth-dev/ZeroAuth/pull/38) | ADR-0006: verifier in TS workspace, not Rust separate repo | Formal record of Plan B decision + inline-fallback retirement timeline (2026-06-08). |
 
 ### Cross-repo PRs (governance)
 
 | Repo | Change | Why |
 |---|---|---|
-| `pulkitpareek18/ZeroAuth-Governance` | Initial scaffold (30 files) + counsel-not-engaged honesty patch + verifier component threat-model promoted from stub to v1 with A-V01..A-V05 entries | Day 3 created the repo (collapsed → split per ADR-0004). Day 5 promoted the verifier threat model after PR #37 went live. |
+| `zeroauth-dev/ZeroAuth-Governance` | Initial scaffold (30 files) + counsel-not-engaged honesty patch + verifier component threat-model promoted from stub to v1 with A-V01..A-V05 entries | Day 3 created the repo (collapsed → split per ADR-0004). Day 5 promoted the verifier threat model after PR #37 went live. |
 
 ### Total numbers
 
@@ -74,7 +74,7 @@ PRs merged to main, in order:
 
 | Source | Item | Severity | Owner | Next step |
 |---|---|---|---|---|
-| Issue [#27](https://github.com/pulkitpareek18/ZeroAuth/issues/27) | F-2 byte-identical email-enumeration fix (v2 — 202 always + verification flow) | Medium (down from Critical thanks to Day 4 timing-equalization + notice email) | Pulkit | Week 2 build item. Breaks dashboard signup flow + Playwright happy path; ~4–6h. |
+| Issue [#27](https://github.com/zeroauth-dev/ZeroAuth/issues/27) | F-2 byte-identical email-enumeration fix (v2 — 202 always + verification flow) | Medium (down from Critical thanks to Day 4 timing-equalization + notice email) | Pulkit | Week 2 build item. Breaks dashboard signup flow + Playwright happy path; ~4–6h. |
 | ADR-0005 (open) | Engage external DPO + IP counsel | High (gates SOW) | Amit | Pick firm at W05 review. Recommended: Ikigai Law (specialist boutique) or Khaitan & Co (full-service). |
 | ADR-0006 | Inline-fallback retirement in `src/services/zkp.ts` | Low | Pulkit | Hard date: 2026-06-08 (end of Week 4). 3-week soak window starts today. |
 | Verifier threat model | Periodic `/audit/verify-chain` cron + alert | Medium | Pulkit | Week 2 ops task. Daily run + page on `ok:false`. |
@@ -128,7 +128,7 @@ Default plan for Mon 2026-05-18 → Fri 2026-05-22, subject to revision in the W
 
 | Day | Item | Why |
 |---|---|---|
-| Mon | **B03 — IoT terminal firmware skeleton** (`pulkitpareek18/ZeroAuth-IoT` new repo). Per dev brainstorm Week 3 schedule, but bringing forward to Week 2 Mon. | The four demos unblock when B03 + B13 ship. Earlier ⇒ pilot demos sooner. |
+| Mon | **B03 — IoT terminal firmware skeleton** (`zeroauth-dev/ZeroAuth-IoT` new repo). Per dev brainstorm Week 3 schedule, but bringing forward to Week 2 Mon. | The four demos unblock when B03 + B13 ship. Earlier ⇒ pilot demos sooner. |
 | Tue | **Counsel outreach (Amit) + Issue #27 v2** (Pulkit, in parallel). | ADR-0005 closure starts the engagement window. F-2 v2 needs the email infra that's now live. |
 | Wed | **B13 — Liveness detection skeleton** + mock-hardware demos pass | Demo 1 of the four-demo battery starts to lift. |
 | Thu | **Periodic chain-verify cron + off-host SQLite backup** + DPDP mapping counsel review (if Amit has firm picked) | Closes two open items the verifier threat model flagged. |

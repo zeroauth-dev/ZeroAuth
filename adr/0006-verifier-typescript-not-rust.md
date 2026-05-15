@@ -20,13 +20,13 @@ The plan-mode doc's §3.3 recommended **Plan A**. Pulkit picked **Plan B** on Th
 
 ## Decision
 
-The Groth16 verifier ships as **`@zeroauth/verifier`, an npm workspace inside `pulkitpareek18/ZeroAuth`**, written in TypeScript on top of `snarkjs`. It runs as a separate Docker container (`zeroauth-verifier`) bound to `127.0.0.1:3001` on the Docker network. The API container reaches it via HTTP — never inline anymore.
+The Groth16 verifier ships as **`@zeroauth/verifier`, an npm workspace inside `zeroauth-dev/ZeroAuth`**, written in TypeScript on top of `snarkjs`. It runs as a separate Docker container (`zeroauth-verifier`) bound to `127.0.0.1:3001` on the Docker network. The API container reaches it via HTTP — never inline anymore.
 
 Shipped in three PRs today:
 
-- [PR #35](https://github.com/pulkitpareek18/ZeroAuth/pull/35) — Dockerfile `verifier-build` + `verifier-production` stages, compose service, `VERIFIER_URL` wired into the API's environment.
-- [PR #36](https://github.com/pulkitpareek18/ZeroAuth/pull/36) — Healthcheck hotfix (`localhost` → `127.0.0.1` because alpine busybox `wget` hits IPv6 first).
-- [PR #37](https://github.com/pulkitpareek18/ZeroAuth/pull/37) — SQLite append-only audit log + hash chain (the design doc §4.3 component).
+- [PR #35](https://github.com/zeroauth-dev/ZeroAuth/pull/35) — Dockerfile `verifier-build` + `verifier-production` stages, compose service, `VERIFIER_URL` wired into the API's environment.
+- [PR #36](https://github.com/zeroauth-dev/ZeroAuth/pull/36) — Healthcheck hotfix (`localhost` → `127.0.0.1` because alpine busybox `wget` hits IPv6 first).
+- [PR #37](https://github.com/zeroauth-dev/ZeroAuth/pull/37) — SQLite append-only audit log + hash chain (the design doc §4.3 component).
 
 The inline-`snarkjs` fallback in `src/services/zkp.ts` **stays in the codebase for two more weeks** as a safety net while the verifier service soaks in production. It activates only when `VERIFIER_URL` is unset (which never happens in prod — the value is hard-set in `docker-compose.yml`'s `environment:` block). Retirement is scheduled for end of Week 4 of the build cycle (~2026-06-08), as a separate PR.
 
@@ -52,7 +52,7 @@ Single-engineer velocity. The Rust path was the brainstorm's recommendation when
 - **No reproducible build provenance** for the verifier image. Docker `buildx --provenance --sbom` would produce signed attestations, but the `better-sqlite3` native build (alpine arm64-musl has no prebuilt → node-gyp compile via apk-added python+make+g++) is non-deterministic. The audit story is therefore "trust the image" not "verify the image's bytes." Acceptable for v0; this is the single biggest delta vs Plan A.
 - **Larger transitive surface.** snarkjs has ~12 transitive deps vs arkworks' ~6. Each is JS, MIT-licensed, audited; but the larger surface is real.
 - **`cryptographer-reviewer` subagent calibration** assumes Rust + arkworks per its current spec. The subagent works against snarkjs too (it's just JS) but the review is less precise — Rust's type system catches a class of memory-safety bugs the reviewer can stop looking for. With snarkjs, the reviewer has to reason about JS-level invariants. Documented in the subagent's known-limitations section (TBD).
-- **No `--unsafe` audit story.** TypeScript has no equivalent of Rust's `unsafe` block, so the "no unsafe without an ADR" rule in B02's quality bar doesn't transfer. The closest analog is "no `any` in exported signatures + no `dangerouslySetInnerHTML` in user-rendering code" which is already in our [`coding-standards.md`](https://github.com/pulkitpareek18/ZeroAuth-Governance/blob/main/docs/shared/coding-standards.md).
+- **No `--unsafe` audit story.** TypeScript has no equivalent of Rust's `unsafe` block, so the "no unsafe without an ADR" rule in B02's quality bar doesn't transfer. The closest analog is "no `any` in exported signatures + no `dangerouslySetInnerHTML` in user-rendering code" which is already in our [`coding-standards.md`](https://github.com/zeroauth-dev/ZeroAuth-Governance/blob/main/docs/shared/coding-standards.md).
 - **Container image size is bigger.** Alpine + node + snarkjs + better-sqlite3 → ~140MB. A static Rust binary would be ~20MB. We're not bandwidth-constrained at single-VPS scale; revisit if/when we go multi-region.
 
 ### Neutral
@@ -85,8 +85,8 @@ If during the soak window any verifier failure mode surfaces that we can't fix f
 
 - Plan-mode design doc: [`docs/design/verifier-service-split.md`](../docs/design/verifier-service-split.md)
 - B02 build prompt (rejected path): `zeroauth_prompt_suite/04_development_suite/02_claude_code_dev/build_prompts/B02_verifier_service_bootstrap.md`
-- Issue tracking: [#35](https://github.com/pulkitpareek18/ZeroAuth/pull/35), [#36](https://github.com/pulkitpareek18/ZeroAuth/pull/36), [#37](https://github.com/pulkitpareek18/ZeroAuth/pull/37)
-- Component threat model (to be promoted from stub in the governance repo): `pulkitpareek18/ZeroAuth-Governance: docs/threat-model/verifier.md`
+- Issue tracking: [#35](https://github.com/zeroauth-dev/ZeroAuth/pull/35), [#36](https://github.com/zeroauth-dev/ZeroAuth/pull/36), [#37](https://github.com/zeroauth-dev/ZeroAuth/pull/37)
+- Component threat model (to be promoted from stub in the governance repo): `zeroauth-dev/ZeroAuth-Governance: docs/threat-model/verifier.md`
 
 ---
 
