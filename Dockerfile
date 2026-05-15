@@ -107,8 +107,12 @@ ENV VERIFIER_PORT=3001
 
 EXPOSE 3001
 
+# NOTE: 127.0.0.1 not localhost. Alpine's busybox wget resolves
+# `localhost` to IPv6 (::1) first; the verifier binds IPv4 0.0.0.0,
+# so the IPv6 connection is refused and busybox bails without falling
+# back to IPv4. Using the literal IPv4 address sidesteps the resolver.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3001/health || exit 1
 
 CMD ["node", "dist/server.js"]
 
