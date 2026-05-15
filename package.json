@@ -57,7 +57,7 @@
     "@types/express-session": "^1.19.0",
     "@types/jest": "^29.5.11",
     "@types/jsonwebtoken": "^9.0.5",
-    "@types/node": "^20.10.6",
+    "@types/node": "^25.8.0",
     "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.20.0",
     "@types/snarkjs": "^0.7.9",

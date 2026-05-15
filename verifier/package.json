@@ -21,7 +21,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.14",
-    "@types/node": "^20.10.6",
+    "@types/node": "^25.8.0",
     "@types/snarkjs": "^0.7.9",
     "@types/supertest": "^6.0.3",
     "@types/uuid": "^9.0.7",
