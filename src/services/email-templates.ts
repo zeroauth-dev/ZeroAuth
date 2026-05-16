@@ -137,6 +137,65 @@ ${input.attemptIp ? `\nAttempt source IP: ${input.attemptIp}\n` : ''}${FOOTER_TE
 }
 
 /**
+ * Sent when someone requests the whitepaper from the landing page. The PDF
+ * is attached so the recipient never has to come back to a download page;
+ * the email itself is the delivery channel.
+ */
+export function whitepaperEmail(): { subject: string; html: string; text: string } {
+  const subject = 'Your ZeroAuth white paper';
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; color: #1f2933; line-height: 1.55;">
+      <h2 style="color:#0a0a0a;font-size:20px;margin-bottom:8px;">Your white paper is attached.</h2>
+      <p style="font-size:15px;">
+        Thanks for requesting the ZeroAuth white paper. The PDF is attached to this
+        message — 36 pages covering the cryptographic construction, the security
+        reductions, the on-chain anchoring model, and the recommended deployment
+        topology.
+      </p>
+      <p style="font-size:15px;">
+        The underlying protocol is Pramaan (Indian Patent IN202311041001),
+        the zero-knowledge biometric identity scheme that powers ZeroAuth.
+      </p>
+      <p style="font-size:15px;">
+        If you have questions after reading, reply to this email or open an issue
+        at <a href="https://github.com/zeroauth-dev/ZeroAuth/issues" style="color:#0a0a0a;text-decoration:underline;">github.com/zeroauth-dev/ZeroAuth/issues</a>.
+      </p>
+      <p style="font-size:15px;margin-top:20px;">
+        Useful next steps:
+      </p>
+      <ul style="font-size:15px;line-height:1.7;">
+        <li>Read the <a href="https://zeroauth.dev/docs/getting-started/quickstart/" style="color:#0a0a0a;text-decoration:underline;">Quickstart</a></li>
+        <li>Browse the <a href="https://zeroauth.dev/docs/reference/api-reference" style="color:#0a0a0a;text-decoration:underline;">API reference</a></li>
+        <li>Self-host the <a href="https://github.com/zeroauth-dev/ZeroAuth" style="color:#0a0a0a;text-decoration:underline;">reference implementation</a></li>
+      </ul>
+      ${FOOTER_HTML}
+    </div>
+  `;
+
+  const text = `Your white paper is attached.
+
+Thanks for requesting the ZeroAuth white paper. The PDF is attached to this
+message — 36 pages covering the cryptographic construction, the security
+reductions, the on-chain anchoring model, and the recommended deployment
+topology.
+
+The underlying protocol is Pramaan (Indian Patent IN202311041001), the
+zero-knowledge biometric identity scheme that powers ZeroAuth.
+
+If you have questions after reading, reply to this email or open an issue at
+https://github.com/zeroauth-dev/ZeroAuth/issues
+
+Useful next steps:
+- Read the Quickstart: https://zeroauth.dev/docs/getting-started/quickstart/
+- Browse the API reference: https://zeroauth.dev/docs/reference/api-reference
+- Self-host the reference implementation: https://github.com/zeroauth-dev/ZeroAuth
+${FOOTER_TEXT}`;
+
+  return { subject, html, text };
+}
+
+/**
  * Minimal HTML escape for user-supplied strings landing in templates.
  * Don't use a full library for this — the surface is tiny (operator email
  * + company name) and a 4-line escape is cheaper to audit.

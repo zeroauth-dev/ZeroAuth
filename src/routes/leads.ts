@@ -1,9 +1,37 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { authenticateAdmin } from '../middleware/auth';
 import { logger } from '../services/logger';
 import { getPoolOrNull } from '../services/db';
+import { sendMail } from '../services/email';
+import { whitepaperEmail } from '../services/email-templates';
 
 const router = Router();
+
+/**
+ * Resolve the whitepaper PDF path across environments. The Dockerfile builds
+ * the docs site into website/build/, so production reads from there. In dev
+ * we fall back to the source PDFs in website/static or docs/. Resolved once
+ * at first use; null means no PDF is shipped with this build.
+ */
+let whitepaperPathCache: string | null | undefined;
+function resolveWhitepaperPath(): string | null {
+  if (whitepaperPathCache !== undefined) return whitepaperPathCache;
+  const candidates = [
+    path.resolve(__dirname, '..', '..', 'website', 'build', 'whitepaper.pdf'),
+    path.resolve(__dirname, '..', '..', 'website', 'static', 'whitepaper.pdf'),
+    path.resolve(__dirname, '..', '..', 'docs', 'whitepaper.pdf'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      whitepaperPathCache = p;
+      return p;
+    }
+  }
+  whitepaperPathCache = null;
+  return null;
+}
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -83,11 +111,39 @@ router.post('/whitepaper', async (req: Request, res: Response) => {
   }
 
   logger.info('Whitepaper lead submitted', { email: trimmedEmail });
+
+  // Best-effort mail delivery — non-blocking for the response. If SMTP is
+  // unconfigured (dev) the call no-ops; the downloadUrl in the response is
+  // the fallback so the user can still read the paper.
+  const pdfPath = resolveWhitepaperPath();
+  if (pdfPath) {
+    const { subject, html, text } = whitepaperEmail();
+    void sendMail({
+      to: trimmedEmail,
+      subject,
+      html,
+      text,
+      attachments: [
+        {
+          filename: 'ZeroAuth_Whitepaper.pdf',
+          path: pdfPath,
+          contentType: 'application/pdf',
+        },
+      ],
+    }).then((result) => {
+      if (!result.ok && !result.skipped) {
+        logger.warn('Whitepaper email send failed', { error: result.error });
+      }
+    });
+  } else {
+    logger.warn('Whitepaper PDF not found on disk — email will not include attachment');
+  }
+
   res.status(201).json({
     success: true,
-    message: 'Whitepaper access granted.',
+    message: 'Whitepaper sent. Check your inbox in a minute.',
     downloadUrl: '/docs/whitepaper.pdf',
-    filename: 'Pramaan_Whitepaper.pdf',
+    filename: 'ZeroAuth_Whitepaper.pdf',
   });
 });
 
