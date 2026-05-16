@@ -64,7 +64,7 @@
       text-decoration: none; color: var(--text);
       font-size: 1.125rem; font-weight: 700; letter-spacing: -0.02em;
     }
-    .logo svg { width: 28px; height: 28px; }
+    .logo svg, .logo img { width: 28px; height: 28px; }
     .powered-by {
       display: inline-flex; align-items: center; gap: 0.3125rem;
       padding: 0.1875rem 0.5rem;
@@ -753,7 +753,7 @@
       color: var(--text);
       margin-bottom: 0.75rem;
     }
-    .footer-brand-col .footer-brand svg { width: 22px; height: 22px; }
+    .footer-brand-col .footer-brand svg, .footer-brand-col .footer-brand img { width: 22px; height: 22px; }
     .footer-tagline {
       font-size: 0.8125rem;
       color: var(--text-secondary);
@@ -934,11 +934,7 @@
     <div class="nav-inner">
       <div style="display:flex;align-items:center;gap:0.75rem;">
         <a href="/" class="logo">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs><linearGradient id="nav-g" x1="3" y1="2.5" x2="21" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4285F4"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
-            <rect x="2" y="2" width="20" height="20" rx="6" fill="url(#nav-g)"/>
-            <path d="M7.25 7.75H16.75L7.25 16.25H16.75" stroke="white" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          <img src="/zeroauth-mark-dark.svg" alt="" aria-hidden="true" />
           ZeroAuth
         </a>
         <a href="#patents" class="powered-by" title="Pramaan is the patented zero-knowledge biometric identity protocol that ZeroAuth is built on (Indian Patent IN202311041001, granted to Yushu Excellence Technologies Pvt. Ltd.)">
@@ -1472,11 +1468,7 @@ result = <span class="var">za</span>.verifications.<span class="fn">create</span
       <div class="footer-grid">
         <div class="footer-brand-col">
           <div class="footer-brand">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <defs><linearGradient id="ft-g" x1="3" y1="2.5" x2="21" y2="22" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#4285F4"/><stop offset="1" stop-color="#0B57D0"/></linearGradient></defs>
-              <rect x="2" y="2" width="20" height="20" rx="6" fill="url(#ft-g)"/>
-              <path d="M7.25 7.75H16.75L7.25 16.25H16.75" stroke="white" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <img src="/zeroauth-mark-dark.svg" alt="" aria-hidden="true" />
             ZeroAuth
           </div>
           <p class="footer-tagline">Auth API where a breach exposes nothing. Built on the patented <strong style="color:var(--text-secondary);font-weight:600;">Pramaan&trade;</strong> zero-knowledge biometric protocol.</p>

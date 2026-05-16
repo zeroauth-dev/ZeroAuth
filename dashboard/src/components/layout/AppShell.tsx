@@ -92,11 +92,7 @@ export function AppShell() {
         )}
       >
         <div className="flex h-14 items-center gap-2 border-b border-[var(--color-border-subtle)] px-4">
-          <div className="grid size-7 place-items-center rounded-md bg-gradient-to-br from-[var(--color-brand)] to-[var(--color-brand-dark)] text-white">
-            <svg viewBox="0 0 24 24" width={16} height={16} fill="none">
-              <path d="M7.25 7.75H16.75L7.25 16.25H16.75" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
+          <img src="/zeroauth-mark-dark.svg" alt="" aria-hidden="true" className="size-7" />
           <div>
             <div className="text-sm font-semibold leading-none">ZeroAuth</div>
             <div className="mt-0.5 text-[10px] text-[var(--color-text-dim)]">Developer console</div>
