@@ -10,7 +10,7 @@
   <meta name="description" content="A drop-in identity API built on zero-knowledge cryptography. The biometric never leaves the device. The server never sees it." />
 
   <meta property="og:title" content="ZeroAuth" />
-  <meta property="og:description" content="Authentication where a breach exposes nothing. A drop-in identity API built on zero-knowledge cryptography." />
+  <meta property="og:description" content="Authentication where a breach exposes nothing. Drop-in identity API built on zero-knowledge cryptography." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://zeroauth.dev" />
   <meta property="og:image" content="https://zeroauth.dev/zeroauth-mark.svg" />
@@ -28,9 +28,10 @@
     html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     body, h1, h2, h3, h4, p, figure, blockquote, dl, dd { margin: 0; }
     ul[role="list"], ol[role="list"] { list-style: none; padding: 0; margin: 0; }
-    img, picture, svg { display: block; max-width: 100%; }
+    img, picture, svg, iframe { display: block; max-width: 100%; }
     button, input, textarea, select { font: inherit; color: inherit; }
     button { background: none; border: 0; padding: 0; cursor: pointer; }
+    code, pre { font-family: var(--font-mono); }
 
     :root {
       --bg: #ffffff;
@@ -46,14 +47,15 @@
       --line-strong: #d4d4d4;
       --line-inverse: #1f1f1f;
       --status: #1a7a4a;
+      --warn: #b91c1c;
 
       --font-display: 'Fraunces', 'Times New Roman', serif;
       --font-body: 'Inter Tight', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
       --container: 1320px;
-      --pad-x: clamp(24px, 5vw, 80px);
-      --section-y: clamp(96px, 13vw, 168px);
+      --pad-x: clamp(20px, 4.5vw, 64px);
+      --section-y: clamp(80px, 10vw, 128px);
     }
 
     html { scroll-behavior: smooth; }
@@ -87,7 +89,7 @@
       font-family: var(--font-body);
       font-size: 11px;
       font-weight: 500;
-      letter-spacing: 0.22em;
+      letter-spacing: 0.2em;
       text-transform: uppercase;
       color: var(--ink-3);
     }
@@ -99,9 +101,9 @@
       font-family: var(--font-display);
       font-weight: 300;
       font-variation-settings: "opsz" 144;
-      font-size: clamp(2.5rem, 6.4vw, 5.75rem);
-      line-height: 1.02;
-      letter-spacing: -0.035em;
+      font-size: clamp(2.25rem, 5.6vw, 4.75rem);
+      line-height: 1.04;
+      letter-spacing: -0.03em;
       color: var(--ink);
     }
     .display em { font-style: italic; font-weight: 400; }
@@ -110,35 +112,37 @@
       font-family: var(--font-display);
       font-weight: 300;
       font-variation-settings: "opsz" 60;
-      font-size: clamp(2rem, 4.5vw, 3.5rem);
-      line-height: 1.08;
-      letter-spacing: -0.025em;
+      font-size: clamp(1.75rem, 3.8vw, 2.875rem);
+      line-height: 1.1;
+      letter-spacing: -0.022em;
     }
     .display-2 em { font-style: italic; font-weight: 400; }
 
     .lede {
-      font-size: clamp(1.0625rem, 1.5vw, 1.25rem);
+      font-size: clamp(1rem, 1.3vw, 1.125rem);
       line-height: 1.55;
       color: var(--ink-2);
-      max-width: 56ch;
+      max-width: 60ch;
     }
+
+    /* ───── Buttons / links ───── */
 
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 10px;
-      height: 52px;
-      padding-inline: 32px;
+      height: 48px;
+      padding-inline: 28px;
       font-family: var(--font-body);
       font-size: 12px;
       font-weight: 500;
-      letter-spacing: 0.14em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
       border: 1px solid var(--ink);
       background: var(--ink);
       color: var(--bg);
-      transition: background 240ms ease, color 240ms ease, border-color 240ms ease, transform 240ms ease;
+      transition: background 200ms ease, color 200ms ease, transform 200ms ease;
     }
     .btn:hover { background: transparent; color: var(--ink); }
     .btn:active { transform: translateY(1px); }
@@ -151,8 +155,8 @@
     .btn.ghost.on-dark { background: transparent; color: var(--ink-inverse); border-color: var(--ink-inverse); }
     .btn.ghost.on-dark:hover { background: var(--ink-inverse); color: var(--ink); }
 
-    .btn .arrow { transition: transform 240ms ease; }
-    .btn:hover .arrow { transform: translateX(4px); }
+    .btn .arrow { transition: transform 200ms ease; }
+    .btn:hover .arrow { transform: translateX(3px); }
 
     .link {
       display: inline-flex;
@@ -169,13 +173,13 @@
     .link.on-dark { color: var(--ink-inverse); }
     .link.on-dark:hover { border-color: var(--ink-inverse); }
 
-    /* ───────── Nav ───────── */
+    /* ───── Nav ───── */
 
     .nav {
       position: sticky;
       top: 0;
       z-index: 100;
-      background: rgba(255, 255, 255, 0.86);
+      background: rgba(255,255,255,0.88);
       backdrop-filter: saturate(140%) blur(16px);
       -webkit-backdrop-filter: saturate(140%) blur(16px);
       border-bottom: 1px solid var(--line);
@@ -184,7 +188,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      height: 72px;
+      height: 68px;
       gap: 32px;
     }
     .brand {
@@ -202,12 +206,12 @@
     .nav-links {
       display: flex;
       align-items: center;
-      gap: 36px;
+      gap: 32px;
     }
     .nav-links a {
       font-size: 13px;
       font-weight: 500;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.03em;
       color: var(--ink-2);
       transition: color 180ms ease;
     }
@@ -217,15 +221,15 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      height: 40px;
-      padding-inline: 22px;
+      height: 38px;
+      padding-inline: 20px;
       font-size: 12px;
       font-weight: 500;
       letter-spacing: 0.12em;
       text-transform: uppercase;
       background: var(--ink);
       color: var(--bg);
-      transition: background 200ms ease, transform 200ms ease;
+      transition: background 200ms ease;
     }
     .nav-cta:hover { background: #1f1f1f; }
     .nav-sign-in {
@@ -238,18 +242,17 @@
 
     @media (max-width: 880px) {
       .nav-links, .nav-sign-in { display: none; }
-      .nav-row { height: 64px; }
+      .nav-row { height: 60px; }
     }
     @media (max-width: 480px) {
       .brand { font-size: 18px; gap: 10px; }
       .brand img { width: 28px; height: 28px; }
-      .nav-cta { height: 38px; padding-inline: 16px; font-size: 11px; letter-spacing: 0.1em; }
+      .nav-cta { height: 36px; padding-inline: 14px; font-size: 11px; letter-spacing: 0.08em; }
     }
 
-    /* ───────── Hero ───────── */
+    /* ───── Hero ───── */
 
-    .hero { padding-block: clamp(72px, 10vw, 144px) clamp(96px, 13vw, 184px); }
-    .hero-grid { display: grid; gap: clamp(40px, 6vw, 80px); }
+    .hero { padding-block: clamp(56px, 8vw, 112px) clamp(64px, 8vw, 112px); border-bottom: 1px solid var(--line); }
     .hero-eyebrow {
       display: inline-flex;
       align-items: center;
@@ -260,249 +263,386 @@
       border-radius: 999px;
       background: var(--status);
     }
-    .hero h1 { max-width: 18ch; }
-    .hero-lede { margin-top: 32px; max-width: 56ch; }
+    .hero h1 { max-width: 18ch; margin-top: 20px; }
+    .hero-lede { margin-top: 28px; max-width: 56ch; }
     .hero-actions {
-      margin-top: 48px;
+      margin-top: 40px;
       display: flex;
       flex-wrap: wrap;
-      gap: 16px;
+      gap: 14px;
     }
-    .hero-meta {
-      margin-top: clamp(56px, 8vw, 96px);
-      padding-top: 32px;
+    .hero-stats {
+      margin-top: clamp(48px, 6vw, 80px);
+      padding-top: 28px;
       border-top: 1px solid var(--line);
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 32px;
     }
-    .hero-meta-item .eyebrow { display: block; margin-bottom: 12px; }
-    .hero-meta-item p { font-size: 14px; line-height: 1.5; color: var(--ink-2); max-width: 32ch; }
-    @media (max-width: 720px) {
-      .hero-meta { grid-template-columns: 1fr; gap: 24px; }
-    }
-
-    /* ───────── Manifesto ───────── */
-
-    .manifesto {
-      padding-block: var(--section-y);
-      border-top: 1px solid var(--line);
-    }
-    .manifesto-grid {
-      display: grid;
-      grid-template-columns: 1fr 2fr;
-      gap: clamp(40px, 8vw, 120px);
-      align-items: start;
-    }
-    @media (max-width: 880px) { .manifesto-grid { grid-template-columns: 1fr; gap: 40px; } }
-    .manifesto p {
-      font-family: var(--font-display);
-      font-weight: 300;
-      font-variation-settings: "opsz" 60;
-      font-size: clamp(1.625rem, 3vw, 2.5rem);
-      line-height: 1.22;
-      letter-spacing: -0.018em;
-      color: var(--ink);
-    }
-    .manifesto p + p { margin-top: 24px; color: var(--ink-2); }
-    .manifesto em { font-style: italic; font-weight: 400; }
-
-    /* ───────── Numbers ───────── */
-
-    .numbers {
-      padding-block: clamp(96px, 12vw, 144px);
-      background: var(--bg-muted);
-      border-block: 1px solid var(--line);
-    }
-    .numbers-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: clamp(32px, 4vw, 56px);
-    }
-    @media (max-width: 720px) { .numbers-grid { grid-template-columns: 1fr; gap: 48px; } }
-    .number-item .num {
+    .hero-stat .num {
       font-family: var(--font-display);
       font-weight: 300;
       font-variation-settings: "opsz" 144;
-      font-size: clamp(4rem, 9vw, 7rem);
-      line-height: 0.95;
-      letter-spacing: -0.04em;
+      font-size: clamp(2.5rem, 5vw, 3.75rem);
+      line-height: 1;
+      letter-spacing: -0.035em;
       color: var(--ink);
     }
-    .number-item .label {
-      margin-top: 16px;
-      padding-top: 16px;
-      border-top: 1px solid var(--line-strong);
+    .hero-stat .num small { font-size: 0.5em; letter-spacing: -0.02em; }
+    .hero-stat .lbl {
+      margin-top: 12px;
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      font-weight: 500;
+    }
+    .hero-stat .desc {
+      margin-top: 6px;
       font-size: 13px;
       color: var(--ink-2);
-      max-width: 28ch;
-      line-height: 1.5;
+      max-width: 30ch;
+    }
+    @media (max-width: 720px) {
+      .hero-stats { grid-template-columns: 1fr; gap: 24px; padding-top: 24px; }
     }
 
-    /* ───────── Section header pattern ───────── */
+    /* ───── Section header pattern ───── */
 
     .section-head {
       display: grid;
-      grid-template-columns: 1fr 2fr;
-      gap: clamp(32px, 6vw, 96px);
-      margin-bottom: clamp(56px, 8vw, 96px);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+      gap: clamp(24px, 5vw, 80px);
+      margin-bottom: clamp(40px, 6vw, 64px);
       align-items: end;
     }
-    @media (max-width: 880px) { .section-head { grid-template-columns: 1fr; gap: 24px; margin-bottom: 48px; } }
-    .section-head .eyebrow { display: block; margin-bottom: 16px; }
-    .section-head .lede { margin-top: 24px; }
+    @media (max-width: 880px) { .section-head { grid-template-columns: 1fr; gap: 16px; margin-bottom: 36px; } }
+    .section-head .eyebrow { display: block; margin-bottom: 14px; }
+    .section-head .lede { margin-top: 0; }
 
-    /* ───────── Products ───────── */
+    /* ───── Live demo (iframe) ───── */
 
-    .products { padding-block: var(--section-y); }
-    .products-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      border-top: 1px solid var(--line);
+    .live-demo { padding-block: var(--section-y); }
+    .demo-frame {
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      background: #06070d;
+      overflow: hidden;
+      position: relative;
     }
-    @media (max-width: 880px) { .products-grid { grid-template-columns: 1fr; } }
-    .product {
-      padding: 48px 32px 40px 0;
-      border-right: 1px solid var(--line);
+    .demo-iframe {
+      width: 100%;
+      height: clamp(440px, 64vh, 680px);
+      border: 0;
     }
-    .product:last-child { border-right: 0; padding-right: 0; }
-    @media (max-width: 880px) {
-      .product { border-right: 0; border-bottom: 1px solid var(--line); padding: 40px 0; }
-      .product:last-child { border-bottom: 0; }
+    .demo-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 20px;
+      gap: 16px;
+      flex-wrap: wrap;
     }
-    @media (min-width: 881px) {
-      .product { padding-left: clamp(0px, 2vw, 32px); }
-      .product:first-child { padding-left: 0; }
-    }
-    .product-num {
+    .demo-meta-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
       font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 500;
+      font-size: 11px;
       letter-spacing: 0.08em;
+      text-transform: uppercase;
       color: var(--ink-3);
-      margin-bottom: 24px;
     }
-    .product h3 {
+    .demo-meta-left .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--status); }
+
+    /* ───── Quickstart with code tabs ───── */
+
+    .quickstart { padding-block: var(--section-y); background: var(--bg-muted); border-block: 1px solid var(--line); }
+    .quickstart-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+      gap: clamp(32px, 5vw, 64px);
+      align-items: start;
+    }
+    @media (max-width: 960px) { .quickstart-grid { grid-template-columns: 1fr; } }
+
+    .qs-step { padding-block: 16px; border-top: 1px solid var(--line); }
+    .qs-step:first-child { border-top: 0; padding-top: 0; }
+    .qs-step h3 {
       font-family: var(--font-display);
       font-weight: 400;
       font-variation-settings: "opsz" 60;
-      font-size: clamp(1.375rem, 2vw, 1.75rem);
-      line-height: 1.15;
-      letter-spacing: -0.02em;
-      margin-bottom: 16px;
+      font-size: 1.25rem;
+      line-height: 1.2;
+      letter-spacing: -0.015em;
+      margin-bottom: 8px;
     }
-    .product p {
-      font-size: 15px;
-      line-height: 1.6;
-      color: var(--ink-2);
-      max-width: 32ch;
-    }
-    .product .tag {
+    .qs-step h3 .n {
       display: inline-block;
-      margin-top: 24px;
+      width: 26px;
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: 12px;
       letter-spacing: 0.06em;
       color: var(--ink-3);
+      vertical-align: middle;
     }
+    .qs-step p { font-size: 14px; line-height: 1.6; color: var(--ink-2); max-width: 44ch; margin-left: 26px; }
+    .qs-step .ic { display: inline-block; font-family: var(--font-mono); font-size: 12px; padding: 1px 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; color: var(--ink); }
+    .qs-actions { display: flex; gap: 12px; margin-top: 24px; margin-left: 26px; flex-wrap: wrap; }
 
-    /* ───────── How it works ───────── */
+    /* Code card */
+    .code-card {
+      background: var(--bg-inverse);
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .code-tabs {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      background: var(--bg-inverse-raised);
+      border-bottom: 1px solid var(--line-inverse);
+      padding-inline: 8px;
+    }
+    .code-tab {
+      padding: 12px 16px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      color: var(--ink-inverse-2);
+      border-bottom: 1px solid transparent;
+      transition: color 150ms ease, border-color 150ms ease;
+    }
+    .code-tab:hover { color: var(--ink-inverse); }
+    .code-tab.active { color: var(--ink-inverse); border-bottom-color: var(--ink-inverse); }
+    .code-copy {
+      margin-left: auto;
+      padding: 6px 12px;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-inverse-2);
+      border: 1px solid var(--line-inverse);
+      transition: color 150ms ease, border-color 150ms ease;
+    }
+    .code-copy:hover { color: var(--ink-inverse); border-color: var(--ink-inverse-2); }
+    .code-pane {
+      display: none;
+      padding: clamp(16px, 2vw, 24px);
+      overflow-x: auto;
+    }
+    .code-pane.active { display: block; }
+    .code-pane pre {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.7;
+      color: #ededed;
+      white-space: pre;
+    }
+    .code-pane .c-cmt { color: #6e6e6e; }
+    .code-pane .c-str { color: #d0d0d0; }
+    .code-pane .c-kw { color: #b8b8b8; }
+    .code-pane .c-fn { color: #fafafa; }
 
-    .how { padding-block: var(--section-y); border-top: 1px solid var(--line); }
-    .how-steps { display: flex; flex-direction: column; }
+    /* ───── How it works (steps + mini-code) ───── */
+
+    .how { padding-block: var(--section-y); }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: clamp(20px, 3vw, 36px);
+    }
+    @media (max-width: 960px) { .steps { grid-template-columns: 1fr; } }
     .step {
       display: grid;
-      grid-template-columns: 64px 1fr 1.4fr;
-      gap: clamp(24px, 4vw, 64px);
-      padding-block: clamp(40px, 5vw, 64px);
-      border-bottom: 1px solid var(--line);
-      align-items: start;
-    }
-    .step:last-child { border-bottom: 0; }
-    @media (max-width: 880px) {
-      .step { grid-template-columns: 1fr; gap: 12px; padding-block: 40px; }
+      gap: 16px;
+      padding: 28px;
+      border: 1px solid var(--line);
+      background: var(--bg);
     }
     .step .step-num {
       font-family: var(--font-mono);
-      font-size: 13px;
-      font-weight: 500;
-      letter-spacing: 0.1em;
+      font-size: 12px;
+      letter-spacing: 0.08em;
       color: var(--ink-3);
     }
     .step h3 {
       font-family: var(--font-display);
       font-weight: 400;
       font-variation-settings: "opsz" 60;
-      font-size: clamp(1.5rem, 2.2vw, 2rem);
+      font-size: 1.375rem;
       line-height: 1.15;
       letter-spacing: -0.02em;
     }
-    .step p { font-size: 15px; line-height: 1.65; color: var(--ink-2); max-width: 50ch; }
+    .step p { font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+    .step .mini-code {
+      background: var(--bg-inverse);
+      color: #ededed;
+      padding: 14px 16px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.7;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .step .mini-code .c-cmt { color: #6e6e6e; }
+    .step .mini-code .c-str { color: #d0d0d0; }
+    .step .mini-code .c-kw { color: #b8b8b8; }
+    .step .mini-code .c-fn { color: #fafafa; }
 
-    /* ───────── Code section (inverted) ───────── */
+    /* ───── Features grid ───── */
 
-    .code-section {
+    .features { padding-block: var(--section-y); background: var(--bg-muted); border-block: 1px solid var(--line); }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0;
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+      background: var(--bg);
+    }
+    @media (max-width: 880px) { .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 560px) { .feature-grid { grid-template-columns: 1fr; } }
+    .feature {
+      padding: 32px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: var(--bg);
+    }
+    .feature .feature-icon {
+      display: block;
+      width: 26px; height: 26px;
+      color: var(--ink);
+      margin-bottom: 20px;
+    }
+    .feature .feature-icon svg { display: block; width: 100%; height: 100%; }
+    .feature h3 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-variation-settings: "opsz" 60;
+      font-size: 1.125rem;
+      line-height: 1.2;
+      letter-spacing: -0.015em;
+      margin-bottom: 10px;
+    }
+    .feature p { font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+    .feature p code { font-size: 12px; background: var(--bg-muted); padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; }
+
+    /* ───── Breach comparison ───── */
+
+    .breach { padding-block: var(--section-y); }
+    .breach-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      border: 1px solid var(--line);
+    }
+    @media (max-width: 880px) { .breach-grid { grid-template-columns: 1fr; } }
+    .breach-card {
+      padding: clamp(28px, 4vw, 44px);
+      background: var(--bg);
+    }
+    .breach-card.dark {
       background: var(--bg-inverse);
       color: var(--ink-inverse);
-      padding-block: var(--section-y);
+      border-left: 1px solid var(--line);
     }
-    .code-section .eyebrow { color: var(--ink-inverse-2); }
-    .code-section .display-2 { color: var(--ink-inverse); }
-    .code-section .lede { color: var(--ink-inverse-2); max-width: 56ch; }
-
-    .code-frame {
-      margin-top: clamp(48px, 6vw, 72px);
-      border: 1px solid var(--line-inverse);
-      background: #0d0d0d;
-      overflow: hidden;
-    }
-    .code-frame-bar {
-      display: flex;
+    @media (max-width: 880px) { .breach-card.dark { border-left: 0; border-top: 1px solid var(--line); } }
+    .breach-card .badge {
+      display: inline-flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 14px 20px;
-      border-bottom: 1px solid var(--line-inverse);
+      gap: 8px;
+      padding: 4px 10px;
       font-family: var(--font-mono);
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      color: var(--ink-inverse-2);
+      font-size: 10px;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
+      color: var(--warn);
+      border: 1px solid var(--warn);
+      margin-bottom: 24px;
     }
-    .code-frame-bar .dots { display: inline-flex; gap: 6px; }
-    .code-frame-bar .dots span {
-      width: 10px; height: 10px; border-radius: 999px; background: #2a2a2a;
+    .breach-card.dark .badge { color: var(--ink-inverse); border-color: var(--line-inverse); }
+    .breach-card h3 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-variation-settings: "opsz" 60;
+      font-size: 1.5rem;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      margin-bottom: 6px;
     }
-    .code-frame pre {
-      margin: 0;
-      padding: clamp(20px, 3vw, 32px);
+    .breach-card .when {
       font-family: var(--font-mono);
-      font-size: 13.5px;
-      line-height: 1.7;
-      color: #ededed;
-      overflow-x: auto;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      color: var(--ink-3);
+      margin-bottom: 28px;
     }
-    .code-frame pre .c-cmt { color: #6e6e6e; }
-    .code-frame pre .c-str { color: #d0d0d0; }
-    .code-frame pre .c-key { color: #a3a3a3; }
+    .breach-card.dark .when { color: var(--ink-inverse-2); }
+    .breach-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding-block: 12px;
+      border-top: 1px solid var(--line);
+      gap: 16px;
+    }
+    .breach-card.dark .breach-row { border-top-color: var(--line-inverse); }
+    .breach-row .k {
+      font-size: 13px;
+      color: var(--ink-2);
+    }
+    .breach-card.dark .breach-row .k { color: var(--ink-inverse-2); }
+    .breach-row .v {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--ink);
+      text-align: right;
+    }
+    .breach-card.dark .breach-row .v { color: var(--ink-inverse); }
+    .breach-total {
+      margin-top: 8px;
+      padding-top: 16px;
+      border-top: 2px solid var(--ink);
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .breach-card.dark .breach-total { border-top-color: var(--ink-inverse); }
+    .breach-total .k {
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      font-weight: 500;
+    }
+    .breach-card.dark .breach-total .k { color: var(--ink-inverse-2); }
+    .breach-total .v {
+      font-family: var(--font-display);
+      font-weight: 300;
+      font-variation-settings: "opsz" 144;
+      font-size: clamp(2rem, 3.5vw, 2.75rem);
+      letter-spacing: -0.025em;
+    }
 
-    .code-cta { margin-top: clamp(32px, 4vw, 48px); }
+    /* ───── Engineering ───── */
 
-    /* ───────── Engineering ───────── */
-
-    .engineering { padding-block: var(--section-y); border-top: 1px solid var(--line); }
+    .engineering { padding-block: var(--section-y); background: var(--bg-muted); border-block: 1px solid var(--line); }
     .engineering-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: clamp(32px, 6vw, 96px);
+      gap: clamp(28px, 5vw, 80px);
       align-items: start;
     }
     @media (max-width: 880px) { .engineering-grid { grid-template-columns: 1fr; } }
     .pillars { display: grid; gap: 0; }
     .pillar {
       display: grid;
-      grid-template-columns: 100px 1fr;
-      gap: 24px;
-      padding-block: 28px;
+      grid-template-columns: 96px 1fr;
+      gap: 20px;
+      padding-block: 22px;
       border-top: 1px solid var(--line);
       align-items: start;
     }
@@ -515,44 +655,149 @@
       text-transform: uppercase;
       padding-top: 3px;
     }
-    .pillar .pillar-val { font-size: 15px; line-height: 1.55; color: var(--ink); }
+    .pillar .pillar-val { font-size: 14px; line-height: 1.55; color: var(--ink); }
     .pillar .pillar-val small { display: block; color: var(--ink-2); margin-top: 4px; font-size: 13px; }
 
-    /* ───────── Whitepaper (inverted, the ONLY pramaan mention) ───────── */
+    .eng-links { display: grid; gap: 14px; align-content: start; }
 
-    .whitepaper {
-      background: var(--bg-inverse);
-      color: var(--ink-inverse);
-      padding-block: var(--section-y);
+    /* ───── Pilot form ───── */
+
+    .pilot { padding-block: var(--section-y); }
+    .pilot-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: clamp(32px, 5vw, 64px);
+      align-items: start;
     }
+    @media (max-width: 880px) { .pilot-grid { grid-template-columns: 1fr; } }
+
+    .benefits { display: grid; gap: 4px; border-top: 1px solid var(--line); }
+    .benefit {
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      gap: 16px;
+      padding-block: 22px;
+      border-bottom: 1px solid var(--line);
+      align-items: start;
+    }
+    .benefit svg { width: 22px; height: 22px; stroke: var(--ink); }
+    .benefit h4 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-variation-settings: "opsz" 60;
+      font-size: 1.0625rem;
+      line-height: 1.2;
+      margin-bottom: 4px;
+      letter-spacing: -0.015em;
+    }
+    .benefit p { font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+
+    .form-card {
+      background: var(--bg-muted);
+      border: 1px solid var(--line);
+      padding: clamp(24px, 3vw, 32px);
+    }
+    .form-card h3 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-variation-settings: "opsz" 60;
+      font-size: 1.375rem;
+      line-height: 1.2;
+      letter-spacing: -0.018em;
+      margin-bottom: 6px;
+    }
+    .form-sub { font-size: 13px; color: var(--ink-2); margin-bottom: 22px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-weight: 500;
+      color: var(--ink-3);
+      margin-bottom: 6px;
+    }
+    .form-group input,
+    .form-group select {
+      display: block;
+      width: 100%;
+      height: 42px;
+      padding-inline: 12px;
+      font-size: 14px;
+      color: var(--ink);
+      background: var(--bg);
+      border: 1px solid var(--line-strong);
+      border-radius: 0;
+      outline: none;
+      transition: border-color 180ms ease;
+    }
+    .form-group input:focus,
+    .form-group select:focus { border-color: var(--ink); }
+    .btn-submit {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 48px;
+      margin-top: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      background: var(--ink);
+      color: var(--bg);
+      border: 1px solid var(--ink);
+      transition: background 200ms ease, color 200ms ease;
+    }
+    .btn-submit:hover { background: transparent; color: var(--ink); }
+    .form-note { margin-top: 14px; font-size: 12px; color: var(--ink-3); }
+    .form-note a { border-bottom: 1px solid var(--line-strong); }
+    .form-note a:hover { border-color: var(--ink); }
+    .form-success { text-align: center; padding: 12px 0 4px; }
+    .form-success svg { width: 36px; height: 36px; stroke: var(--status); margin: 0 auto 12px; }
+    .form-success h4 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-variation-settings: "opsz" 60;
+      font-size: 1.25rem;
+      line-height: 1.2;
+      margin-bottom: 6px;
+    }
+    .form-success p { font-size: 13px; color: var(--ink-2); }
+    .hidden { display: none !important; }
+
+    /* ───── Whitepaper (inverted) ───── */
+
+    .whitepaper { background: var(--bg-inverse); color: var(--ink-inverse); padding-block: var(--section-y); }
     .whitepaper .eyebrow { color: var(--ink-inverse-2); }
     .whitepaper-grid {
       display: grid;
-      grid-template-columns: 1fr 1.2fr;
-      gap: clamp(40px, 8vw, 120px);
+      grid-template-columns: 1fr 1.15fr;
+      gap: clamp(32px, 6vw, 96px);
       align-items: end;
     }
-    @media (max-width: 880px) { .whitepaper-grid { grid-template-columns: 1fr; align-items: start; gap: 40px; } }
+    @media (max-width: 880px) { .whitepaper-grid { grid-template-columns: 1fr; align-items: start; gap: 32px; } }
     .whitepaper h2 {
       font-family: var(--font-display);
       font-weight: 300;
       font-variation-settings: "opsz" 144;
-      font-size: clamp(2.25rem, 4.5vw, 3.75rem);
-      line-height: 1.05;
-      letter-spacing: -0.03em;
+      font-size: clamp(2rem, 4vw, 3.25rem);
+      line-height: 1.06;
+      letter-spacing: -0.028em;
       color: var(--ink-inverse);
       max-width: 14ch;
+      margin-top: 14px;
     }
     .whitepaper h2 em { font-style: italic; font-weight: 400; }
-    .whitepaper p { color: var(--ink-inverse-2); font-size: 16px; line-height: 1.65; max-width: 52ch; }
-    .whitepaper p + p { margin-top: 16px; }
+    .whitepaper p { color: var(--ink-inverse-2); font-size: 15px; line-height: 1.65; max-width: 52ch; }
+    .whitepaper p + p { margin-top: 14px; }
     .whitepaper-meta {
-      margin-top: 32px;
-      padding-top: 24px;
+      margin-top: 28px;
+      padding-top: 20px;
       border-top: 1px solid var(--line-inverse);
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 24px;
+      gap: 20px;
     }
     .whitepaper-meta dt {
       font-family: var(--font-mono);
@@ -562,37 +807,23 @@
       color: var(--ink-inverse-2);
       margin-bottom: 6px;
     }
-    .whitepaper-meta dd {
-      margin: 0;
-      font-size: 14px;
-      color: var(--ink-inverse);
-    }
-    .whitepaper-actions {
-      margin-top: 36px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
+    .whitepaper-meta dd { margin: 0; font-size: 14px; color: var(--ink-inverse); }
+    .whitepaper-actions { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 14px; }
 
-    /* ───────── Footer ───────── */
+    /* ───── Footer ───── */
 
-    footer {
-      background: var(--bg);
-      color: var(--ink);
-      padding-block: clamp(72px, 10vw, 120px) 40px;
-      border-top: 1px solid var(--line);
-    }
+    footer { background: var(--bg); color: var(--ink); padding-block: clamp(64px, 8vw, 96px) 32px; border-top: 1px solid var(--line); }
     .footer-grid {
       display: grid;
       grid-template-columns: 2fr 1fr 1fr 1fr;
-      gap: clamp(32px, 5vw, 64px);
+      gap: clamp(28px, 4vw, 56px);
     }
     @media (max-width: 880px) {
       .footer-grid { grid-template-columns: 1fr 1fr; }
       .footer-brand-col { grid-column: 1 / -1; }
     }
     @media (max-width: 480px) { .footer-grid { grid-template-columns: 1fr; } }
-    .footer-brand-col .brand { margin-bottom: 16px; }
+    .footer-brand-col .brand { margin-bottom: 14px; }
     .footer-tagline { font-size: 14px; line-height: 1.6; color: var(--ink-2); max-width: 36ch; }
     .footer-col h4 {
       font-family: var(--font-body);
@@ -601,42 +832,27 @@
       letter-spacing: 0.18em;
       text-transform: uppercase;
       color: var(--ink-3);
-      margin-bottom: 20px;
+      margin-bottom: 18px;
     }
-    .footer-col ul { display: grid; gap: 12px; list-style: none; padding: 0; margin: 0; }
-    .footer-col a {
-      font-size: 14px;
-      color: var(--ink-2);
-      transition: color 180ms ease;
-    }
+    .footer-col ul { display: grid; gap: 10px; list-style: none; padding: 0; margin: 0; }
+    .footer-col a { font-size: 14px; color: var(--ink-2); transition: color 180ms ease; }
     .footer-col a:hover { color: var(--ink); }
     .footer-bottom {
-      margin-top: clamp(56px, 8vw, 96px);
-      padding-top: 24px;
+      margin-top: clamp(48px, 6vw, 72px);
+      padding-top: 20px;
       border-top: 1px solid var(--line);
       display: flex;
       flex-wrap: wrap;
-      gap: 16px 32px;
+      gap: 14px 28px;
       justify-content: space-between;
       font-size: 12px;
       color: var(--ink-3);
     }
-    .footer-bottom .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .footer-bottom .status .dot {
-      width: 6px; height: 6px;
-      border-radius: 999px;
-      background: var(--status);
-    }
-
-    /* `.reveal` is reserved for future on-scroll animation; currently a no-op so
-       content renders predictably and the page is robust without JS. */
-    .reveal { opacity: 1; transform: none; }
+    .footer-bottom .status { display: inline-flex; align-items: center; gap: 8px; }
+    .footer-bottom .status .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--status); }
   </style>
 </head>
+
 <body>
 
   <header class="nav">
@@ -647,13 +863,14 @@
       </a>
 
       <nav class="nav-links" aria-label="Primary">
-        <a href="#product">Product</a>
+        <a href="#quickstart">Quickstart</a>
+        <a href="#demo">Demo</a>
+        <a href="#features">Product</a>
         <a href="/docs/">Docs</a>
-        <a href="#whitepaper">White paper</a>
         <a href="https://github.com/zeroauth-dev/ZeroAuth">GitHub</a>
       </nav>
 
-      <div style="display:flex; align-items:center; gap:24px;">
+      <div style="display:flex; align-items:center; gap:20px;">
         <a href="/dashboard/login" class="nav-sign-in">Sign in</a>
         <a href="/dashboard/signup" class="nav-cta">Get started <span aria-hidden="true">→</span></a>
       </div>
@@ -664,112 +881,179 @@
 
     <!-- Hero -->
     <section class="hero">
-      <div class="container hero-grid">
-        <div class="reveal">
-          <div class="hero-eyebrow eyebrow">
-            <span class="dot" aria-hidden="true"></span>
-            ZeroAuth · Live in production
-          </div>
-          <h1 class="display" style="margin-top:24px;">
-            Authentication where a breach exposes <em>nothing</em>.
-          </h1>
-          <p class="lede hero-lede">
-            A drop-in identity API built on zero-knowledge cryptography.
-            The biometric never leaves the device. The server never sees it.
-            What we store cannot be reversed, replayed, or sold.
-          </p>
-          <div class="hero-actions">
-            <a href="/dashboard/signup" class="btn">Start building <span class="arrow" aria-hidden="true">→</span></a>
-            <a href="/docs/getting-started/quickstart/" class="btn ghost">Read the docs</a>
-          </div>
+      <div class="container">
+        <div class="hero-eyebrow eyebrow">
+          <span class="dot" aria-hidden="true"></span>
+          ZeroAuth · Live in production
+        </div>
+        <h1 class="display">
+          Authentication where a breach exposes <em>nothing</em>.
+        </h1>
+        <p class="lede hero-lede">
+          A drop-in identity API built on zero-knowledge cryptography.
+          The biometric never leaves the device. The server never sees it.
+          What we store cannot be reversed, replayed, or sold.
+        </p>
+        <div class="hero-actions">
+          <a href="/dashboard/signup" class="btn">Start building <span class="arrow" aria-hidden="true">→</span></a>
+          <a href="#demo" class="btn ghost">See it run</a>
+        </div>
 
-          <div class="hero-meta">
-            <div class="hero-meta-item">
-              <span class="eyebrow">Cryptography</span>
-              <p>Groth16 zero-knowledge proofs over BN128, Poseidon commitments, SHA-256.</p>
-            </div>
-            <div class="hero-meta-item">
-              <span class="eyebrow">Open</span>
-              <p>MIT licensed reference implementation. Public threat model. Open ADRs.</p>
-            </div>
-            <div class="hero-meta-item">
-              <span class="eyebrow">Standards</span>
-              <p>Drop-in SAML 2.0 and OAuth 2.0 / OIDC. Any IdP, no client changes.</p>
-            </div>
+        <div class="hero-stats">
+          <div class="hero-stat">
+            <div class="num">00</div>
+            <div class="lbl">Secrets stored</div>
+            <div class="desc">The database holds commitments, not credentials.</div>
+          </div>
+          <div class="hero-stat">
+            <div class="num">00</div>
+            <div class="lbl">Bytes transmitted</div>
+            <div class="desc">The proof leaves the device. The biometric never does.</div>
+          </div>
+          <div class="hero-stat">
+            <div class="num">100<small>%</small></div>
+            <div class="lbl">Mathematically verified</div>
+            <div class="desc">Soundness reduces to discrete-log on BN128.</div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Manifesto -->
-    <section class="manifesto">
-      <div class="container manifesto-grid">
-        <span class="eyebrow reveal">A new standard</span>
-        <div class="reveal">
-          <p>
-            Passwords leak. Templates leak. Even hashes leak — given a database and time.
-          </p>
-          <p>
-            We removed the thing an attacker could steal. There is no stored credential, no
-            retained biometric, no shared secret. Just a <em>proof</em> — generated on the
-            user's device, verified by mathematics, gone in a hundred milliseconds.
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Numbers -->
-    <section class="numbers" aria-label="Key invariants">
-      <div class="container numbers-grid">
-        <div class="number-item reveal">
-          <div class="num">00</div>
-          <div class="label">Secrets stored. The database holds commitments, not credentials.</div>
-        </div>
-        <div class="number-item reveal">
-          <div class="num">00</div>
-          <div class="label">Biometric bytes transmitted. The proof leaves the device. The biometric never does.</div>
-        </div>
-        <div class="number-item reveal">
-          <div class="num">100<span style="font-size:0.5em;letter-spacing:-0.02em;">%</span></div>
-          <div class="label">Mathematically verified. Soundness reduces to discrete-log on BN128.</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Products -->
-    <section class="products" id="product">
+    <!-- Live demo -->
+    <section class="live-demo" id="demo">
       <div class="container">
         <div class="section-head">
-          <div class="reveal">
-            <span class="eyebrow">The product</span>
-            <h2 class="display-2">One verifier. Three surfaces.</h2>
+          <div>
+            <span class="eyebrow">Live demo</span>
+            <h2 class="display-2">A signup, <em>end&nbsp;to&nbsp;end</em>.</h2>
           </div>
-          <p class="lede reveal">
-            ZeroAuth replaces the credential database with a verifier. The same engine
-            powers zero-knowledge biometric, SAML 2.0, and OIDC under one API and one
-            audit trail.
+          <p class="lede">
+            A real-time simulation of the protocol — enrollment, client-side proof generation,
+            on-chain anchoring, and verification. The biometric never leaves the simulated device.
           </p>
         </div>
 
-        <div class="products-grid">
-          <article class="product reveal">
-            <div class="product-num">01</div>
-            <h3>Zero-knowledge biometric</h3>
-            <p>Client-generated Groth16 proofs. The verifier sees the proof, not the user.</p>
-            <span class="tag">/v1/verifications</span>
-          </article>
-          <article class="product reveal">
-            <div class="product-num">02</div>
-            <h3>SAML 2.0</h3>
-            <p>Standards-compliant Service Provider for any IdP — Okta, Azure AD, Ping, ADFS.</p>
-            <span class="tag">/v1/saml</span>
-          </article>
-          <article class="product reveal">
-            <div class="product-num">03</div>
-            <h3>OAuth 2.0 · OIDC</h3>
-            <p>Authorization-code flow with PKCE, discovery, JWKS, and userinfo.</p>
-            <span class="tag">/v1/oidc</span>
-          </article>
+        <div class="demo-frame">
+          <iframe class="demo-iframe" src="/demo.html" title="ZeroAuth live demo" loading="lazy"></iframe>
+        </div>
+
+        <div class="demo-meta">
+          <span class="demo-meta-left">
+            <span class="dot" aria-hidden="true"></span>
+            Running locally · No real biometric collected
+          </span>
+          <a href="/demo.html" class="link" target="_blank" rel="noopener">Open fullscreen <span aria-hidden="true">↗</span></a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quickstart with code tabs -->
+    <section class="quickstart" id="quickstart">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Quickstart</span>
+            <h2 class="display-2">Up and running in five lines.</h2>
+          </div>
+          <p class="lede">
+            Spin up a tenant from the dashboard, grab an API key, and start issuing
+            zero-knowledge proofs from any backend. SDKs for Node and Python; the
+            REST API works from anywhere.
+          </p>
+        </div>
+
+        <div class="quickstart-grid">
+          <div>
+            <div class="qs-step">
+              <h3><span class="n">01</span>Get an API key</h3>
+              <p>Sign up to create a tenant. You'll get a <span class="ic">za_test_…</span> key for development and a separate <span class="ic">za_live_…</span> key for production.</p>
+            </div>
+            <div class="qs-step">
+              <h3><span class="n">02</span>Register a user</h3>
+              <p>POST a Poseidon commitment from the client SDK. ZeroAuth stores the commitment — never the underlying biometric.</p>
+            </div>
+            <div class="qs-step">
+              <h3><span class="n">03</span>Verify the proof</h3>
+              <p>On every login, send the Groth16 proof to <span class="ic">/v1/verifications</span>. Get back a verified principal in under 100 ms.</p>
+            </div>
+            <div class="qs-actions">
+              <a href="/dashboard/signup" class="btn">Create free account</a>
+              <a href="/docs/getting-started/quickstart/" class="btn ghost">Quickstart guide</a>
+            </div>
+          </div>
+
+          <div class="code-card">
+            <div class="code-tabs" role="tablist">
+              <button class="code-tab active" type="button" role="tab" data-tab="curl">curl</button>
+              <button class="code-tab" type="button" role="tab" data-tab="node">Node.js</button>
+              <button class="code-tab" type="button" role="tab" data-tab="python">Python</button>
+              <button class="code-copy" type="button" data-copy="curl">Copy</button>
+            </div>
+
+            <div class="code-pane active" data-pane="curl">
+<pre><span class="c-cmt"># 1. Register a user with a commitment</span>
+curl <span class="c-kw">-X</span> POST <span class="c-str">https://zeroauth.dev/v1/users/register</span> \
+  <span class="c-kw">-H</span> <span class="c-str">"Authorization: Bearer $ZEROAUTH_API_KEY"</span> \
+  <span class="c-kw">-H</span> <span class="c-str">"Content-Type: application/json"</span> \
+  <span class="c-kw">-d</span> <span class="c-str">'{
+    "external_id": "user_42",
+    "commitment": "0x1f3c…"
+  }'</span>
+
+<span class="c-cmt"># 2. Verify a Groth16 proof at login</span>
+curl <span class="c-kw">-X</span> POST <span class="c-str">https://zeroauth.dev/v1/verifications</span> \
+  <span class="c-kw">-H</span> <span class="c-str">"Authorization: Bearer $ZEROAUTH_API_KEY"</span> \
+  <span class="c-kw">-H</span> <span class="c-str">"Content-Type: application/json"</span> \
+  <span class="c-kw">-d</span> <span class="c-str">'{
+    "external_id": "user_42",
+    "proof": { "a": [...], "b": [...], "c": [...] },
+    "public_signals": ["0x1f3c…"]
+  }'</span></pre>
+            </div>
+
+            <div class="code-pane" data-pane="node">
+<pre><span class="c-kw">import</span> { ZeroAuth } <span class="c-kw">from</span> <span class="c-str">'@zeroauth/sdk'</span>;
+
+<span class="c-kw">const</span> za = <span class="c-kw">new</span> <span class="c-fn">ZeroAuth</span>({ apiKey: process.env.ZEROAUTH_API_KEY });
+
+<span class="c-cmt">// 1. Register a user from your backend</span>
+<span class="c-kw">await</span> za.users.<span class="c-fn">register</span>({
+  externalId: <span class="c-str">'user_42'</span>,
+  commitment,                       <span class="c-cmt">// from client SDK</span>
+});
+
+<span class="c-cmt">// 2. Verify a proof on login</span>
+<span class="c-kw">const</span> { verified, principal } = <span class="c-kw">await</span> za.verifications.<span class="c-fn">create</span>({
+  externalId: <span class="c-str">'user_42'</span>,
+  proof,
+  publicSignals,
+});
+
+<span class="c-kw">if</span> (verified) issueSession(principal);</pre>
+            </div>
+
+            <div class="code-pane" data-pane="python">
+<pre><span class="c-kw">from</span> zeroauth <span class="c-kw">import</span> ZeroAuth
+
+za = <span class="c-fn">ZeroAuth</span>(api_key=os.environ[<span class="c-str">"ZEROAUTH_API_KEY"</span>])
+
+<span class="c-cmt"># 1. Register a user</span>
+za.users.<span class="c-fn">register</span>(
+    external_id=<span class="c-str">"user_42"</span>,
+    commitment=commitment,
+)
+
+<span class="c-cmt"># 2. Verify a proof</span>
+result = za.verifications.<span class="c-fn">create</span>(
+    external_id=<span class="c-str">"user_42"</span>,
+    proof=proof,
+    public_signals=public_signals,
+)
+
+<span class="c-kw">if</span> result.verified:
+    issue_session(result.principal)</pre>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -778,85 +1062,161 @@
     <section class="how" id="how">
       <div class="container">
         <div class="section-head">
-          <div class="reveal">
+          <div>
             <span class="eyebrow">How it works</span>
-            <h2 class="display-2">Three calls. End to end.</h2>
+            <h2 class="display-2">Three steps. <em>Zero secrets exposed.</em></h2>
           </div>
-          <p class="lede reveal">
-            The complete flow, from enrollment to verification, is three HTTP calls — each
-            replay-safe, each idempotent, each producing a row in a tamper-evident audit log.
+          <p class="lede">
+            The user proves they hold a biometric on their device. Only a Poseidon
+            commitment and a Groth16 proof ever cross the network. Raw embeddings
+            stay in memory and are destroyed after hashing.
           </p>
         </div>
 
-        <div class="how-steps">
-          <div class="step reveal">
-            <span class="step-num">01</span>
-            <h3>Register a commitment</h3>
-            <p>
-              The client submits a Poseidon commitment derived from the user's biometric.
-              The commitment is one-way. The original buffer is destroyed in memory before
-              the response is sent.
-            </p>
-          </div>
-          <div class="step reveal">
-            <span class="step-num">02</span>
-            <h3>Generate a proof</h3>
-            <p>
-              On every sign-in the client constructs a Groth16 zero-knowledge proof that
-              the commitment matches what only the user can produce. The proof is opaque
-              and bound to a server-issued challenge.
-            </p>
-          </div>
-          <div class="step reveal">
-            <span class="step-num">03</span>
-            <h3>Verify and proceed</h3>
-            <p>
-              Your server posts the proof to <span style="font-family:var(--font-mono); font-size:0.94em;">/v1/verifications</span>.
-              ZeroAuth verifies it cryptographically and returns a signed principal,
-              audited and rate-limited per tenant.
-            </p>
-          </div>
+        <div class="steps">
+          <article class="step">
+            <span class="step-num">01 — Enroll locally</span>
+            <h3>User enrolls on-device</h3>
+            <p>The user creates a credential on their own device. A cryptographic commitment is generated and stored — never the credential itself.</p>
+<pre class="mini-code"><span class="c-cmt">// On the user's device</span>
+<span class="c-kw">const</span> secret      = <span class="c-fn">generateCredential</span>();
+<span class="c-kw">const</span> commitment  = <span class="c-fn">poseidonHash</span>(secret);
+<span class="c-fn">register</span>({ commitment });</pre>
+          </article>
+
+          <article class="step">
+            <span class="step-num">02 — Prove without revealing</span>
+            <h3>ZK proof generated client-side</h3>
+            <p>At login, a Groth16 zero-knowledge proof is generated on the device. It mathematically proves the user knows the credential — without transmitting any part of it.</p>
+<pre class="mini-code"><span class="c-cmt">// Client-side proof generation</span>
+<span class="c-kw">const</span> proof = <span class="c-kw">await</span> <span class="c-fn">groth16.prove</span>(
+  circuit, { secret, commitment }
+);
+<span class="c-fn">authenticate</span>({ proof });</pre>
+          </article>
+
+          <article class="step">
+            <span class="step-num">03 — Verify, on or off chain</span>
+            <h3>Succinct verification</h3>
+            <p>Proofs are verified against the commitment using succinct verification. Works on-chain via smart contracts or off-chain with a lightweight verifier.</p>
+<pre class="mini-code"><span class="c-cmt">// Server or smart contract</span>
+<span class="c-kw">const</span> valid = <span class="c-fn">groth16.verify</span>(
+  verificationKey, proof, signals
+);
+<span class="c-cmt">// secrets exposed: 0</span></pre>
+          </article>
         </div>
       </div>
     </section>
 
-    <!-- Code (inverted) -->
-    <section class="code-section" id="demo">
+    <!-- Developer features -->
+    <section class="features" id="features">
       <div class="container">
         <div class="section-head">
-          <div class="reveal">
-            <span class="eyebrow on-dark">Quickstart</span>
-            <h2 class="display-2">Five lines, two endpoints.</h2>
+          <div>
+            <span class="eyebrow">Built for developers</span>
+            <h2 class="display-2">Everything you expect from a modern auth API.</h2>
           </div>
-          <p class="lede reveal">
-            Sign up, generate an API key, and verify a proof. The full reference
-            implementation runs locally on Docker in under two minutes.
+          <p class="lede">
+            A typed REST API, a developer console, granular audit logs, and a
+            separation between live and test environments — so you can ship
+            without flying blind.
           </p>
         </div>
 
-        <div class="code-frame reveal">
-          <div class="code-frame-bar">
-            <span>POST /v1/verifications</span>
-            <span class="dots" aria-hidden="true">
-              <span></span><span></span><span></span>
+        <div class="feature-grid">
+          <article class="feature">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
             </span>
-          </div>
-<pre><span class="c-cmt"># Verify a Groth16 proof at login.</span>
-curl <span class="c-key">-X</span> POST <span class="c-str">https://zeroauth.dev/v1/verifications</span> \
-  <span class="c-key">-H</span> <span class="c-str">"Authorization: Bearer $ZEROAUTH_API_KEY"</span> \
-  <span class="c-key">-H</span> <span class="c-str">"Content-Type: application/json"</span> \
-  <span class="c-key">-d</span> <span class="c-str">'{
-    "external_id": "user_42",
-    "proof": { "a": [...], "b": [...], "c": [...] },
-    "public_signals": ["0x1f3c…"]
-  }'</span>
+            <h3>REST &amp; SDKs</h3>
+            <p>A typed REST API with first-party SDKs for Node and Python. Predictable error codes and idempotent writes.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </span>
+            <h3>Live + test keys</h3>
+            <p>Two isolated environments per tenant. Mint, rotate, and revoke <code>za_live_</code> / <code>za_test_</code> keys from the dashboard.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </span>
+            <h3>Audit log</h3>
+            <p>Every signup, verification, key rotation, and device event — searchable, exportable, and tamper-evident.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 3v4M8 3v4M2 11h20"/></svg>
+            </span>
+            <h3>Devices &amp; attestation</h3>
+            <p>Register hardware devices, attach battery + location telemetry, and tie verifications back to a specific endpoint.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </span>
+            <h3>Verify in &lt; 100 ms</h3>
+            <p>Groth16 verification on a single core. Run it inside our API or self-host the verifier — the math is the same.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6z"/></svg>
+            </span>
+            <h3>Open source</h3>
+            <p>API, dashboard, circuits, and docs are on <a href="https://github.com/zeroauth-dev/ZeroAuth" style="text-decoration:underline; text-underline-offset:3px;">GitHub</a>. Audit it. Self-host it. Fork it.</p>
+          </article>
+        </div>
+      </div>
+    </section>
 
-<span class="c-cmt"># → 200 OK · { "verified": true, "principal": "…" }</span>
-</pre>
+    <!-- Breach comparison -->
+    <section class="breach">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">What a breach costs</span>
+            <h2 class="display-2">A $25M lesson, side by side.</h2>
+          </div>
+          <p class="lede">
+            In October 2023, Okta's support breach exposed every support customer's data
+            and shaved more than 11% off the share price. In May 2024 an Indian
+            contractor leaked 496 GB of biometric data. Here is the same scenario,
+            with ZeroAuth.
+          </p>
         </div>
 
-        <div class="code-cta">
-          <a href="/docs/reference/api-reference" class="link on-dark">Full API reference <span aria-hidden="true">→</span></a>
+        <div class="breach-grid">
+          <article class="breach-card">
+            <span class="badge">Traditional auth · Okta breach</span>
+            <h3>The cost of stored credentials</h3>
+            <div class="when">October 2023</div>
+            <div class="breach-row"><span class="k">Records exposed</span><span class="v">All support customers</span></div>
+            <div class="breach-row"><span class="k">Incident response</span><span class="v">$2.1M+</span></div>
+            <div class="breach-row"><span class="k">Legal &amp; regulatory</span><span class="v">$8M+</span></div>
+            <div class="breach-row"><span class="k">Customer churn</span><span class="v">$15M+</span></div>
+            <div class="breach-row"><span class="k">Stock price impact</span><span class="v">−11.6%</span></div>
+            <div class="breach-total">
+              <span class="k">Total damage</span>
+              <span class="v">$25M+</span>
+            </div>
+          </article>
+
+          <article class="breach-card dark">
+            <span class="badge">ZeroAuth · same scenario</span>
+            <h3>The cost of zero-knowledge</h3>
+            <div class="when">Database fully exfiltrated</div>
+            <div class="breach-row"><span class="k">Records exposed</span><span class="v">0 usable</span></div>
+            <div class="breach-row"><span class="k">Incident response</span><span class="v">$0</span></div>
+            <div class="breach-row"><span class="k">Legal &amp; regulatory</span><span class="v">$0</span></div>
+            <div class="breach-row"><span class="k">Customer churn</span><span class="v">$0</span></div>
+            <div class="breach-row"><span class="k">Credential reset</span><span class="v">None required</span></div>
+            <div class="breach-total">
+              <span class="k">Total damage</span>
+              <span class="v">$0</span>
+            </div>
+          </article>
         </div>
       </div>
     </section>
@@ -865,40 +1225,38 @@ curl <span class="c-key">-X</span> POST <span class="c-str">https://zeroauth.dev
     <section class="engineering" id="engineering">
       <div class="container">
         <div class="section-head">
-          <div class="reveal">
+          <div>
             <span class="eyebrow">Engineering</span>
             <h2 class="display-2">No magic. Just primitives, written down.</h2>
           </div>
-          <p class="lede reveal">
+          <p class="lede">
             Every cryptographic choice, every architectural decision, every threat is
-            documented in the open. The full source — including the verifier, the circuit,
-            and the on-chain contracts — is MIT licensed.
+            documented in the open. The full source — verifier, circuit, on-chain
+            contracts — is MIT licensed.
           </p>
         </div>
 
         <div class="engineering-grid">
-          <div class="reveal">
-            <dl class="pillars">
-              <div class="pillar">
-                <dt class="pillar-key">Stack</dt>
-                <dd class="pillar-val">TypeScript · PostgreSQL · Circom · Solidity<small>Node 20, strict mode. Hardhat for contracts. snarkjs for verification.</small></dd>
-              </div>
-              <div class="pillar">
-                <dt class="pillar-key">Crypto</dt>
-                <dd class="pillar-val">Groth16 · BN128 · Poseidon · SHA-256<small>Peer-reviewed primitives. Soundness reduces to discrete-log on BN128.</small></dd>
-              </div>
-              <div class="pillar">
-                <dt class="pillar-key">L2</dt>
-                <dd class="pillar-val">Base Sepolia · DIDRegistry · Groth16Verifier<small>On-chain anchoring of identity commitments. Publicly auditable.</small></dd>
-              </div>
-              <div class="pillar">
-                <dt class="pillar-key">Audit</dt>
-                <dd class="pillar-val">Append-only event log · Hash-chained<small>Every write produces a verifiable row. Chain integrity is checkable from any commit.</small></dd>
-              </div>
-            </dl>
-          </div>
+          <dl class="pillars">
+            <div class="pillar">
+              <dt class="pillar-key">Stack</dt>
+              <dd class="pillar-val">TypeScript · PostgreSQL · Circom · Solidity<small>Node 20, strict mode. Hardhat for contracts. snarkjs for verification.</small></dd>
+            </div>
+            <div class="pillar">
+              <dt class="pillar-key">Crypto</dt>
+              <dd class="pillar-val">Groth16 · BN128 · Poseidon · SHA-256<small>Peer-reviewed primitives. Soundness reduces to discrete-log on BN128.</small></dd>
+            </div>
+            <div class="pillar">
+              <dt class="pillar-key">L2</dt>
+              <dd class="pillar-val">Base Sepolia · DIDRegistry · Groth16Verifier<small>On-chain anchoring of identity commitments. Publicly auditable.</small></dd>
+            </div>
+            <div class="pillar">
+              <dt class="pillar-key">Audit</dt>
+              <dd class="pillar-val">Append-only event log · Hash-chained<small>Every write produces a verifiable row. Chain integrity is checkable from any commit.</small></dd>
+            </div>
+          </dl>
 
-          <div class="reveal" style="display:grid; gap:16px; align-content:start;">
+          <div class="eng-links">
             <a href="https://github.com/zeroauth-dev/ZeroAuth/tree/main/adr" class="link">Architecture decision records <span aria-hidden="true">→</span></a>
             <a href="https://github.com/zeroauth-dev/ZeroAuth/blob/main/docs/threat_model.md" class="link">Public threat model <span aria-hidden="true">→</span></a>
             <a href="https://github.com/zeroauth-dev/ZeroAuth/blob/main/docs/api_contract.md" class="link">API contract <span aria-hidden="true">→</span></a>
@@ -909,15 +1267,104 @@ curl <span class="c-key">-X</span> POST <span class="c-str">https://zeroauth.dev
       </div>
     </section>
 
-    <!-- Whitepaper (inverted) — the ONLY mention of Pramaan -->
+    <!-- Enterprise pilot -->
+    <section class="pilot" id="pilot">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Enterprise</span>
+            <h2 class="display-2">SOC 2, SSO, or a private deployment?</h2>
+          </div>
+          <p class="lede">
+            Self-serve gets you to production for most workloads. For regulated
+            industries or on-prem requirements, our team works directly with your
+            security org — no rip-and-replace required.
+          </p>
+        </div>
+
+        <div class="pilot-grid">
+          <div class="benefits">
+            <div class="benefit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <div>
+                <h4>Zero-trust by default</h4>
+                <p>Your database becomes worthless to attackers. No password hashes, no tokens, no session secrets to exfiltrate.</p>
+              </div>
+            </div>
+            <div class="benefit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              <div>
+                <h4>Drop-in integration</h4>
+                <p>Works alongside your existing IdP. Integrates via standard APIs and SDKs. Deploy in days, not quarters.</p>
+              </div>
+            </div>
+            <div class="benefit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <div>
+                <h4>Compliance-ready</h4>
+                <p>Designed for SOC 2, GDPR, DPDP, and HIPAA. Less data stored means less data to govern.</p>
+              </div>
+            </div>
+            <div class="benefit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <div>
+                <h4>Mathematically proven</h4>
+                <p>Built on peer-reviewed cryptographic primitives: Groth16 proofs, Poseidon hashing, and elliptic-curve pairings.</p>
+              </div>
+            </div>
+          </div>
+
+          <aside class="form-card">
+            <div id="pilotFormFields">
+              <h3>Talk to our team</h3>
+              <p class="form-sub">For SOC 2, SSO, on-prem, or pilot deployments. We'll reach out within one business day.</p>
+              <form id="pilotForm" novalidate>
+                <div class="form-group">
+                  <label for="pilotName">Full name</label>
+                  <input type="text" id="pilotName" name="name" placeholder="Jane Smith" required />
+                </div>
+                <div class="form-group">
+                  <label for="pilotCompany">Company</label>
+                  <input type="text" id="pilotCompany" name="company" placeholder="Acme Corp" required />
+                </div>
+                <div class="form-group">
+                  <label for="pilotEmail">Work email</label>
+                  <input type="email" id="pilotEmail" name="email" placeholder="jane@acme.com" required />
+                </div>
+                <div class="form-group">
+                  <label for="pilotSize">Employee count</label>
+                  <select id="pilotSize" name="size" required>
+                    <option value="" disabled selected>Select company size</option>
+                    <option value="1-50">1 – 50</option>
+                    <option value="51-200">51 – 200</option>
+                    <option value="201-1000">201 – 1,000</option>
+                    <option value="1001-5000">1,001 – 5,000</option>
+                    <option value="5001+">5,001+</option>
+                  </select>
+                </div>
+                <button type="submit" class="btn-submit">Contact sales</button>
+              </form>
+              <p class="form-note">For self-serve: <a href="/dashboard/signup">create an account →</a></p>
+            </div>
+            <div class="form-success hidden" id="pilotSuccess">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <h4>Request received</h4>
+              <p>Our team will contact you within one business day to schedule a technical walkthrough.</p>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- White paper (the ONLY mention of Pramaan) -->
     <section class="whitepaper" id="whitepaper">
       <div class="container">
         <div class="whitepaper-grid">
-          <div class="reveal">
+          <div>
             <span class="eyebrow on-dark">White paper</span>
-            <h2 style="margin-top:16px;">The cryptographic <em>foundation</em>.</h2>
+            <h2>The cryptographic <em>foundation</em>.</h2>
           </div>
-          <div class="reveal">
+          <div>
             <p>
               Pramaan is the zero-knowledge biometric identity protocol underlying ZeroAuth.
               The paper describes the construction, the security reductions, the on-chain
@@ -925,8 +1372,7 @@ curl <span class="c-key">-X</span> POST <span class="c-str">https://zeroauth.dev
             </p>
             <p>
               Written for cryptographers and platform engineers. Includes the formal proof
-              of soundness, the circuit specification, and the recommended deployment
-              topology.
+              of soundness, the circuit specification, and the recommended deployment topology.
             </p>
 
             <dl class="whitepaper-meta">
@@ -970,10 +1416,11 @@ curl <span class="c-key">-X</span> POST <span class="c-str">https://zeroauth.dev
         <div class="footer-col">
           <h4>Product</h4>
           <ul role="list">
-            <li><a href="/docs/getting-started/quickstart/">Quickstart</a></li>
+            <li><a href="#quickstart">Quickstart</a></li>
+            <li><a href="#demo">Live demo</a></li>
+            <li><a href="#features">Features</a></li>
             <li><a href="/docs/">Documentation</a></li>
             <li><a href="/docs/reference/api-reference">API reference</a></li>
-            <li><a href="#whitepaper">White paper</a></li>
           </ul>
         </div>
 
@@ -984,6 +1431,7 @@ curl <span class="c-key">-X</span> POST <span class="c-str">https://zeroauth.dev
             <li><a href="https://github.com/zeroauth-dev/ZeroAuth/issues">Issues</a></li>
             <li><a href="https://github.com/zeroauth-dev/ZeroAuth/blob/main/CONTRIBUTING.md">Contributing</a></li>
             <li><a href="https://github.com/zeroauth-dev/ZeroAuth/blob/main/SECURITY.md">Security policy</a></li>
+            <li><a href="#whitepaper">White paper</a></li>
           </ul>
         </div>
 
@@ -992,6 +1440,7 @@ curl <span class="c-key">-X</span> POST <span class="c-str">https://zeroauth.dev
           <ul role="list">
             <li><a href="/dashboard/login">Sign in</a></li>
             <li><a href="/dashboard/signup">Get started</a></li>
+            <li><a href="#pilot">Contact sales</a></li>
             <li><a href="https://github.com/zeroauth-dev/ZeroAuth/blob/main/LICENSE">MIT license</a></li>
             <li><a href="https://github.com/zeroauth-dev/ZeroAuth/blob/main/CODE_OF_CONDUCT.md">Code of conduct</a></li>
           </ul>
@@ -1009,6 +1458,69 @@ curl <span class="c-key">-X</span> POST <span class="c-str">https://zeroauth.dev
   </footer>
 
   <script>
+    // Code-tab switcher
+    (function () {
+      var tabs = document.querySelectorAll('.code-tab');
+      var panes = document.querySelectorAll('.code-pane');
+      var copyBtn = document.querySelector('.code-copy');
+      if (!tabs.length) return;
+
+      tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+          var key = tab.getAttribute('data-tab');
+          tabs.forEach(function (t) { t.classList.toggle('active', t === tab); });
+          panes.forEach(function (p) { p.classList.toggle('active', p.getAttribute('data-pane') === key); });
+          if (copyBtn) copyBtn.setAttribute('data-copy', key);
+        });
+      });
+
+      if (copyBtn) {
+        copyBtn.addEventListener('click', function () {
+          var key = copyBtn.getAttribute('data-copy');
+          var pane = document.querySelector('.code-pane[data-pane="' + key + '"] pre');
+          if (!pane) return;
+          var text = pane.innerText;
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(function () {
+              var original = copyBtn.textContent;
+              copyBtn.textContent = 'Copied';
+              setTimeout(function () { copyBtn.textContent = original; }, 1400);
+            });
+          }
+        });
+      }
+    })();
+
+    // Pilot form submission
+    (function () {
+      var form = document.getElementById('pilotForm');
+      if (!form) return;
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var data = {
+          name: form.name.value.trim(),
+          company: form.company.value.trim(),
+          email: form.email.value.trim(),
+          size: form.size.value
+        };
+        var btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+        try {
+          var res = await fetch('/api/leads/pilot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+          });
+          if (!res.ok) throw new Error('http ' + res.status);
+          document.getElementById('pilotFormFields').classList.add('hidden');
+          document.getElementById('pilotSuccess').classList.remove('hidden');
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = 'Try again';
+        }
+      });
+    })();
   </script>
 
 </body>
