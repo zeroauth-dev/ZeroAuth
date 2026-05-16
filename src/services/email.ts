@@ -41,6 +41,17 @@ function getTransporter(): Transporter | null {
   return transporter;
 }
 
+export interface SendMailAttachment {
+  /** File name as the recipient will see it. */
+  filename: string;
+  /** Absolute path on disk, OR provide `content` instead. */
+  path?: string;
+  /** Raw bytes / string if path is unavailable. */
+  content?: Buffer | string;
+  /** MIME type. Inferred when possible; pass explicitly for non-obvious files. */
+  contentType?: string;
+}
+
 export interface SendMailInput {
   to: string;
   subject: string;
@@ -49,6 +60,8 @@ export interface SendMailInput {
   text: string;
   /** Optional Reply-To override. Defaults to EMAIL_FROM. */
   replyTo?: string;
+  /** Optional file attachments — used for whitepaper delivery, audit-pack exports, etc. */
+  attachments?: SendMailAttachment[];
 }
 
 export interface SendMailResult {
@@ -86,6 +99,7 @@ export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
       subject: input.subject,
       text: input.text,
       html: input.html,
+      attachments: input.attachments,
     });
     logger.info('Email: sent', {
       messageId: info.messageId,

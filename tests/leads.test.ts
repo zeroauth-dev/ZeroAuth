@@ -133,8 +133,9 @@ describe('routes/leads — POST /api/leads/whitepaper', () => {
     expect(res.body).toMatchObject({
       success: true,
       downloadUrl: '/docs/whitepaper.pdf',
-      filename: 'Pramaan_Whitepaper.pdf',
+      filename: 'ZeroAuth_Whitepaper.pdf',
     });
+    expect(res.body.message).toMatch(/inbox/i);
   });
 
   it('400s on missing email', async () => {
