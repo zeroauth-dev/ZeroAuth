@@ -1,7 +1,10 @@
 <div align="center">
 
   <a href="https://zeroauth.dev">
-    <img src="public/favicon.svg" width="80" alt="ZeroAuth" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="public/zeroauth-mark-dark.svg">
+      <img src="public/zeroauth-mark.svg" width="96" alt="ZeroAuth" />
+    </picture>
   </a>
 
   <h1>ZeroAuth</h1>
