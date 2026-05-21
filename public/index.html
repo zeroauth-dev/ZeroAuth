@@ -938,16 +938,37 @@
       height: 48px;
       padding: 0 16px;
       background: transparent;
-      border: 1px solid var(--line-inverse);
+      /* The whitepaper section is the inverted card, so the border has
+         to stand out on bg-inverse. --line-inverse is tuned for hairline
+         dividers and disappears here — use ink-inverse-2 at reduced
+         opacity for a visible-but-quiet edge. */
+      border: 1px solid rgba(163, 163, 163, 0.45);
       color: var(--ink-inverse);
       font-size: 14px;
       font-family: var(--font-body);
       border-radius: 0;
       outline: none;
-      transition: border-color 180ms ease;
+      caret-color: var(--ink-inverse);
+      transition: border-color 180ms ease, box-shadow 180ms ease;
     }
     .wp-form input::placeholder { color: var(--ink-inverse-2); opacity: 0.7; }
-    .wp-form input:focus { border-color: var(--ink-inverse); }
+    .wp-form input:hover { border-color: rgba(163, 163, 163, 0.7); }
+    .wp-form input:focus {
+      border-color: var(--ink-inverse);
+      box-shadow: 0 0 0 3px rgba(250, 250, 250, 0.12);
+    }
+    /* Kill the browser autofill yellow on the dark whitepaper card.
+       The inset shadow paints over Chromium's hard-coded fill, and
+       text-fill-color forces the visible text back to ink-inverse. */
+    .wp-form input:-webkit-autofill,
+    .wp-form input:-webkit-autofill:hover,
+    .wp-form input:-webkit-autofill:focus,
+    .wp-form input:-webkit-autofill:active {
+      -webkit-box-shadow: 0 0 0 1000px var(--bg-inverse) inset;
+      -webkit-text-fill-color: var(--ink-inverse);
+      caret-color: var(--ink-inverse);
+      transition: background-color 9999s ease-out 0s;
+    }
     .wp-form-submit { white-space: nowrap; }
     .wp-form-note {
       margin-top: 12px;
@@ -1722,6 +1743,19 @@ result = za.verifications.<span class="c-fn">create</span>(
       }
     })();
 
+    // Pick the API base at runtime. On zeroauth.dev (and www.) the
+    // lead endpoints live on the api.* subdomain — posting straight
+    // there avoids the apex 308 redirect, which the browser blocks
+    // for cross-origin POSTs with a non-simple Content-Type (the
+    // preflight has to happen on the redirect target, not the
+    // original origin). Everywhere else (local dev, localhost
+    // preview) we keep the relative path so the same Express
+    // upstream handles it without any DNS plumbing.
+    var LEADS_API_BASE = (function () {
+      var h = (location.hostname || '').toLowerCase();
+      return (h === 'zeroauth.dev' || h === 'www.zeroauth.dev') ? 'https://api.zeroauth.dev' : '';
+    })();
+
     // Whitepaper form — POST email to /api/leads/whitepaper, backend emails the PDF.
     (function () {
       var form = document.getElementById('wpForm');
@@ -1742,7 +1776,7 @@ result = za.verifications.<span class="c-fn">create</span>(
         note.textContent = 'Sending…';
         btn.disabled = true;
         try {
-          var res = await fetch('/api/leads/whitepaper', {
+          var res = await fetch(LEADS_API_BASE + '/api/leads/whitepaper', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: email })
@@ -1774,7 +1808,7 @@ result = za.verifications.<span class="c-fn">create</span>(
         btn.disabled = true;
         btn.textContent = 'Sending…';
         try {
-          var res = await fetch('/api/leads/pilot', {
+          var res = await fetch(LEADS_API_BASE + '/api/leads/pilot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
