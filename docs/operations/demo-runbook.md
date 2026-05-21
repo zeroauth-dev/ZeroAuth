@@ -12,7 +12,7 @@ hardware in under five minutes.
 
 ## Pre-flight (one-time)
 
-1. **Tenant + API key.** Sign up at <https://console.zeroauth.dev/signup>
+1. **Tenant + API key.** Sign up at [console.zeroauth.dev/signup](https://console.zeroauth.dev/signup)
    and mint a tenant API key with scopes `devices:write`, `users:write`,
    `verifications:write`, `attendance:write`. Copy the `za_test_…`
    string — you'll only see it once.
@@ -28,8 +28,8 @@ hardware in under five minutes.
    ```
 
 3. **Two browser tabs already open**, side by side:
-   - <https://console.zeroauth.dev/overview> (logged in as the demo tenant)
-   - The bridge's local page, opens to <http://localhost:3100> after step 1 below
+   - [console.zeroauth.dev/overview](https://console.zeroauth.dev/overview) (logged in as the demo tenant)
+   - The bridge's local page, opens to `http://localhost:3100` after step 1 below
 
 ## Demo (≈ 4 min)
 
