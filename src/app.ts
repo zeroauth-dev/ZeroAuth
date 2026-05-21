@@ -31,6 +31,25 @@ export function createApp() {
   }
 
   // Security middleware
+  // connect-src has to enumerate every cross-host fetch the page makes.
+  // After the subdomain split:
+  //   - landing (zeroauth.dev) POSTs to api.zeroauth.dev for the lead forms
+  //   - docs (docs.zeroauth.dev) playground fetches api.zeroauth.dev
+  //   - dashboard (console.zeroauth.dev) is same-origin, already covered by 'self'
+  // 'self' alone falls back to default-src 'self' and Chromium blocks the
+  // cross-subdomain XHR. Listing the four production hosts plus localhost
+  // is the smallest allow-list that covers prod + dev without going wild
+  // with wildcards.
+  const connectSources = [
+    "'self'",
+    'https://api.zeroauth.dev',
+    'https://console.zeroauth.dev',
+    'https://docs.zeroauth.dev',
+    'https://zeroauth.dev',
+    'https://www.zeroauth.dev',
+    'http://localhost:*',
+    'http://127.0.0.1:*',
+  ];
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -39,6 +58,7 @@ export function createApp() {
         styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com'],
         imgSrc: ["'self'", 'data:'],
+        connectSrc: connectSources,
       },
     },
   }));
