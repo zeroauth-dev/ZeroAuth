@@ -162,6 +162,27 @@ describe('CentralApiClient.registerUser', () => {
 });
 
 describe('CentralApiClient.recordVerification + recordCheckIn', () => {
+  it('records check_out with the right type field', async () => {
+    let captured: unknown = null;
+    const { fetchImpl } = makeMockFetch(call => {
+      if (call.url.endsWith('/v1/attendance')) {
+        captured = call.body;
+        return new Response(JSON.stringify({ attendance: { id: 'att_co', event_type: 'check_out', result: 'accepted' } }), { status: 201 });
+      }
+      return new Response('{}', { status: 500 });
+    });
+    const client = new CentralApiClient(baseCfg, { fetchImpl, logger: silentLogger });
+    const out = await client.recordCheckIn({
+      userId: 'u1', deviceId: 'd1', verificationId: 'v1',
+      type: 'check_out', result: 'accepted',
+    });
+    assert.equal(out?.event_type, 'check_out');
+    assert.deepEqual(captured, {
+      userId: 'u1', deviceId: 'd1', verificationId: 'v1',
+      type: 'check_out', result: 'accepted',
+    });
+  });
+
   it('posts the correct payload shapes', async () => {
     const seen: Array<{ url: string; body: unknown }> = [];
     const { fetchImpl } = makeMockFetch(call => {

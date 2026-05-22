@@ -579,10 +579,18 @@ async function syncSignupToCentral(email: string, write: (event: Phase) => void)
   write({ phase: 'central_synced', op: 'register_user', id: user.id });
 }
 
+/**
+ * Mirror a successful fingerprint auth into the central API as a
+ * verification + attendance event. `attendanceType` lets the same
+ * helper power both the sign-in flow (check_in) and the sign-out
+ * flow (check_out) — the verification step is identical in either
+ * case, only the attendance type differs.
+ */
 async function syncLoginToCentral(
   email: string,
   matchScore: number | undefined,
   write: (event: Phase) => void,
+  attendanceType: 'check_in' | 'check_out' = 'check_in',
 ): Promise<void> {
   if (!centralApi || !centralDeviceId) {
     write({ phase: 'central_skipped', reason: 'not_configured' });
@@ -611,7 +619,7 @@ async function syncLoginToCentral(
     method: 'fingerprint',
     result: 'pass',
     confidenceScore: matchScore,
-    referenceId: `iot-bridge:${Date.now()}`,
+    referenceId: `iot-bridge:${attendanceType}:${Date.now()}`,
   });
   if (!verification) {
     write({ phase: 'central_skipped', reason: 'remote_error' });
@@ -624,7 +632,7 @@ async function syncLoginToCentral(
     userId,
     deviceId: centralDeviceId,
     verificationId: verification.id,
-    type: 'check_in',
+    type: attendanceType,
     result: 'accepted',
   });
   if (!attendance) {
@@ -831,9 +839,41 @@ const server = http.createServer(async (req, res) => {
       await runStreamed(res, async (write) => {
         const result = await performAuthenticate(email, write);
         if (result.matched) {
-          await syncLoginToCentral(email, result.score, write);
+          await syncLoginToCentral(email, result.score, write, 'check_in');
         }
-        write({ phase: 'done', result });
+        write({ phase: 'done', result: { ...result, attendanceType: 'check_in' as const } });
+      });
+      return;
+    }
+
+    /**
+     * POST /api/demo/checkout — closes the W2 charter loop. Mirrors the
+     * /login flow exactly (OTP gate, fingerprint match, central sync)
+     * but the attendance event recorded on the dashboard is type
+     * 'check_out' instead of 'check_in'. The OTP namespace is the
+     * 'login' kind so the same verified session token can be reused if
+     * the operator does sign-in immediately followed by sign-out — the
+     * UX assumption is the user already proved possession of the inbox
+     * when they signed in.
+     */
+    if (req.method === 'POST' && url.pathname === '/api/demo/checkout') {
+      const body = (await readJson(req)) as { email?: unknown; sessionToken?: unknown };
+      const email = normalizeEmail(body.email);
+      const sessionToken = typeof body.sessionToken === 'string' ? body.sessionToken : '';
+      if (!email) {
+        sendJson(res, 400, { error: 'invalid_email' });
+        return;
+      }
+      if (!sessionToken || !otp.consumeSession(sessionToken, email, 'login')) {
+        sendJson(res, 401, { error: 'otp_required', message: 'Verify your email with the code first.' });
+        return;
+      }
+      await runStreamed(res, async (write) => {
+        const result = await performAuthenticate(email, write);
+        if (result.matched) {
+          await syncLoginToCentral(email, result.score, write, 'check_out');
+        }
+        write({ phase: 'done', result: { ...result, attendanceType: 'check_out' as const } });
       });
       return;
     }

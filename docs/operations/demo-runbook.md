@@ -87,7 +87,43 @@ Flip to the dashboard tab:
 - **Attendance**: a row with `event_type: check_in`, `result: accepted`,
   joined to the user from step 2 and the device from step 1
 
-### Step 4 — close
+### Step 4 — check out (close the loop)
+
+Re-trigger the OTP for the same email (kind: `login`), then POST the
+session token to `/api/demo/checkout`. The endpoint runs the same
+fingerprint match the sign-in flow runs, but the attendance event it
+records is `check_out` instead of `check_in`.
+
+Quick curl version for the demo:
+
+```bash
+# 1) request OTP for kind=login
+curl -s http://localhost:3100/api/demo/request-otp \
+  -H 'content-type: application/json' \
+  -d '{"email":"demo@example.com","kind":"login"}' | jq
+
+# 2) verify the OTP (read devCode from step 1's response) and grab a session
+SESSION=$(curl -s http://localhost:3100/api/demo/verify-otp \
+  -H 'content-type: application/json' \
+  -d '{"email":"demo@example.com","kind":"login","code":"123456"}' \
+  | jq -r .sessionToken)
+
+# 3) check out
+curl -N http://localhost:3100/api/demo/checkout \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"demo@example.com\",\"sessionToken\":\"$SESSION\"}"
+```
+
+Operator script: "Same biometric proof, same verification record — only
+the attendance type flips. From the dashboard's perspective the user is
+now off the floor."
+
+Flip to the dashboard tab:
+- **Overview**: `verifications: 2`, `attendanceEvents: 2`
+- **Attendance**: a second row with `event_type: check_out`,
+  `result: accepted`, sharing the user + device id from step 3
+
+### Step 5 — close
 
 Operator script: "Three independent surfaces — the terminal, the API,
 the dashboard. The biometric stayed on the device. The breach surface
@@ -106,7 +142,7 @@ the finger."
 ## What this proves
 
 - W2 charter: "device firmware calls `/v1/verifications` + `/v1/attendance`" ✅
-- W2 charter: "dashboard/overview confirms check-in and check-out visibility" ✅
+- W2 charter: "dashboard/overview confirms check-in and check-out visibility" ✅ — Step 3 lands the check-in row, Step 4 lands the check-out row, both visible on the Attendance page filtered by `event_type`.
 - W2 charter: "one fixed demo script using one test tenant" ✅
 
 A "live tenant" variation just swaps `ZA_CENTRAL_API_KEY` for a
