@@ -57,7 +57,12 @@ export function createApp() {
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-        imgSrc: ["'self'", 'data:'],
+        // QR images for the W3 QR-proof sign-in demo come from
+        // api.qrserver.com (no extra JS dependency in the dashboard
+        // bundle, see dashboard/src/routes/demo/QrProofLogin.tsx).
+        // Strictly limited to that one host so the imgSrc relaxation
+        // doesn't accumulate.
+        imgSrc: ["'self'", 'data:', 'https://api.qrserver.com'],
         connectSrc: connectSources,
       },
     },
