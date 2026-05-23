@@ -129,8 +129,6 @@
 | **Mitigation** | All inline handlers were removed; forms now use `addEventListener` from a single `<script>` block. CSP is enforced. |
 | **Test status** | Live `curl … | grep onsubmit=` returns 0 in CI. Could be promoted to a real test. |
 
-<!-- ─── W3: QR-proof pairing (Android phone → desktop) ─────────────── -->
-
 ### A-11 — Pairing-nonce replay across two desktop sessions
 
 | | |
@@ -138,7 +136,7 @@
 | **Class** | Spoofing (STRIDE: S) |
 | **Surface** | `POST /v1/proof-pairing/sessions/:id/submit` |
 | **Description** | A passively-recorded `{proof, publicSignals, did}` from session S1 is replayed against a freshly-issued session S2 whose nonce the attacker observes (shoulder-surf of the desktop QR). Without an explicit nonce ↔ proof binding the same proof verifies for any session because `identityBinding = Poseidon(2)([biometricSecret, didHash])` is per-user, not per-session. |
-| **Mitigation** | [ADR-0009](../adr/0009-qr-proof-pairing-protocol.md) Option B′: phone computes `didHashSession = Poseidon(2)([didHash, sessionNonce])` and uses it as the circuit's `didHash` input. Server re-derives `Poseidon(2)([user.didHash, session.nonce])` from its own records and `crypto.timingSafeEqual`-compares to `publicSignals[1]`. Mismatch → 400 `pairing_nonce_mismatch`. |
+| **Mitigation** | [ADR-0009](https://github.com/zeroauth-dev/ZeroAuth/blob/main/adr/0009-qr-proof-pairing-protocol.md) Option B′: phone computes `didHashSession = Poseidon(2)([didHash, sessionNonce])` and uses it as the circuit's `didHash` input. Server re-derives `Poseidon(2)([user.didHash, session.nonce])` from its own records and `crypto.timingSafeEqual`-compares to `publicSignals[1]`. Mismatch → 400 `pairing_nonce_mismatch`. |
 | **Test status** | **Required before merge.** `tests/proof-pairing.test.ts` cases: (i) valid first submit succeeds; (ii) replay against same session returns 409; (iii) replay against fresh session with different nonce returns 400 with `pairing_nonce_mismatch`. |
 | **Audit signal** | `audit_events.action = 'pairing.replay_blocked'` with `metadata.session_id`. |
 
@@ -204,7 +202,7 @@
 | **Class** | Tampering (STRIDE: T) |
 | **Surface** | The Android app's WebView running snarkjs |
 | **Description** | If snarkjs is loaded over HTTPS at runtime, a CDN/network compromise swaps it for a build that exfiltrates `biometricSecret` (the only private witness) or produces proofs against attacker-chosen commitments. Same class as `event-stream` / `ua-parser-js`. |
-| **Mitigation** | [ADR-0010](../adr/0010-android-webview-snarkjs-bundling.md): snarkjs is bundled in the APK at `android/app/src/main/assets/prover/`, SHA-256 pinned in the ADR, build fails on mismatch. WebView CSP: `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'`. WebView in a separate renderer process. No `file://`, no `content://`, no DOM storage. Play Integrity verdict travels in `clientMeta.playIntegrityVerdict` for W4 server-side enforcement. |
+| **Mitigation** | [ADR-0010](https://github.com/zeroauth-dev/ZeroAuth/blob/main/adr/0010-android-webview-snarkjs-bundling.md): snarkjs is bundled in the APK at `android/app/src/main/assets/prover/`, SHA-256 pinned in the ADR, build fails on mismatch. WebView CSP: `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'`. WebView in a separate renderer process. No `file://`, no `content://`, no DOM storage. Play Integrity verdict travels in `clientMeta.playIntegrityVerdict` for W4 server-side enforcement. |
 | **Test status** | **Required before Android app merge.** CI step diffs `assets/prover/*.sha256` against the ADR-pinned table; build fails on mismatch. |
 | **Audit signal** | If `clientMeta.snarkjsHash` ever travels in the submit, log mismatches as `audit_events.action = 'pairing.unexpected_prover_hash'`. |
 

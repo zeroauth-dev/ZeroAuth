@@ -129,7 +129,7 @@ All require `X-API-Key: <ADMIN_API_KEY>`. Read-only.
 
 ### Proof pairing (`/v1/proof-pairing/*`)
 
-Cross-device verification flow: a desktop opens a session, a phone scans the QR + generates a Groth16 proof, the desktop submits the proof, the backend mints a desktop JWT. Full protocol in [ADR-0009](../adr/0009-qr-proof-pairing-protocol.md).
+Cross-device verification flow: a desktop opens a session, a phone scans the QR + generates a Groth16 proof, the desktop submits the proof, the backend mints a desktop JWT. Full protocol in [ADR-0009](https://github.com/zeroauth-dev/ZeroAuth/blob/main/adr/0009-qr-proof-pairing-protocol.md).
 
 | Method | Path | Scope | Description |
 |---|---|---|---|
