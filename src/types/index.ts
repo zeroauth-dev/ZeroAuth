@@ -186,6 +186,8 @@ export type ApiScope =
   | 'attendance:read'
   | 'attendance:write'
   | 'audit:read'
+  | 'proof_pairing:create'
+  | 'proof_pairing:claim'
   | 'admin:stats'
   | 'admin:audit';
 
@@ -341,6 +343,31 @@ export interface AuditEvent {
   status: AuditStatus;
   summary: string;
   metadata: Record<string, unknown>;
+  created_at: Date;
+}
+
+// ─── Proof Pairing Types (W3, ADR-0009) ──────────────────────────────
+
+export type ProofPairingState = 'issued' | 'consumed' | 'expired' | 'failed';
+
+/** DB row shape for `proof_pairing_sessions`. */
+export interface ProofPairingSession {
+  id: string;
+  tenant_id: string;
+  environment: ApiKeyEnvironment;
+  api_key_id: string | null;
+  nonce_hex: string;
+  session_bind_token_hash: string;
+  state: ProofPairingState;
+  consumed_user_id: string | null;
+  consumed_verification_id: string | null;
+  proof_hash: string | null;
+  last_error_code: string | null;
+  desktop_ip: string | null;
+  desktop_user_agent: string | null;
+  failure_count: number;
+  expires_at: Date;
+  consumed_at: Date | null;
   created_at: Date;
 }
 

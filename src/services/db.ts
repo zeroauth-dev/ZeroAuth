@@ -213,6 +213,39 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_attendance_events_tenant ON attendance_events(tenant_id, environment, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_attendance_events_user ON attendance_events(tenant_id, environment, user_id, occurred_at DESC);
 
+  -- ─── Proof Pairing Sessions (W3, ADR-0009) ───────────────
+  -- Desktop-issued, single-use, 5-min TTL. The session_bind cookie's
+  -- sha256 is the second factor that prevents an attacker-issued QR
+  -- from delivering the minted JWT to the wrong browser (A-13).
+  -- Single-use enforced by atomic UPDATE ... WHERE state='issued'
+  -- RETURNING * in the consume path (A-14).
+  CREATE TABLE IF NOT EXISTS proof_pairing_sessions (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL
+      CHECK (environment IN ('live', 'test')),
+    api_key_id UUID REFERENCES api_keys(id) ON DELETE SET NULL,
+    nonce_hex VARCHAR(62) NOT NULL,                   -- 31 bytes = 62 hex chars
+    session_bind_token_hash VARCHAR(64) NOT NULL,     -- sha256 of cookie value
+    state VARCHAR(20) NOT NULL DEFAULT 'issued'
+      CHECK (state IN ('issued', 'consumed', 'expired', 'failed')),
+    consumed_user_id UUID REFERENCES tenant_users(id) ON DELETE SET NULL,
+    consumed_verification_id UUID REFERENCES verification_events(id),
+    proof_hash VARCHAR(64),
+    last_error_code VARCHAR(50),
+    desktop_ip INET,
+    desktop_user_agent VARCHAR(512),
+    failure_count SMALLINT NOT NULL DEFAULT 0,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, nonce_hex)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pps_tenant_created
+    ON proof_pairing_sessions(tenant_id, environment, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_pps_state_expires
+    ON proof_pairing_sessions(state, expires_at) WHERE state = 'issued';
+
   -- ─── Audit Events ────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS audit_events (
     id BIGSERIAL PRIMARY KEY,
