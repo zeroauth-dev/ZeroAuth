@@ -96,6 +96,23 @@ Some responses carry extra fields (`docs`, `retryAfterSeconds`, `currentScopes`,
 | `attendance_create_failed`, `attendance_list_failed` | Attendance route exceptions. |
 | `audit_list_failed` | Audit route exceptions. |
 
+## Proof pairing (`/v1/proof-pairing/*` — W3)
+
+| Code | Status | When |
+|---|---|---|
+| `pairing_session_not_found` | `404` | `:id` doesn't match a session row for this tenant. Also returned (indistinguishably) for "exists in a different tenant" to defeat enumeration. |
+| `pairing_session_expired` | `410` | Session passed its 5-min TTL. |
+| `pairing_session_already_bound` | `409` | Single-use — another submit already succeeded. |
+| `pairing_session_locked` | `423` | Per-session failure cap reached (3 failed submits). Get a fresh session. |
+| `pairing_session_bind_mismatch` | `403` | `session_bind` cookie missing or doesn't match the row. |
+| `pairing_nonce_mismatch` | `400` | `publicSignals[1]` ≠ server-recomputed `Poseidon(storedDidHash, sessionNonce)`. |
+| `pairing_did_unknown` | `400` | The `did` in submit doesn't resolve to a stored commitment in this tenant. |
+| `pairing_proof_invalid` | `401` | Verifier returned `verified: false`. Distinct from `pairing_nonce_mismatch` for dashboard attribution. |
+| `pairing_tenant_mismatch` | `403` | Session row's `tenant_id` differs from the authed tenant (defense-in-depth on top of normal scope check). |
+| `pairing_unavailable` | `503` | Verifier unreachable at session creation; pairing temporarily disabled. |
+| `verifier_unavailable` | `503` | Verifier loopback call timed out on this submit. Retryable. |
+| `too_many_pending_sessions` | `429` | Tenant has more than 50 open `issued` sessions. |
+
 ---
-LAST_UPDATED: 2026-05-12
+LAST_UPDATED: 2026-05-22
 OWNER: Pulkit Pareek

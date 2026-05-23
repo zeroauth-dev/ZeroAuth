@@ -127,6 +127,66 @@ All require `X-API-Key: <ADMIN_API_KEY>`. Read-only.
 | `POST` | `/api/leads/pilot` | none | Pilot-access form: `{ name, company, email, size }`. |
 | `POST` | `/api/leads/whitepaper` | none | Whitepaper download form: `{ email }`. Response includes `downloadUrl`. |
 
+### Proof pairing (`/v1/proof-pairing/*`)
+
+Cross-device verification flow: a desktop opens a session, a phone scans the QR + generates a Groth16 proof, the desktop submits the proof, the backend mints a desktop JWT. Full protocol in [ADR-0009](../adr/0009-qr-proof-pairing-protocol.md).
+
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| `POST` | `/v1/proof-pairing/sessions` | `proof_pairing:create` | Desktop opens a session. Server returns `{ id, nonce, expiresAt, qrPayload, streamUrl }` and sets a `session_bind` cookie on the response. |
+| `POST` | `/v1/proof-pairing/sessions/:id/submit` | `proof_pairing:claim` | Desktop submits the proof + public signals it scanned from the phone. Body: `{ did, proof, publicSignals, clientMeta? }`. Returns `{ session, tokens }`. |
+| `GET` | `/v1/proof-pairing/sessions/:id/stream` | `proof_pairing:create` + `session_bind` cookie | Server-Sent Events. Events: `session_created`, `session_bound`, `session_expired`, `session_error`. Connection closes after a terminal event. |
+| `GET` | `/v1/proof-pairing/sessions/:id` | `proof_pairing:create` + `session_bind` cookie | Polling fallback for clients without `EventSource`. |
+
+`POST /sessions` response (also sets `Set-Cookie: zeroauth_pair_bind=…; HttpOnly; Secure; SameSite=Strict; Path=/v1/proof-pairing/; Max-Age=300`):
+```json
+{
+  "session": {
+    "id": "9f8e2a4b-1c0d-4e9a-bd33-2a44f0e7e9d1",
+    "nonce": "<62-hex-char 31-byte nonce>",
+    "expiresAt": "2026-05-25T14:35:00.000Z",
+    "qrPayload": "za:pair:1:9f8e2a4b…:9f7c1d4a…:zeroauth.dev:5b3e",
+    "streamUrl": "/v1/proof-pairing/sessions/9f8e2a4b…/stream",
+    "state": "issued"
+  }
+}
+```
+
+`POST .../submit` body:
+```json
+{
+  "did": "did:zeroauth:demo:7a3c9f5b8e1d2a4c6f0b9e3d5a7c1f8b",
+  "proof": { "pi_a":[…], "pi_b":[…], "pi_c":[…], "protocol":"groth16", "curve":"bn128" },
+  "publicSignals": ["<commitment>", "<didHashSession>", "<identityBinding>"],
+  "clientMeta": { "appVersion": "0.1.0", "platform": "android", "model": "Pixel 7a", "proofMs": 4820, "playIntegrityVerdict": "MEETS_STRONG_INTEGRITY" }
+}
+```
+
+`POST .../submit` success — `200 OK`:
+```json
+{
+  "session": { "id": "9f8e2a4b…", "state": "bound", "boundAt": "…", "userId": "…", "did": "…" },
+  "tokens": { "accessToken": "eyJ…", "refreshToken": "eyJ…", "tokenType": "Bearer", "expiresIn": 3600 }
+}
+```
+
+SSE event shapes on `/stream`:
+```
+event: session_created
+data: {"id":"9f8e2a4b…","state":"issued","expiresAt":"…"}
+
+event: session_bound
+data: {"id":"…","state":"bound","userId":"…","did":"…","tokens":{…}}
+
+event: session_expired
+data: {"id":"…","state":"expired"}
+
+event: session_error
+data: {"id":"…","error":"pairing_nonce_mismatch","message":"…"}
+```
+
+Error variants on `/submit` (all return `{ "error": "<code>", "message": "<human>" }`): see [`docs/error_codes.md`](error_codes.md) under "Proof pairing".
+
 ### Legacy `/api/auth/*` surface
 
 These exist for backwards compatibility with internal tooling that pre-dates the `/v1/*` rollout. The legacy SAML and OIDC callbacks are gated by `ENABLE_DEMO_AUTH` for the same reason as their `/v1/*` counterparts. Document but plan to deprecate.
@@ -148,5 +208,5 @@ These exist for backwards compatibility with internal tooling that pre-dates the
 | `GET` | `/api/auth/oidc/.well-known/openid-configuration` | OIDC discovery document. **Note:** `jwks_uri` is intentionally absent (HS256-only today). |
 
 ---
-LAST_UPDATED: 2026-05-12
+LAST_UPDATED: 2026-05-22
 OWNER: Pulkit Pareek
