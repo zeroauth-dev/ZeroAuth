@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AndroidManifest.xml — ZeroAuth W3 wrapper app.
+
+  Permissions:
+    * CAMERA  — required for QR scanning (ScanScreen). Marked
+                android:required="true" so Play does not list the app
+                on devices without a back-facing camera.
+    * INTERNET — required so the desktop ↔ phone flow can later POST
+                proof responses (the prover-glue sprint task wires
+                the Retrofit client). Phone itself does NOT contact
+                api.zeroauth.dev for proof submission per ADR-0009;
+                INTERNET is reserved for Play Integrity + auxiliary
+                console probes only.
+    * USE_BIOMETRIC — Class 3 biometric prompt for the enroll +
+                unlock paths (BiometricGate is stubbed for now).
+
+  Components:
+    * .MainActivity  — single-activity host, Compose root.
+    * .prover.ProverActivity  (NOT YET PRESENT) — will run in
+                android:process=":prover" per ADR-0010 once the
+                WebView snarkjs bundle lands. Manifest entry stubbed
+                below as a commented block so the next sprint can
+                uncomment + flesh out.
+
+  No <queries> needed today — no package introspection.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="true" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
+    <application
+        android:name=".ZeroAuthApp"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.ZeroAuth"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:theme="@style/Theme.ZeroAuth">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Prover activity placeholder — uncomment + flesh out in the prover-glue
+          sprint task. android:process=":prover" puts the WebView renderer
+          in a dedicated process so a renderer compromise cannot reach
+          the main process where the Keystore-bound credential lives
+          (ADR-0010, "WebView is process-isolated and CSP-locked").
+
+          <activity
+              android:name=".prover.ProverActivity"
+              android:exported="false"
+              android:process=":prover"
+              android:theme="@style/Theme.ZeroAuth.Prover" />
+        -->
+
+        <!--
+          WebView asset loader provider placeholder — once we ship
+          assets/prover/* (ADR-0010), the prover activity will host an
+          androidx.webkit.WebViewAssetLoader that serves the bundled
+          snarkjs.min.js + .wasm + .zkey over an https://appassets.androidplatform.net
+          origin. No <provider> registration is needed for that — calling
+          this out so the next engineer doesn't add one by reflex.
+        -->
+
+    </application>
+
+</manifest>

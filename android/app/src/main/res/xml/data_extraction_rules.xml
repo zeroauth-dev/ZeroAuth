@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  data_extraction_rules.xml — Android 12+ backup + transfer rules.
+
+  ZeroAuth holds Keystore-bound credentials + cached commitments that
+  must NOT be copied to Google Drive cloud backups or device-to-device
+  transfers. Exclude every domain.
+
+  Cloud backups + transfers are also disabled via
+  android:allowBackup="false" + android:fullBackupContent="false" in
+  AndroidManifest; this file is the Android 12+ replacement that the
+  platform consults when those legacy flags are set. Belt + braces.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </device-transfer>
+</data-extraction-rules>

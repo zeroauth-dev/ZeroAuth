@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  colors.xml — monochrome ink palette matching the dashboard. Compose
+  uses these via the ZeroAuthColorScheme in ui/theme/Color.kt; the XML
+  copies exist purely for the pre-Compose window background (themes.xml)
+  and any future View-based components (none today).
+-->
+<resources>
+    <color name="ink_bg">#FF0A0A0A</color>
+    <color name="ink_surface">#FF121212</color>
+    <color name="ink_surface_variant">#FF1A1A1A</color>
+    <color name="ink_primary">#FFFAFAFA</color>
+    <color name="ink_on_primary">#FF0A0A0A</color>
+    <color name="ink_secondary">#FFA3A3A3</color>
+    <color name="ink_error">#FFEF4444</color>
+    <color name="ink_outline">#FF2A2A2A</color>
+</resources>

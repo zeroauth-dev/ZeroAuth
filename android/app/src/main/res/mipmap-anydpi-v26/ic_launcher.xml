@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive launcher icon (Android 8.0+). The Android Studio image-asset
+  tool normally generates per-density PNGs alongside this; for the
+  scaffold we ship the adaptive-icon XML only, which is sufficient for
+  all min-SDK 30+ devices. A real designer pass replaces the placeholder
+  foreground in a later iteration.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ink_bg" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

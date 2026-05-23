@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  themes.xml — Material 3 anchor theme used by the manifest. The actual
+  M3 ColorScheme is constructed in Kotlin (ui/theme/Theme.kt) and applied
+  per-composable; this XML file only owns the activity's pre-Compose
+  surface (status bar, navigation bar, splash window background). Keeping
+  it minimal avoids the historic Material XML/Compose drift.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.ZeroAuth" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ink_bg</item>
+        <item name="android:statusBarColor">@color/ink_bg</item>
+        <item name="android:navigationBarColor">@color/ink_bg</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">false</item>
+    </style>
+
+</resources>

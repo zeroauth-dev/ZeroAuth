@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand -->
+    <string name="app_name">ZeroAuth</string>
+    <string name="brand_wordmark">ZeroAuth</string>
+
+    <!-- Splash -->
+    <string name="splash_tagline">Authentication where a breach exposes nothing.</string>
+    <string name="splash_cta">Get started</string>
+
+    <!-- Enroll -->
+    <string name="enroll_title">Enroll your biometric</string>
+    <string name="enroll_body">Your biometric never leaves this device. ZeroAuth derives a one-way commitment on the device and only the commitment is anchored on the audit chain. Even the operator cannot reverse it to your face or fingerprint.</string>
+    <string name="enroll_cta">Set up</string>
+    <string name="enroll_stub_toast">Enrollment will land in the next iteration.</string>
+
+    <!-- Scan -->
+    <string name="scan_caption">Point at the QR on your laptop</string>
+    <string name="scan_permission_title">Camera access needed</string>
+    <string name="scan_permission_body">ZeroAuth uses the camera only to read the desktop login QR. Nothing is recorded.</string>
+    <string name="scan_permission_cta">Allow camera</string>
+    <string name="scan_invalid_payload">That QR did not match the ZeroAuth desktop-login format. Refresh the laptop and try again.</string>
+
+    <!-- Done -->
+    <string name="done_title">QR captured</string>
+    <string name="done_subtitle">In the next iteration this screen will generate the Groth16 proof and complete the handshake. For now it confirms the QR decoded cleanly.</string>
+    <string name="done_session_label">Session</string>
+    <string name="done_nonce_label">Nonce (first 8 hex)</string>
+    <string name="done_proof_placeholder">Proof generation goes here — wires up in the next iteration.</string>
+    <string name="done_cta">Done</string>
+
+    <!-- Error placeholders (filled in as the network layer lands) -->
+    <string name="error_camera_init">Camera initialisation failed. Restart the app.</string>
+    <string name="error_unknown">Something went wrong. Please try again.</string>
+</resources>

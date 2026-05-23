@@ -1,0 +1,40 @@
+# Android-specific gitignore. Scoped to android/ — the repo root has
+# its own .gitignore for Node + Docs + secrets. Keeping the two files
+# separate so Android Studio's auto-edits never touch the root.
+
+# Gradle / Android build outputs
+/build
+/.gradle
+/app/build
+/app/release
+/app/debug
+*/build
+*/.gradle
+
+# Per-developer Gradle settings (SDK path, JDK pick) live here.
+/local.properties
+
+# Android Studio inspection captures (.hprof memory dumps etc.)
+/captures
+
+# IDE caches — every IntelliJ-family product leaves these.
+/.idea
+*.iml
+*.iws
+*.ipr
+
+# Native crash logs
+/hs_err_pid*
+/replay_pid*
+
+# Lint baseline / reports (regenerated on every run)
+/app/lint-baseline.xml.bak
+
+# The gradle-wrapper.jar binary is regenerated locally + on CI by
+# `gradle wrapper --gradle-version 8.7`; we do not commit binaries.
+/gradle/wrapper/gradle-wrapper.jar
+
+# Mac / editor noise (covered by root .gitignore too, but cheap to repeat
+# so a contributor running an editor only inside android/ is still safe).
+.DS_Store
+*.swp

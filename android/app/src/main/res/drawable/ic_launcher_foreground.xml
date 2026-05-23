@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Placeholder launcher foreground — a stylised "Z" wordmark on the ink
+  background. Designer pass replaces this with the brand mark in a
+  later iteration. Sized to the adaptive-icon 108dp canvas with the
+  recommended 18dp safe-zone padding.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FAFAFA"
+        android:pathData="M34,32 L74,32 L74,40 L46,40 L74,68 L74,76 L34,76 L34,68 L62,68 L34,40 Z" />
+</vector>

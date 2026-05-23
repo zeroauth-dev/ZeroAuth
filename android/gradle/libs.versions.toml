@@ -1,0 +1,123 @@
+# android/gradle/libs.versions.toml — version catalog for the W3 wrapper app.
+#
+# Single source of truth for every Android dependency. Bumping a library means
+# bumping it here. The catalog is referenced from settings.gradle.kts via
+# versionCatalogs.create("libs") { from(files("gradle/libs.versions.toml")) }.
+#
+# Stack pinned by the previous design decision — see CLAUDE.md + ADR-0009/0010.
+# Aliases use dash separators in this file; Gradle generates camelCase
+# accessors (libs.androidx.compose.bom etc.) automatically.
+
+[versions]
+# Build tooling
+agp                       = "8.5.2"
+kotlin                    = "2.0.20"
+# AndroidX core / lifecycle / activity
+androidx-core-ktx         = "1.13.1"
+androidx-lifecycle        = "2.8.6"
+androidx-activity-compose = "1.9.2"
+# Compose
+compose-bom               = "2024.09.03"
+compose-navigation        = "2.8.2"
+# Biometric (alpha, but it's the only API that does Class 3 + crypto-bound)
+androidx-biometric        = "1.2.0-alpha05"
+# CameraX
+camerax                   = "1.3.4"
+# ML Kit barcode scanning (bundled — no Play Services dependency at install)
+mlkit-barcode             = "17.3.0"
+# ZXing (for the *generation* side, used in a follow-on iteration; pinned now
+# so the catalog is complete).
+zxing-core                = "3.5.3"
+# Networking + serialization
+okhttp                    = "4.12.0"
+retrofit                  = "2.11.0"
+retrofit-kotlinx          = "1.0.0"
+kotlinx-serialization     = "1.7.1"
+# Logging (debug only — see ZeroAuthApp.kt)
+timber                    = "5.0.1"
+# Test
+junit                     = "4.13.2"
+androidx-test-junit       = "1.2.1"
+espresso-core             = "3.6.1"
+
+[libraries]
+# Core / lifecycle / activity
+androidx-core-ktx                  = { group = "androidx.core",        name = "core-ktx",                       version.ref = "androidx-core-ktx" }
+androidx-lifecycle-runtime-ktx     = { group = "androidx.lifecycle",   name = "lifecycle-runtime-ktx",          version.ref = "androidx-lifecycle" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle",   name = "lifecycle-runtime-compose",      version.ref = "androidx-lifecycle" }
+androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose",    version.ref = "androidx-lifecycle" }
+androidx-activity-compose          = { group = "androidx.activity",    name = "activity-compose",               version.ref = "androidx-activity-compose" }
+
+# Compose — BOM keeps the constellation aligned without per-artifact versions
+androidx-compose-bom               = { group = "androidx.compose",     name = "compose-bom",                    version.ref = "compose-bom" }
+androidx-compose-ui                = { group = "androidx.compose.ui",  name = "ui" }
+androidx-compose-ui-graphics       = { group = "androidx.compose.ui",  name = "ui-graphics" }
+androidx-compose-ui-tooling        = { group = "androidx.compose.ui",  name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-material3         = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-navigation        = { group = "androidx.navigation", name = "navigation-compose",              version.ref = "compose-navigation" }
+
+# Biometric
+androidx-biometric                 = { group = "androidx.biometric",   name = "biometric",                      version.ref = "androidx-biometric" }
+
+# CameraX
+androidx-camera-core               = { group = "androidx.camera",      name = "camera-core",                    version.ref = "camerax" }
+androidx-camera-camera2            = { group = "androidx.camera",      name = "camera-camera2",                 version.ref = "camerax" }
+androidx-camera-lifecycle          = { group = "androidx.camera",      name = "camera-lifecycle",               version.ref = "camerax" }
+androidx-camera-view               = { group = "androidx.camera",      name = "camera-view",                    version.ref = "camerax" }
+
+# ML Kit barcode (bundled flavor — model ships in the APK, no Play Services
+# install-time download).
+mlkit-barcode-scanning             = { group = "com.google.mlkit",     name = "barcode-scanning",               version.ref = "mlkit-barcode" }
+
+# ZXing core — used by the proof-side QR *generation* in a follow-on iteration.
+# Imported here so the catalog is complete and bumps stay in one place.
+zxing-core                         = { group = "com.google.zxing",     name = "core",                           version.ref = "zxing-core" }
+
+# Networking
+okhttp                             = { group = "com.squareup.okhttp3", name = "okhttp",                         version.ref = "okhttp" }
+okhttp-logging-interceptor         = { group = "com.squareup.okhttp3", name = "logging-interceptor",            version.ref = "okhttp" }
+retrofit-core                      = { group = "com.squareup.retrofit2", name = "retrofit",                     version.ref = "retrofit" }
+retrofit-kotlinx-serialization     = { group = "com.jakewharton.retrofit", name = "retrofit2-kotlinx-serialization-converter", version.ref = "retrofit-kotlinx" }
+kotlinx-serialization-json         = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json",    version.ref = "kotlinx-serialization" }
+
+# Logging
+timber                             = { group = "com.jakewharton.timber", name = "timber",                       version.ref = "timber" }
+
+# Test
+junit                              = { group = "junit",                name = "junit",                          version.ref = "junit" }
+androidx-test-junit                = { group = "androidx.test.ext",    name = "junit",                          version.ref = "androidx-test-junit" }
+androidx-test-espresso-core        = { group = "androidx.test.espresso", name = "espresso-core",                version.ref = "espresso-core" }
+androidx-compose-ui-test-junit4    = { group = "androidx.compose.ui",  name = "ui-test-junit4" }
+androidx-compose-ui-test-manifest  = { group = "androidx.compose.ui",  name = "ui-test-manifest" }
+
+[plugins]
+android-application                = { id = "com.android.application",        version.ref = "agp" }
+kotlin-android                     = { id = "org.jetbrains.kotlin.android",   version.ref = "kotlin" }
+kotlin-serialization               = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kotlin-compose                     = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+
+[bundles]
+compose-ui = [
+    "androidx-compose-ui",
+    "androidx-compose-ui-graphics",
+    "androidx-compose-ui-tooling-preview",
+    "androidx-compose-material3",
+]
+compose-debug = [
+    "androidx-compose-ui-tooling",
+    "androidx-compose-ui-test-manifest",
+]
+camerax = [
+    "androidx-camera-core",
+    "androidx-camera-camera2",
+    "androidx-camera-lifecycle",
+    "androidx-camera-view",
+]
+network = [
+    "okhttp",
+    "okhttp-logging-interceptor",
+    "retrofit-core",
+    "retrofit-kotlinx-serialization",
+    "kotlinx-serialization-json",
+]
