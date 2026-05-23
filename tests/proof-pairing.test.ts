@@ -141,6 +141,7 @@ jest.mock('../src/services/proof-pairing', () => {
   class PairingNonceMismatch extends Error { code = 'pairing_nonce_mismatch'; }
   class PairingDidUnknown extends Error { code = 'pairing_did_unknown'; }
   class PairingProofInvalid extends Error { code = 'pairing_proof_invalid'; }
+  class PairingTenantMismatch extends Error { code = 'pairing_tenant_mismatch'; }
   class TooManyPendingSessions extends Error { code = 'too_many_pending_sessions'; }
   class VerifierUnavailable extends Error { code = 'verifier_unavailable'; }
   return {
@@ -149,6 +150,7 @@ jest.mock('../src/services/proof-pairing', () => {
     getSession: (...args: unknown[]) => getSessionMock(...args),
     subscribeStream: (...args: unknown[]) => subscribeStreamMock(...args),
     expireOverdueSessions: jest.fn(),
+    streamHeartbeatMs: 15000,
     PairingSessionNotFound,
     PairingSessionExpired,
     PairingSessionAlreadyBound,
@@ -157,6 +159,7 @@ jest.mock('../src/services/proof-pairing', () => {
     PairingNonceMismatch,
     PairingDidUnknown,
     PairingProofInvalid,
+    PairingTenantMismatch,
     TooManyPendingSessions,
     VerifierUnavailable,
   };
