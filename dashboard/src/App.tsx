@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './lib/auth';
@@ -16,6 +17,25 @@ import { Attendance } from './routes/Attendance';
 import { Audit } from './routes/Audit';
 import { Settings } from './routes/Settings';
 import { NotFound } from './routes/NotFound';
+
+// The QR-proof demo is the only consumer of the qrserver.com image
+// host today; lazy-loading keeps it (and any future scanner deps) out
+// of the main bundle until the operator opens /demo/qr-proof-login.
+const QrProofLogin = lazy(() => import('./routes/demo/QrProofLogin'));
+
+function RouteSuspense({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <div className="size-6 animate-spin rounded-full border-2 border-current border-r-transparent text-[var(--color-text-dim)]" />
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
 
 /**
  * Router basename has to track where the dashboard is mounted, which
@@ -89,6 +109,14 @@ export function App() {
                   <Route path="/attendance" element={<Attendance />} />
                   <Route path="/audit" element={<Audit />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route
+                    path="/demo/qr-proof-login"
+                    element={
+                      <RouteSuspense>
+                        <QrProofLogin />
+                      </RouteSuspense>
+                    }
+                  />
                   <Route path="*" element={<NotFound />} />
                 </Route>
               </Route>

@@ -52,6 +52,10 @@ const NAV = [
   { to: '/verifications', label: 'Verifications', icon: 'shield' },
   { to: '/attendance', label: 'Attendance', icon: 'clock' },
   { to: '/audit', label: 'Audit Log', icon: 'list' },
+  // W3 wrapper demo: desktop QR-proof sign-in (ADR-0009). Sits under
+  // its own /demo/ namespace so additional wrapper demos can co-locate
+  // without polluting the primary console nav.
+  { to: '/demo/qr-proof-login', label: 'Demos', icon: 'qr' },
   { to: '/settings', label: 'Settings', icon: 'gear' },
 ] as const;
 
@@ -66,6 +70,7 @@ function Icon({ name, className }: { name: string; className?: string }) {
     case 'shield': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><path d="M12 3 4 6v6c0 5 3.5 8.5 8 9 4.5-.5 8-4 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg>;
     case 'clock': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>;
     case 'list': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>;
+    case 'qr': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M20 14v3M14 17v4h4M20 20v1"/></svg>;
     case 'gear': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><circle cx="12" cy="12" r="3"/><path d="m19.4 15-1.4-.8.2-1.6-.2-1.6 1.4-.8-2-3.4-1.6.6-1.2-1-.4-1.6h-4l-.4 1.6-1.2 1-1.6-.6-2 3.4 1.4.8.2 1.6-.2 1.6-1.4.8 2 3.4 1.6-.6 1.2 1 .4 1.6h4l.4-1.6 1.2-1 1.6.6z"/></svg>;
     default: return null;
   }
