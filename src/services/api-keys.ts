@@ -53,6 +53,8 @@ export async function createApiKey(
     'attendance:read',
     'attendance:write',
     'audit:read',
+    'proof_pairing:create',
+    'proof_pairing:claim',
   ],
 ): Promise<ApiKeyCreateResult> {
   const pool = getPool();
