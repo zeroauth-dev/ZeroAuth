@@ -100,21 +100,50 @@ function renderPage() {
   );
 }
 
-describe('<QrProofLogin />', () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-  });
+type FakeStream = ReturnType<typeof buildFakeStream>;
 
+/**
+ * Configure `api.pairing.createSession` + `subscribeStream` so the test
+ * can:
+ *   - know exactly which stream the page subscribed to (captured by
+ *     `subscribed.stream` after `await waitForSubscription()`),
+ *   - emit through the captured handle.
+ *
+ * Replaces the older "create-stream-then-mockReturnValue" pattern which
+ * raced on the page's own SSE useEffect — the test's stream and the
+ * page's stream were the same object but the subscriber/emitter
+ * handshake wasn't guaranteed to land before `act()` returned.
+ */
+function wireSession(session: PairingSession): {
+  subscribed: { stream: FakeStream | null };
+  waitForSubscription: () => Promise<FakeStream>;
+} {
+  vi.mocked(api.pairing.createSession).mockResolvedValue({ session });
+  const subscribed: { stream: FakeStream | null } = { stream: null };
+  vi.mocked(api.pairing.subscribeStream).mockImplementation(() => {
+    const s = buildFakeStream();
+    subscribed.stream = s;
+    return s;
+  });
+  return {
+    subscribed,
+    waitForSubscription: async () => {
+      await waitFor(() => {
+        if (!subscribed.stream) throw new Error('stream not yet subscribed');
+      });
+      return subscribed.stream!;
+    },
+  };
+}
+
+describe('<QrProofLogin />', () => {
   afterEach(() => {
-    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
   it('renders the QR + countdown once createSession resolves', async () => {
     const session = fakeSession();
-    vi.mocked(api.pairing.createSession).mockResolvedValue({ session });
-    const stream = buildFakeStream();
-    vi.mocked(api.pairing.subscribeStream).mockReturnValue(stream);
+    wireSession(session);
 
     renderPage();
 
@@ -134,12 +163,11 @@ describe('<QrProofLogin />', () => {
 
   it('shows the expired card when SSE emits session_expired', async () => {
     const session = fakeSession();
-    vi.mocked(api.pairing.createSession).mockResolvedValue({ session });
-    const stream = buildFakeStream();
-    vi.mocked(api.pairing.subscribeStream).mockReturnValue(stream);
+    const wire = wireSession(session);
 
     renderPage();
     await screen.findByTestId('pairing-qr');
+    const stream = await wire.waitForSubscription();
 
     await act(async () => {
       stream.emit({ type: 'session_expired', id: session.id, state: 'expired' });
@@ -152,14 +180,13 @@ describe('<QrProofLogin />', () => {
 
   it('shows the success card when SSE emits session_bound', async () => {
     const session = fakeSession();
-    vi.mocked(api.pairing.createSession).mockResolvedValue({ session });
-    const stream = buildFakeStream();
-    vi.mocked(api.pairing.subscribeStream).mockReturnValue(stream);
+    const wire = wireSession(session);
 
     renderPage();
     await screen.findByTestId('pairing-qr');
+    const stream = await wire.waitForSubscription();
 
-    act(() => {
+    await act(async () => {
       stream.emit({
         type: 'session_bound',
         id: session.id,
@@ -176,12 +203,11 @@ describe('<QrProofLogin />', () => {
 
   it('closes the EventSource-like stream on unmount', async () => {
     const session = fakeSession();
-    vi.mocked(api.pairing.createSession).mockResolvedValue({ session });
-    const stream = buildFakeStream();
-    vi.mocked(api.pairing.subscribeStream).mockReturnValue(stream);
+    const wire = wireSession(session);
 
     const { unmount } = renderPage();
     await screen.findByTestId('pairing-qr');
+    const stream = await wire.waitForSubscription();
 
     expect(stream.closed).toBe(false);
     unmount();
@@ -190,23 +216,19 @@ describe('<QrProofLogin />', () => {
 
   it('retry button calls createSession again', async () => {
     const session = fakeSession();
-    vi.mocked(api.pairing.createSession).mockResolvedValue({ session });
-    const stream = buildFakeStream();
-    vi.mocked(api.pairing.subscribeStream).mockReturnValue(stream);
+    const wire = wireSession(session);
 
     renderPage();
     await screen.findByTestId('pairing-qr');
+    const stream = await wire.waitForSubscription();
 
     // Drive to the expired card.
-    act(() => {
+    await act(async () => {
       stream.emit({ type: 'session_expired', id: session.id, state: 'expired' });
     });
     const restart = await screen.findByTestId('restart-button');
 
     vi.mocked(api.pairing.createSession).mockClear();
-    // Set up a fresh fake stream for the second go-round.
-    const stream2 = buildFakeStream();
-    vi.mocked(api.pairing.subscribeStream).mockReturnValue(stream2);
 
     await userEvent.click(restart);
 
