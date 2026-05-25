@@ -1,0 +1,137 @@
+name: Android CI
+
+# W3 Android wrapper app — see android/README.md. Runs on every PR + every
+# push to main that touches the Android workspace or its CI config.
+#
+# What this validates that the rest of CI doesn't:
+#   * Gradle + AGP can resolve the dependency graph
+#   * Kotlin compiles cleanly (the four Wave-3 parallel agents shipped
+#     ~5,000 lines of Android code; no JVM was available in their
+#     sandbox so this is the first real compile check)
+#   * Unit tests pass (Robolectric + Turbine + the Poseidon vectors)
+#   * Lint stays clean on release variant
+#   * verifyProverAssets succeeds (ADR-0010's SHA-256 gate)
+#
+# What this does NOT do yet:
+#   * Run instrumented tests on a real / emulated device (needs Firebase
+#     Test Lab or reactivecircus/android-emulator-runner — W4)
+#   * Sign a release APK (W4, after we generate the upload keystore)
+#   * Upload to Play Console internal track (W4)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build + lint + unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Minimum: API 30 (our minSdk) + API 34 (target / compile)
+          # build-tools 34.0.0 covers both AGP 8.5 + Robolectric needs.
+          packages: |
+            platforms;android-34
+            platforms;android-30
+            build-tools;34.0.0
+            platform-tools
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # AGP 8.5 pins Gradle 8.7 (see gradle-wrapper.properties).
+          gradle-version: '8.7'
+          # Aggressively cache Gradle artifacts. The dependency graph is
+          # large (Compose BOM + Camera + ML Kit + snarkjs prover assets)
+          # but stable PR-over-PR.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Bootstrap Gradle wrapper
+        # The wrapper jar isn't committed (yet — TODO bring it in-tree once
+        # we've done a real `gradle wrapper --gradle-version 8.7` locally).
+        # The `gradle` binary installed by setup-gradle@v4 generates a
+        # fresh wrapper that matches the gradle-wrapper.properties version
+        # pin. Idempotent.
+        run: gradle wrapper --gradle-version 8.7 --distribution-type bin
+
+      - name: Show toolchain
+        run: |
+          java -version
+          ./gradlew --version
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+      - name: Verify prover-asset integrity (ADR-0010)
+        # Hash-gate ahead of the build so a tampered asset never even
+        # reaches kotlinc. Mirrors the preBuild hook but runs explicitly
+        # so the CI log carries a "PASS: prover assets pinned" record.
+        run: ./gradlew :app:verifyProverAssets --info
+
+      - name: Compile (debug variant)
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Lint (release variant)
+        # Release lint is stricter than debug; catches things like
+        # missing-required permissions, leaking PendingIntents, and
+        # unscoped exported components.
+        run: ./gradlew :app:lintRelease --stacktrace
+        continue-on-error: true # W3 deliberately doesn't error on
+                                # lint findings yet — we want the
+                                # baseline report. Flip to false in W4.
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: android/app/build/reports/lint-results-release.html
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: android/app/build/reports/tests/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zeroauth-android-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+          if-no-files-found: error
