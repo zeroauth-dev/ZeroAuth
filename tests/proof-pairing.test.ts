@@ -128,6 +128,7 @@ jest.mock('../src/middleware/tenant-auth', () => ({
 const createSessionMock = jest.fn();
 const submitProofMock = jest.fn();
 const getSessionMock = jest.fn();
+const getSessionPublicMinimalMock = jest.fn();
 const subscribeStreamMock = jest.fn();
 
 jest.mock('../src/services/proof-pairing', () => {
@@ -148,6 +149,7 @@ jest.mock('../src/services/proof-pairing', () => {
     createSession: (...args: unknown[]) => createSessionMock(...args),
     submitProof: (...args: unknown[]) => submitProofMock(...args),
     getSession: (...args: unknown[]) => getSessionMock(...args),
+    getSessionPublicMinimal: (...args: unknown[]) => getSessionPublicMinimalMock(...args),
     subscribeStream: (...args: unknown[]) => subscribeStreamMock(...args),
     expireOverdueSessions: jest.fn(),
     streamHeartbeatMs: 15000,
@@ -585,5 +587,47 @@ describe('audit', () => {
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('pairing_session_not_found');
     expect(crossTenantAuditRecorded).toBe(true);
+  });
+});
+
+describe('GET /v1/proof-pairing/sessions/:id/public', () => {
+  const id = uuid();
+
+  it('200 with { session: { id, state, expiresAt } } on a known session — no auth required', async () => {
+    getSessionPublicMinimalMock.mockResolvedValueOnce({
+      id,
+      state: 'issued',
+      expiresAt: '2026-12-01T00:00:00.000Z',
+    });
+    const res = await request(app).get(`/v1/proof-pairing/sessions/${id}/public`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      session: { id, state: 'issued', expiresAt: '2026-12-01T00:00:00.000Z' },
+    });
+    expect(res.headers['cache-control']).toBe('no-store');
+    // Exactly the three public fields — no userId, no boundAt, no did,
+    // no tenant identifier. Public callers must never receive PII.
+    expect(res.body.session.userId).toBeUndefined();
+    expect(res.body.session.boundAt).toBeUndefined();
+    expect(res.body.session.did).toBeUndefined();
+  });
+
+  it('404 pairing_session_not_found for unknown id (uniform with all other rejections — A-25)', async () => {
+    getSessionPublicMinimalMock.mockRejectedValueOnce(new PairingSessionNotFound('no such row'));
+    const res = await request(app).get(`/v1/proof-pairing/sessions/${uuid()}/public`);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('pairing_session_not_found');
+  });
+
+  it('does not require Authorization or session_bind cookie', async () => {
+    // Spy that the route ever consults tenant auth would land here; we
+    // assert by reaching the service mock without setting either auth
+    // primitive.
+    getSessionPublicMinimalMock.mockResolvedValueOnce({
+      id, state: 'consumed', expiresAt: '2026-12-01T00:00:00.000Z',
+    });
+    const res = await request(app).get(`/v1/proof-pairing/sessions/${id}/public`);
+    expect(res.status).toBe(200);
+    expect(getSessionPublicMinimalMock).toHaveBeenLastCalledWith(id);
   });
 });

@@ -137,6 +137,7 @@ Cross-device verification flow: a desktop opens a session, a phone scans the QR 
 | `POST` | `/v1/proof-pairing/sessions/:id/submit` | `proof_pairing:claim` | Desktop submits the proof + public signals it scanned from the phone. Body: `{ did, proof, publicSignals, clientMeta? }`. Returns `{ session, tokens }`. |
 | `GET` | `/v1/proof-pairing/sessions/:id/stream` | `proof_pairing:create` + `session_bind` cookie | Server-Sent Events. Events: `session_created`, `session_bound`, `session_expired`, `session_error`. Connection closes after a terminal event. |
 | `GET` | `/v1/proof-pairing/sessions/:id` | `proof_pairing:create` + `session_bind` cookie | Polling fallback for clients without `EventSource`. |
+| `GET` | `/v1/proof-pairing/sessions/:id/public` | none (per-IP rate-limited 30/min) | Unauthenticated freshness read. Returns only `{ id, state, expiresAt }` so the Android app can short-circuit a ceremony after a stale QR was scanned. Uniform `404 pairing_session_not_found` for every rejection class (A-25). Cache-Control: no-store. |
 
 `POST /sessions` response (also sets `Set-Cookie: zeroauth_pair_bind=…; HttpOnly; Secure; SameSite=Strict; Path=/v1/proof-pairing/; Max-Age=300`):
 ```json
@@ -158,9 +159,21 @@ Cross-device verification flow: a desktop opens a session, a phone scans the QR 
   "did": "did:zeroauth:demo:7a3c9f5b8e1d2a4c6f0b9e3d5a7c1f8b",
   "proof": { "pi_a":[…], "pi_b":[…], "pi_c":[…], "protocol":"groth16", "curve":"bn128" },
   "publicSignals": ["<commitment>", "<didHashSession>", "<identityBinding>"],
-  "clientMeta": { "appVersion": "0.1.0", "platform": "android", "model": "Pixel 7a", "proofMs": 4820, "playIntegrityVerdict": "MEETS_STRONG_INTEGRITY" }
+  "clientMeta": { "appVersion": "0.1.0", "platform": "android", "model": "Pixel 7a", "proofMs": 4820, "playIntegrityVerdict": "MEETS_STRONG_INTEGRITY", "rawScan": "za:proof:1:<base64url-of-gzip-cbor>" }
 }
 ```
+
+**`clientMeta.rawScan` short-key schema.** The Android app encodes the proof QR as `gzip(cbor({ s, p, ps, d, m }))` to fit under the 1500-byte QR-capacity ceiling (ADR-0009 §5). The desktop relays the raw scan string into `clientMeta.rawScan` unchanged; backend audit + analytics decoders need to know the field-shortening map:
+
+| Short key | Long key in this contract | Type |
+|---|---|---|
+| `s` | `session.id` | string (UUIDv4) |
+| `p` | `proof` | `{ a, b, c, protocol, curve }` (same shape, also short-keyed: `a` = `pi_a`, `b` = `pi_b`, `c` = `pi_c`) |
+| `ps` | `publicSignals` | string[3] (`[commitment, didHashSession, identityBinding]`) |
+| `d` | `did` | string |
+| `m` | `clientMeta` | `{ av, pl, md, ms, pi }` where `av` = `appVersion`, `pl` = `platform`, `md` = `model`, `ms` = `proofMs`, `pi` = `playIntegrityVerdict` |
+
+Decoded forms are byte-equal to the long-keyed JSON above; the desktop's submit handler reconstructs the long-keyed body before posting if it needs to call `/submit` itself, so server-side handlers can rely on the documented long-keyed shape and treat `clientMeta.rawScan` as an opaque audit token.
 
 `POST .../submit` success — `200 OK`:
 ```json

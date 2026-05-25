@@ -92,9 +92,19 @@ The hosting `WebView` is configured with:
 - `setDomStorageEnabled(false)` — no localStorage / IndexedDB inside
   the prover sandbox
 
-The WebView runs in its own renderer process
-(`android:process=":prover"` in the manifest) so a renderer
-compromise does not give the attacker the rest of the app.
+**Process isolation — DEFERRED to W4+.** The W3 build hosts the
+WebView inline in the main activity's process (see
+[`WebViewMobileProver.kt`](../android/app/src/main/java/dev/zeroauth/android/prover/WebViewMobileProver.kt)
+class doc). Moving the WebView into its own
+`android:process=":prover"` activity requires a Messenger or AIDL
+binder layer between MainActivity and the prover process, which is
+its own day-of-work. The deferred state is documented inline in
+[`AndroidManifest.xml`](../android/app/src/main/AndroidManifest.xml)
+and acknowledged by threat-model row
+[A-17](../docs/threat_model.md). For the W3 demo the WebView's CSP +
+asset hash-pinning + Android process sandboxing carry the
+defense-in-depth; the dedicated `:prover` process is the next-class
+upgrade.
 
 ### Build-time integrity gate
 

@@ -16,12 +16,15 @@
                 unlock paths (BiometricGate is stubbed for now).
 
   Components:
-    * .MainActivity  — single-activity host, Compose root.
-    * .prover.ProverActivity  (NOT YET PRESENT) — will run in
-                android:process=":prover" per ADR-0010 once the
-                WebView snarkjs bundle lands. Manifest entry stubbed
-                below as a commented block so the next sprint can
-                uncomment + flesh out.
+    * .MainActivity  — single-activity host, Compose root. Hosts the
+                WebViewMobileProver inline in the main process today
+                (see TODO in WebViewMobileProver.kt and the "Deferred:
+                WebView process isolation" note in ADR-0010 §"WebView
+                is process-isolated and CSP-locked"). Process
+                isolation is gated on the IPC plumbing — a Messenger
+                or AIDL binder between MainActivity and a future
+                ProverActivity running android:process=":prover".
+                Scheduled work, not stubbed scaffolding.
 
   No <queries> needed today — no package introspection.
 -->
@@ -61,26 +64,30 @@
         </activity>
 
         <!--
-          Prover activity placeholder — uncomment + flesh out in the prover-glue
-          sprint task. android:process=":prover" puts the WebView renderer
-          in a dedicated process so a renderer compromise cannot reach
-          the main process where the Keystore-bound credential lives
-          (ADR-0010, "WebView is process-isolated and CSP-locked").
+          DEFERRED: dedicated prover activity in android:process=":prover".
+
+          ADR-0010 §"WebView is process-isolated and CSP-locked" calls for
+          hosting the snarkjs WebView in its own OS process. The W3 prover
+          (WebViewMobileProver.kt) currently lives inline in the main
+          activity's process because the IPC plumbing — Messenger / AIDL
+          binder between MainActivity and a future ProverActivity — is its
+          own ~day-of-work and we shipped W3 without it. Threat model
+          A-17 acknowledges the residual risk: a WebView renderer
+          compromise has line-of-sight into the main process where the
+          Keystore-unwrapped biometric secret lives during proof
+          generation.
+
+          To uncomment when the IPC layer lands (W4+):
 
           <activity
               android:name=".prover.ProverActivity"
               android:exported="false"
               android:process=":prover"
               android:theme="@style/Theme.ZeroAuth.Prover" />
-        -->
 
-        <!--
-          WebView asset loader provider placeholder — once we ship
-          assets/prover/* (ADR-0010), the prover activity will host an
-          androidx.webkit.WebViewAssetLoader that serves the bundled
-          snarkjs.min.js + .wasm + .zkey over an https://appassets.androidplatform.net
-          origin. No <provider> registration is needed for that — calling
-          this out so the next engineer doesn't add one by reflex.
+          (The asset loader at https://appassets.androidplatform.net is
+          configured per-WebView by WebViewMobileProver — no manifest
+          provider needed even after the move.)
         -->
 
     </application>

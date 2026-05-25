@@ -10,12 +10,14 @@
  */
 
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { authenticateTenantApiKey, getTenantContext } from '../../middleware/tenant-auth';
 import { logger } from '../../services/logger';
 import {
   createSession,
   submitProof,
   getSession,
+  getSessionPublicMinimal,
   subscribeStream,
   streamHeartbeatMs,
   PairingSessionNotFound,
@@ -273,6 +275,48 @@ router.get('/sessions/:id',
         logger.error('proof-pairing: getSession failed', { error: (err as Error).message });
       }
       res.status(mapped.status).json({ error: mapped.error, message: mapped.message });
+    }
+  },
+);
+
+// ─── Public freshness read ─────────────────────────────────────────────
+//
+// Unauthenticated read returning ONLY { id, state, expiresAt }. The
+// Android app uses it to short-circuit a doomed ceremony when the user
+// scans a desktop QR after it has already expired — phone gets the
+// signal without exposing the desktop's API key. Per-IP rate-limited
+// to defeat enumeration at scale; service layer pads latency to the
+// LATENCY_FLOOR_MS to defeat A-26.
+const publicReadLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'rate_limit_exceeded' },
+});
+
+router.get('/sessions/:id/public',
+  publicReadLimiter,
+  async (req: Request, res: Response) => {
+    try {
+      const sessionId = String(req.params.id);
+      const session = await getSessionPublicMinimal(sessionId);
+      // Hint to caches: this is per-session and short-lived; never store.
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({ session });
+    } catch (err) {
+      const mapped = mapError(err);
+      if (mapped.status === 500) {
+        logger.error('proof-pairing: getSessionPublicMinimal failed', {
+          error: (err as Error).message,
+        });
+      }
+      // Uniform 404 for every rejection class — A-25 enumeration safety.
+      // Public callers see only "not found", never "exists but blocked".
+      res.status(404).json({
+        error: 'pairing_session_not_found',
+        message: 'No such session.',
+      });
     }
   },
 );

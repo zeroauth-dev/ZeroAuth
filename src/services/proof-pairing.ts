@@ -127,6 +127,21 @@ export interface SessionPublicView {
   did?: string;
 }
 
+/**
+ * Strictly-public view returned by `GET /sessions/:id/public`. No
+ * tenant context, no bind cookie, no PII — only the freshness signal
+ * the Android app needs to decide whether to bother prompting the user
+ * for biometric. Everything in this shape is information the phone
+ * already knows from the QR payload or could re-derive locally. The
+ * endpoint exists purely so the phone can short-circuit a doomed
+ * ceremony when the user scans a QR after it has already expired.
+ */
+export interface SessionPublicMinimalView {
+  id: string;
+  state: ProofPairingState;
+  expiresAt: string;
+}
+
 export interface SubmitResult {
   session: SessionPublicView;
   verification: { id: string };
@@ -661,6 +676,49 @@ export async function submitProof(
     // A-26: pad the failure path latency to >= 200 ms.
     await padToFloor(start);
     throw err;
+  }
+}
+
+/**
+ * Public read for the Android app — no tenant context, no bind cookie.
+ * Returns only `{ id, state, expiresAt }` so the phone can decide
+ * whether the session is worth a biometric prompt. Looks up the row
+ * by ID alone (no tenant filter), which is safe because:
+ *
+ *   - the returned shape has no tenant identifier and no PII;
+ *   - session IDs are UUIDv4 (~122 bits of entropy);
+ *   - the route is per-IP rate-limited at 30 req/min/IP (route layer);
+ *   - latency is padded to LATENCY_FLOOR_MS to defeat A-26.
+ *
+ * A `PairingSessionNotFound` thrown here maps to a uniform 404 — the
+ * route layer must not distinguish "session doesn't exist" from any
+ * other rejection class. See A-25 in `docs/threat_model.md`.
+ */
+export async function getSessionPublicMinimal(
+  sessionId: string,
+): Promise<SessionPublicMinimalView> {
+  const startMs = Date.now();
+  try {
+    const pool = getPool();
+    const result = await pool.query<ProofPairingSession>(
+      `SELECT id, state, expires_at
+         FROM proof_pairing_sessions
+        WHERE id = $1`,
+      [sessionId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new PairingSessionNotFound();
+    }
+    return {
+      id: row.id,
+      state: row.state,
+      expiresAt: row.expires_at instanceof Date
+        ? row.expires_at.toISOString()
+        : String(row.expires_at),
+    };
+  } finally {
+    await padToFloor(startMs);
   }
 }
 
