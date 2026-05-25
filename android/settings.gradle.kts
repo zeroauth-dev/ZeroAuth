@@ -26,11 +26,11 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
     }
-    versionCatalogs {
-        create("libs") {
-            from(files("gradle/libs.versions.toml"))
-        }
-    }
+    // Gradle 8+ auto-discovers `gradle/libs.versions.toml` as the
+    // `libs` catalog. An explicit `versionCatalogs { create("libs") {
+    // from(...) } }` block here would call `from()` a second time and
+    // fail with 'In version catalog libs, you can only call the from
+    // method a single time.' — see the Gradle 8.7 catalog docs.
 }
 
 rootProject.name = "ZeroAuth"
