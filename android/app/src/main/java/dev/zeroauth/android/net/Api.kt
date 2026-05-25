@@ -35,8 +35,9 @@ import java.util.concurrent.TimeUnit
  *     cookie. Neither is available on the phone.
  *
  * The W3 contract drift is real and worth flagging in the exit report:
- * `*/public` does NOT exist on the backend today. This Retrofit binding
- * is wired so the phone is ready when the backend opt-in lands, and
+ * the `/public` sub-path does NOT exist on the backend today. This
+ * Retrofit binding is wired so the phone is ready when the backend
+ * opt-in lands, and
  * the ScanViewModel treats any 4xx from this call as "fine, fall back
  * to QR-only parsing." There is no path in the demo where this call
  * MUST succeed.
