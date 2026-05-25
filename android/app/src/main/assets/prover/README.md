@@ -1,32 +1,46 @@
-# `assets/prover/` — snarkjs WebView bundle drop point
+# `assets/prover/` — snarkjs WebView bundle
 
-This directory is the asset destination for the on-phone proof
-generator. **Nothing is committed here yet.** The W3 scaffold sprint
-established the build pipeline + integrity gate; the bundle drop lands
-in the follow-on prover-glue sprint task.
+The on-phone Groth16 prover bundle, loaded by the WebView at
+`https://appassets.androidplatform.net/assets/prover/prover.html` via
+`WebViewAssetLoader`. Everything in this directory is hash-pinned in
+`/android/prover-assets.sha256` and audited in
+[ADR-0010](../../../../../../../adr/0010-android-webview-snarkjs-bundling.md).
 
-## What lands here (per ADR-0010)
+## Contents
 
-| Filename | Approx size | Source |
+| File | Approx size | Source |
 |---|---|---|
-| `snarkjs-<version>.min.js` | ~600 KB | snarkjs upstream release tag |
-| `identity_proof.wasm` | ~150 KB | copied from `circuits/build/` |
-| `circuit_final.zkey` | ~3.3 MB | copied from `circuits/build/` |
-| `verification_key.json` | ~3 KB | copied from `circuits/build/` |
+| `prover.html` | ~1.5 KB | This repo; the hosting page + locked CSP. |
+| `prover.js` | ~11 KB | This repo; the bridge glue + Option B′ fold. |
+| `poseidon.js` | ~15 KB | Inlined from `poseidon-lite@0.3.0` (constants + kernel). |
+| `snarkjs.min.js` | ~689 KB | Upstream `snarkjs@0.7.6` build artifact. |
+| `identity_proof.wasm` | ~1.75 MB | `circuits/build/identity_proof_js/identity_proof.wasm` |
+| `circuit_final.zkey` | ~507 KB | `circuits/build/circuit_final.zkey` |
+| `verification_key.json` | ~3 KB | `circuits/build/verification_key.json` |
 
-Once the files land, update **two** places in one PR:
+## Bumping any asset
 
-1. `adr/0010-android-webview-snarkjs-bundling.md` — populate the
-   pinned-hash table with the SHA-256 of each file as committed.
-2. `android/app/build.gradle.kts` — the `verifyProverAssets` task's
-   `pinned` map (currently empty) so the build fails on any digest
-   drift.
+A 3-file PR:
 
-The Gradle task is already wired as a dependency of `:app:assembleDebug`
-and `:app:assembleRelease`. Today it short-circuits with an
-informational log because the directory is empty.
+1. drop the new file under this directory
+2. update `/android/prover-assets.sha256` with the new SHA-256
+3. update the "Pinned asset hashes" table in
+   `/adr/0010-android-webview-snarkjs-bundling.md`
+
+The Gradle task `verifyProverAssets` (in `/android/app/build.gradle.kts`)
+hashes every file here at build time and fails the build if any file
+drifts from the manifest, if a manifest entry is missing its file, or
+if a new file is added without a manifest entry.
+
+## What's pinned vs reproducible
+
+`prover.html`, `prover.js`, and `poseidon.js` are first-party source
+committed verbatim — `git blame` is the audit trail. `snarkjs.min.js`,
+`identity_proof.wasm`, `circuit_final.zkey`, and `verification_key.json`
+are externally-produced binaries; their provenance is recorded in
+ADR-0010 along with the upstream version they came from.
 
 ## Reference
 
-- [ADR-0009 — QR proof-pairing protocol](../../../../../adr/0009-qr-proof-pairing-protocol.md)
-- [ADR-0010 — Android WebView snarkjs bundling](../../../../../adr/0010-android-webview-snarkjs-bundling.md)
+- [ADR-0009 — QR proof-pairing protocol](../../../../../../../adr/0009-qr-proof-pairing-protocol.md)
+- [ADR-0010 — Android WebView snarkjs bundling](../../../../../../../adr/0010-android-webview-snarkjs-bundling.md)

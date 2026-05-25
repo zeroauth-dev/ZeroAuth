@@ -6,11 +6,13 @@
 //     dance — the compose Gradle plugin owns the version mapping in K2).
 //   * minSdk 30 (Android 11). StrongBox + Class-3 biometric story is cleanest
 //     from there up; below that the WebView + Compose surface gets fiddly.
-//   * verifyProverAssets task — STUB for now. ADR-0010 mandates a SHA-256
-//     gate on assets/prover/* before assembleDebug/assembleRelease. The
-//     real hash check lands in the prover-glue sprint task once the
-//     snarkjs + .wasm + .zkey files are committed. Wiring the task today
-//     so the build graph already has the dependency edge.
+//   * verifyProverAssets — ADR-0010 SHA-256 integrity gate. Reads the
+//     pinned digests from android/prover-assets.sha256 and fails the
+//     build if any file under assets/prover/ drifts from the manifest
+//     (or vice versa). Hooked into preBuild so it runs ahead of EVERY
+//     variant's assembly (assembleDebug, bundleRelease, installDebug,
+//     …). Bumping a prover asset is a 3-file PR — see the task body
+//     and ADR-0010 for the recipe.
 
 import java.security.MessageDigest
 
@@ -117,6 +119,9 @@ dependencies {
     // and used by AndroidKeystoreManager's on-disk envelope.
     implementation(libs.kotlinx.coroutines.android)
 
+    // AndroidX WebKit — WebViewAssetLoader for ADR-0010's prover bundle.
+    implementation(libs.androidx.webkit)
+
     // CameraX + ML Kit barcode
     implementation(libs.bundles.camerax)
     implementation(libs.mlkit.barcode.scanning)
@@ -155,56 +160,88 @@ android.testOptions {
 // ─── ADR-0010 prover-asset integrity gate ─────────────────────────────────
 //
 // `verifyProverAssets` walks assets/prover/* and SHA-256s each file,
-// failing the build if a digest does not match the value pinned in
-// ADR-0010. The real digest table lives in the ADR — when the snarkjs
-// bundle + .wasm + .zkey files land in the prover-glue sprint task,
-// the implementing engineer will:
+// failing the build if a digest does not match the value pinned in the
+// sibling manifest at android/prover-assets.sha256. That manifest is the
+// build-side enforcement; ADR-0010 holds the same hashes for audit /
+// review.
 //
-//   1. drop the new files under app/src/main/assets/prover/
-//   2. update the digest map in this task body (or move it to a
-//      pinned text file alongside the ADR, TBD)
-//   3. update ADR-0010's pinned table
+// Bumping a prover asset is a 3-part PR (described in adr/0010-...):
 //
-// Today the assets directory is empty (only a .gitkeep + README), so the
-// task short-circuits with an informational log. The dependency edge to
-// assembleDebug / assembleRelease is wired NOW so we never accidentally
-// ship a build that skipped the check once the assets exist.
+//   1. drop the new file into android/app/src/main/assets/prover/
+//   2. update android/prover-assets.sha256 with the new SHA-256
+//   3. update ADR-0010's "Pinned asset hashes" table to match
+//
+// CI runs the same task so a digest drift on either side stops the
+// merge.
+//
+// The manifest parser below is intentionally trivial — `key=hex`, no
+// quoting, no commas — so an attacker can't smuggle a digest in
+// through a weird encoding.
 val verifyProverAssets by tasks.registering {
     group = "verification"
-    description = "Hash-check app/src/main/assets/prover/* against the table pinned in ADR-0010."
+    description =
+        "Hash-check app/src/main/assets/prover/* against android/prover-assets.sha256 (ADR-0010)."
 
     val proverDir = file("src/main/assets/prover")
+    val manifestFile = rootProject.file("prover-assets.sha256")
     inputs.dir(proverDir).withPropertyName("proverAssets").skipWhenEmpty(false)
+    inputs.file(manifestFile).withPropertyName("proverAssetsManifest")
 
     doLast {
+        if (!manifestFile.exists()) {
+            throw GradleException(
+                "ADR-0010 manifest not found at ${manifestFile.absolutePath} — " +
+                    "refusing to build a prover bundle without a pinned hash table."
+            )
+        }
+
+        // Parse `key=hex`, ignoring blank lines and comments. Lowercase
+        // the digest because shasum / sha256sum disagree on the case of
+        // the column they emit.
+        val pinned: Map<String, String> = manifestFile.readLines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") }
+            .mapNotNull { line ->
+                val idx = line.indexOf('=')
+                if (idx <= 0) null else line.substring(0, idx).trim() to
+                    line.substring(idx + 1).trim().lowercase()
+            }
+            .toMap()
+
+        if (pinned.isEmpty()) {
+            throw GradleException(
+                "ADR-0010 manifest at ${manifestFile.absolutePath} parsed to zero entries " +
+                    "— refusing to assemble an APK with an empty pinning policy."
+            )
+        }
+
+        // Files in assets/prover/ that we DON'T hash:
+        //   * .gitkeep — placeholder, never shipped
+        //   * *.md     — operator notes, never shipped
         val hashableFiles = proverDir
             .walkTopDown()
             .filter { it.isFile && it.name != ".gitkeep" && !it.name.endsWith(".md") }
             .toList()
 
-        if (hashableFiles.isEmpty()) {
-            logger.lifecycle(
-                "[verifyProverAssets] prover asset hash check skipped — assets not yet committed; " +
-                    "ADR-0010 pins them once they land."
-            )
-            return@doLast
-        }
-
-        // Once assets land, populate this map from ADR-0010's pinned table.
-        // Until then we deliberately fail-loud on any unexpected file so a
-        // drop-in cannot land without an ADR update.
-        val pinned: Map<String, String> = emptyMap()
-
         val mismatches = mutableListOf<String>()
+        val seenInManifest = mutableSetOf<String>()
         hashableFiles.forEach { file ->
             val digest = MessageDigest.getInstance("SHA-256").digest(file.readBytes())
                 .joinToString("") { "%02x".format(it) }
             val expected = pinned[file.name]
+            seenInManifest += file.name
             if (expected == null) {
-                mismatches += "${file.name}: no pinned digest in ADR-0010 (computed $digest)"
-            } else if (!expected.equals(digest, ignoreCase = true)) {
+                mismatches += "${file.name}: not pinned in prover-assets.sha256 (computed $digest)"
+            } else if (expected != digest) {
                 mismatches += "${file.name}: expected $expected, got $digest"
             }
+        }
+        // Reject the opposite drift too: a manifest entry with no file.
+        // Without this an attacker could delete a load-bearing asset
+        // (zkey, vkey) and the build would still pass.
+        val missing = pinned.keys - seenInManifest
+        missing.forEach { name ->
+            mismatches += "$name: pinned in prover-assets.sha256 but missing from assets/prover/"
         }
 
         if (mismatches.isNotEmpty()) {
@@ -213,14 +250,17 @@ val verifyProverAssets by tasks.registering {
                     mismatches.joinToString("\n  ")
             )
         }
-        logger.lifecycle("[verifyProverAssets] all ${hashableFiles.size} prover assets match ADR-0010.")
+        logger.lifecycle(
+            "[verifyProverAssets] all ${hashableFiles.size} prover assets match ADR-0010."
+        )
     }
 }
 
-// Wire the gate into both debug and release assembly. We do this after
-// project evaluation so the variant-specific tasks exist.
-afterEvaluate {
-    listOf("assembleDebug", "assembleRelease").forEach { name ->
-        tasks.findByName(name)?.dependsOn(verifyProverAssets)
-    }
+// Wire the gate into preBuild so it runs before EVERY variant assembly,
+// debug or release. The previous "find assembleDebug after evaluate"
+// approach skipped the check on tasks that bypass assemble (`bundleDebug`,
+// `installDebug`, etc); preBuild is the universal ancestor so we never
+// ship a build that skipped the integrity check.
+tasks.named("preBuild").configure {
+    dependsOn(verifyProverAssets)
 }

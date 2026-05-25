@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<!--
+  prover.html — Hosting page for the WebView-side snarkjs prover.
+
+  Per ADR-0010 the CSP below is locked down to "no network, no eval,
+  no inline" so that even a runtime code-injection bug cannot exfil
+  the biometricSecret. `wasm-unsafe-eval` is required only because
+  snarkjs compiles the circuit WASM at runtime; every other surface
+  is denied.
+
+  All scripts are loaded from the bundled APK assets via
+  `WebViewAssetLoader` against the synthetic origin
+  https://appassets.androidplatform.net/assets/prover/.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; img-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none';" />
+  <title>ZeroAuth prover</title>
+  <style>
+    /* style-src 'self' 'unsafe-inline' allows this <style>; no external CSS. */
+    html, body { margin: 0; padding: 0; background: #000; color: #fff; font: 14px monospace; }
+    #status { padding: 12px; }
+  </style>
+</head>
+<body>
+  <!-- Operator-visible probe; the Android wrapper never reads this. -->
+  <div id="status">prover: loading&hellip;</div>
+
+  <!-- Load order matters: poseidon helper first (constants), then snarkjs
+       (provides `snarkjs.groth16`), then the prover glue that wires the
+       JavaScriptInterface. -->
+  <script src="poseidon.js"></script>
+  <script src="snarkjs.min.js"></script>
+  <script src="prover.js"></script>
+</body>
+</html>

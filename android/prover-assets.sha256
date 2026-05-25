@@ -1,0 +1,27 @@
+# android/prover-assets.sha256 — ADR-0010 prover-asset integrity manifest.
+#
+# Each line maps a file under android/app/src/main/assets/prover/ to its
+# pinned SHA-256. The `verifyProverAssets` Gradle task in
+# android/app/build.gradle.kts hashes every file in the directory and
+# fails the build if a digest does not match what's pinned here.
+#
+# Bumping the snarkjs / circuit assets is a 2-file PR:
+#   1. drop the new bundle into android/app/src/main/assets/prover/
+#   2. update both this file AND adr/0010-android-webview-snarkjs-bundling.md
+#
+# The dual update is intentional — ADR-0010 is the audit-side source of
+# truth; this file is the build-side enforcement. CI runs the same
+# verify task so a digest drift on either side stops the build.
+#
+# Format: `<filename>=<lowercase hex sha256>`. Comments and blank lines
+# are ignored. NO commas, no quoting. The parser in build.gradle.kts is
+# intentionally trivial so an attacker can't sneak a digest in via a
+# weird key/value encoding.
+
+prover.html=d5c46ebef7bf378c8d93fce3b0ac339efa6628199a1dedaae4cb1d02040495ce
+prover.js=e1c19e218e275c81b0fe4dc984a8f370dbb89a8828e7fec22f657c7b00cb199a
+poseidon.js=3570b5c7ccb595140e3ff8b4d95f9a01b18f53dbfd9062c83b87a792be476132
+snarkjs.min.js=3f61bbd9ac0a10173902eaef65b510fa4e9a2c057f759c7f18a6d0446b20fd06
+identity_proof.wasm=a4b8e00db5d182d7141dd5247ab148c82696326dcabb9f9b4f910543c01fbb20
+circuit_final.zkey=ee3e4c969e186b90d73cb5f11ae70f2b752f02469a897f6bf24a483480a9ddb7
+verification_key.json=81d9632f8e52f92a113467f4253df5a81cfe55805dd19fc154c70359059b4d87
