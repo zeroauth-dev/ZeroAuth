@@ -35,6 +35,12 @@ retrofit-kotlinx          = "1.0.0"
 kotlinx-serialization     = "1.7.1"
 # Logging (debug only — see ZeroAuthApp.kt)
 timber                    = "5.0.1"
+# Coroutines — used by BiometricGate to wrap BiometricPrompt in a suspend fun
+# (matched to kotlinx-coroutines-test below so the production + test
+# variants stay on the same minor)
+kotlinx-coroutines        = "1.8.1"
+# Jetpack Security — EncryptedFile + Master-key helper for the Keystore vault
+androidx-security-crypto  = "1.1.0-alpha06"
 # Test
 junit                     = "4.13.2"
 androidx-test-junit       = "1.2.1"
@@ -66,6 +72,14 @@ androidx-compose-navigation        = { group = "androidx.navigation", name = "na
 
 # Biometric
 androidx-biometric                 = { group = "androidx.biometric",   name = "biometric",                      version.ref = "androidx-biometric" }
+
+# Jetpack Security — used by the Keystore module for forward-compat
+# (EncryptedFile / MasterKey shape that the production at-rest store
+# may opt into once we outgrow the hand-rolled AES-GCM blob).
+androidx-security-crypto           = { group = "androidx.security",    name = "security-crypto",                version.ref = "androidx-security-crypto" }
+
+# Coroutines — AndroidBiometricGate wraps BiometricPrompt in a suspend fun
+kotlinx-coroutines-android         = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android",     version.ref = "kotlinx-coroutines" }
 
 # CameraX
 androidx-camera-core               = { group = "androidx.camera",      name = "camera-core",                    version.ref = "camerax" }

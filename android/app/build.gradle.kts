@@ -108,8 +108,14 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 
-    // Biometric
+    // Biometric + Keystore-bound encryption
     implementation(libs.androidx.biometric)
+    implementation(libs.androidx.security.crypto)
+
+    // Coroutines — needed by AndroidBiometricGate's suspend-fun BiometricPrompt wrapper.
+    // kotlinx-serialization-json is already pulled in via the `network` bundle below
+    // and used by AndroidKeystoreManager's on-disk envelope.
+    implementation(libs.kotlinx.coroutines.android)
 
     // CameraX + ML Kit barcode
     implementation(libs.bundles.camerax)
