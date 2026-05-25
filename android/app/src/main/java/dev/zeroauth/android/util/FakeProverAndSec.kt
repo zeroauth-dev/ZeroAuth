@@ -73,9 +73,14 @@ class FakeKeystoreManager(
 
     private val accounts = mutableMapOf<String, FakeUnlockedCredential>()
 
-    /** Public so tests can assert the credential was closed after generate(). */
+    /**
+     * Tests can assert the credential was closed after generate().
+     * Internal-only because FakeUnlockedCredential is private-in-file;
+     * test code that wants the lifecycle assertion lives in the same
+     * compilation unit (commonTest -> same `util` package).
+     */
     @Volatile
-    var lastIssued: FakeUnlockedCredential? = null
+    internal var lastIssued: FakeUnlockedCredential? = null
         private set
 
     /** Toggle to simulate the user adding a new biometric (Keystore re-locks). */
