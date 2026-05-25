@@ -41,6 +41,53 @@ android {
         }
     }
 
+    // Release signing.
+    //
+    // The Gradle build looks for four properties — in order — and only
+    // wires the release signing config when ALL four resolve. Otherwise
+    // it falls back to leaving the release variant unsigned, which keeps
+    // local debug-only workflows working without operators dropping a
+    // keystore on disk.
+    //
+    //   ZEROAUTH_RELEASE_KEYSTORE        absolute path to the .jks
+    //   ZEROAUTH_RELEASE_KEYSTORE_PASS   keystore password
+    //   ZEROAUTH_RELEASE_KEY_ALIAS       key alias inside the keystore
+    //   ZEROAUTH_RELEASE_KEY_PASS        key password
+    //
+    // The CI workflow at .github/workflows/android.yml decodes the
+    // base64-encoded keystore from a GH secret into a tmp file and
+    // exports these four as env vars before invoking ./gradlew
+    // bundleRelease. See android/RELEASE.md for the operator-side
+    // one-time setup.
+    val releaseKeystorePath: String? = (project.findProperty("ZEROAUTH_RELEASE_KEYSTORE") as String?)
+        ?: System.getenv("ZEROAUTH_RELEASE_KEYSTORE")
+    val releaseKeystorePass: String? = (project.findProperty("ZEROAUTH_RELEASE_KEYSTORE_PASS") as String?)
+        ?: System.getenv("ZEROAUTH_RELEASE_KEYSTORE_PASS")
+    val releaseKeyAlias: String? = (project.findProperty("ZEROAUTH_RELEASE_KEY_ALIAS") as String?)
+        ?: System.getenv("ZEROAUTH_RELEASE_KEY_ALIAS")
+    val releaseKeyPass: String? = (project.findProperty("ZEROAUTH_RELEASE_KEY_PASS") as String?)
+        ?: System.getenv("ZEROAUTH_RELEASE_KEY_PASS")
+    val releaseSigningConfigured =
+        !releaseKeystorePath.isNullOrBlank()
+            && !releaseKeystorePass.isNullOrBlank()
+            && !releaseKeyAlias.isNullOrBlank()
+            && !releaseKeyPass.isNullOrBlank()
+            && file(releaseKeystorePath!!).exists()
+
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePass
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPass
+                // v2 + v1 for max device coverage; v3/v4 lifted by AGP automatically.
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -54,9 +101,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // No signing config here yet — release signing lands with the
-            // Play upload key in a follow-on infra task. CI builds will
-            // assemble only the debug variant until then.
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            // When releaseSigningConfigured is false the release variant
+            // assembles unsigned. Distributors must sign + zipalign by
+            // hand, or set the four ZEROAUTH_RELEASE_* properties.
         }
     }
 
