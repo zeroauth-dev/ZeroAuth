@@ -22,8 +22,9 @@ import java.util.concurrent.TimeUnit
  * stretch: it returns the human-readable "Sign in to Chrome on a
  * MacBook Pro" label IF the backend has populated it.
  *
- * Why a separate `*/public` path (NOT documented in api_contract.md as
- * of 2026-05-22):
+ * Why a separate `/public` sub-path (NOT documented in api_contract.md
+ * as of 2026-05-22 — the literal `* /public` would close this KDoc
+ * block, so the path is written without the leading asterisk):
  *
  *   - The phone holds NO tenant API key. ADR-0009 § "Phone is
  *     air-gapped from the backend" explicitly says the phone never
