@@ -41,7 +41,12 @@ import kotlinx.coroutines.delay
 
 // ─── Fake credential ─────────────────────────────────────────────
 
-private class FakeUnlockedCredential(
+// Internal (not private-in-file) so the `FakeKeystoreManager.lastIssued`
+// property below — also internal — can expose it without tripping
+// kotlinc's E_EXPOSED_PROPERTY_TYPE check. The class still doesn't
+// leak outside the module; the production prover and tests are the
+// only callers.
+internal class FakeUnlockedCredential(
     override val biometricSecret: String,
     override val salt: String,
     override val commitment: String,
