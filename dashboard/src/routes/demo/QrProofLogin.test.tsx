@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, act } from '@testing-library/react';
@@ -28,6 +28,25 @@ vi.mock('../../lib/api', async () => {
     __mockExpire: vi.fn(),
   };
 });
+
+// QrScanner is mocked here — its own unit tests cover the webcam +
+// BarcodeDetector internals. The page-level test only needs to know
+// that the scanner exposes an onDetected callback that delivers a raw
+// QR text upstream. We render a tiny test harness that surfaces a
+// button to drive that callback synchronously.
+vi.mock('../../components/QrScanner', () => ({
+  QrScanner: (props: { onDetected: (text: string) => void; expectedPrefix?: string }) => (
+    <div data-testid="qr-scanner-mock">
+      <button
+        type="button"
+        data-testid="qr-scanner-mock-detect"
+        onClick={() => props.onDetected(`${props.expectedPrefix ?? ''}MOCK-PROOF-PAYLOAD`)}
+      >
+        Simulate scan
+      </button>
+    </div>
+  ),
+}));
 
 import { api } from '../../lib/api';
 
@@ -235,5 +254,78 @@ describe('<QrProofLogin />', () => {
     await waitFor(() => expect(api.pairing.createSession).toHaveBeenCalledTimes(1));
     // And the page should be back to a QR render.
     expect(await screen.findByTestId('pairing-qr')).toBeInTheDocument();
+  });
+
+  // ─── awaiting_proof: live scanner + paste fallback ────────────
+
+  it('submits the proof when the QrScanner detects a payload (live-scan path)', async () => {
+    const session = fakeSession();
+    wireSession(session);
+
+    // submitProof resolves so the page transitions to success via the
+    // submit response (the SSE path is independently covered above).
+    vi.mocked(api.pairing.submitProof).mockResolvedValue({
+      session: {
+        ...session,
+        state: 'bound' as const,
+        boundAt: new Date().toISOString(),
+        userId: 'u-99',
+        did: 'did:zeroauth:demo:scanned',
+      },
+      tokens: { accessToken: 'jwt-scan', tokenType: 'Bearer', expiresIn: 3600 },
+    });
+
+    renderPage();
+    await screen.findByTestId('pairing-qr');
+
+    // Walk the user through "phone is scanning" → awaiting_proof.
+    await userEvent.click(screen.getByRole('button', { name: /i scanned it/i }));
+
+    // Scanner mock is mounted.
+    expect(await screen.findByTestId('qr-scanner-mock')).toBeInTheDocument();
+
+    // Drive the scanner: fire onDetected with a properly-prefixed payload.
+    await userEvent.click(screen.getByTestId('qr-scanner-mock-detect'));
+
+    await waitFor(() => expect(api.pairing.submitProof).toHaveBeenCalledTimes(1));
+    const submitArgs = vi.mocked(api.pairing.submitProof).mock.calls[0]!;
+    expect(submitArgs[0]).toBe(session.id);
+    // The page wraps the raw scan into the structured submit body's clientMeta.
+    expect(submitArgs[1].clientMeta?.rawScan).toBe('za:proof:1:MOCK-PROOF-PAYLOAD');
+
+    // And the page should now show the success card.
+    expect(await screen.findByText(/welcome back/i)).toBeInTheDocument();
+  });
+
+  it('submits the proof when the textarea disclosure is used (paste fallback)', async () => {
+    const session = fakeSession();
+    wireSession(session);
+
+    vi.mocked(api.pairing.submitProof).mockResolvedValue({
+      session: {
+        ...session,
+        state: 'bound' as const,
+        boundAt: new Date().toISOString(),
+        userId: 'u-100',
+        did: 'did:zeroauth:demo:pasted',
+      },
+      tokens: { accessToken: 'jwt-paste', tokenType: 'Bearer', expiresIn: 3600 },
+    });
+
+    renderPage();
+    await screen.findByTestId('pairing-qr');
+    await userEvent.click(screen.getByRole('button', { name: /i scanned it/i }));
+
+    // The textarea lives inside a <details> disclosure; in jsdom the
+    // input is still in the DOM regardless of open/closed, so we can
+    // type directly. We don't need to programmatically open the
+    // <details> — userEvent typing finds the element by testid.
+    const textarea = await screen.findByTestId('proof-payload-input');
+    await userEvent.type(textarea, 'za:proof:1:PASTED-PAYLOAD');
+    await userEvent.click(screen.getByTestId('proof-submit-button'));
+
+    await waitFor(() => expect(api.pairing.submitProof).toHaveBeenCalledTimes(1));
+    const submitArgs = vi.mocked(api.pairing.submitProof).mock.calls[0]!;
+    expect(submitArgs[1].clientMeta?.rawScan).toBe('za:proof:1:PASTED-PAYLOAD');
   });
 });

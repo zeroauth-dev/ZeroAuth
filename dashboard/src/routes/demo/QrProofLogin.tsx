@@ -18,6 +18,8 @@ import {
   type PairingSubmitResponse,
 } from '../../lib/api';
 import { Badge, Button, Card, CardBody, CardHeader, pushToast, Textarea } from '../../components/ui';
+import { QrScanner } from '../../components/QrScanner';
+import { cn } from '../../lib/cn';
 
 /**
  * QR-proof desktop sign-in demo (ADR-0009, W3).
@@ -470,41 +472,77 @@ interface ProofScanCardProps {
 }
 
 function ProofScanCard({ session, secondsLeft, submitting, onSubmit, onCancel, mockMode, onMockBind }: ProofScanCardProps) {
-  // For W3 we ship the paste-fallback as the primary input — the
-  // camera-driven scanner via @zxing/library is a separate dep that
-  // should land via the dep-add skill in a follow-up. The textarea
-  // already exercises the same submit pipeline.
+  // Live webcam scanner (BarcodeDetector) is the primary path; the
+  // textarea is preserved as a <details> disclosure for a11y + browsers
+  // without BarcodeDetector. The scanner fires onDetected exactly once
+  // per session (first-hit-wins) and tears down its own camera stream.
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
   return (
     <Card>
       <CardHeader
         title="Scan the proof QR from your phone"
-        description="Your phone is now displaying a second QR with the proof. Hold it up to your webcam, or paste the payload below."
+        description="Hold your phone's screen up to your webcam. We'll catch the proof QR and sign you in."
         action={
           <Badge tone={secondsLeft > 30 ? 'brand' : 'warn'}>
             Session expires in {formatCountdown(secondsLeft)}
           </Badge>
         }
       />
-      <CardBody className="space-y-4">
-        <div className="rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-bg-surface)] px-4 py-6 text-center text-xs text-[var(--color-text-dim)]">
-          Webcam preview lands here once @zxing/library is wired (W4). For now, paste the proof QR text below.
-        </div>
-        <div>
-          <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
-            Proof QR payload
-          </label>
-          <Textarea
-            ref={ref}
-            data-testid="proof-payload-input"
-            placeholder="za:proof:1:..."
-            spellCheck={false}
-            disabled={submitting}
-            rows={6}
-            className="font-mono text-xs"
+      <CardBody className={cn('space-y-4', submitting && 'opacity-60')}>
+        <p className="text-center text-xs text-[var(--color-text-secondary)]">
+          Hold your phone&apos;s screen up to the webcam
+        </p>
+        <div className="flex justify-center">
+          <QrScanner
+            expectedPrefix={PROOF_QR_PREFIX}
+            width={480}
+            height={360}
+            onDetected={(text) => {
+              // First hit wins. The scanner has already cleared its
+              // own interval + paused the stream; just hand the payload
+              // to the submit pipeline.
+              onSubmit(text);
+            }}
+            onError={(err) => {
+              pushToast('warn', `Webcam unavailable: ${err.message}. Use the paste fallback below.`);
+            }}
           />
         </div>
+        <details className="text-xs text-[var(--color-text-dim)]">
+          <summary className="cursor-pointer hover:text-[var(--color-text-secondary)]">
+            Type or paste the proof code instead
+          </summary>
+          <div className="mt-3 space-y-2">
+            <label className="block text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
+              Proof QR payload
+            </label>
+            <Textarea
+              ref={ref}
+              data-testid="proof-payload-input"
+              placeholder="za:proof:1:..."
+              spellCheck={false}
+              disabled={submitting}
+              rows={6}
+              className="font-mono text-xs"
+            />
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                loading={submitting}
+                data-testid="proof-submit-button"
+                onClick={() => {
+                  if (!ref.current) return;
+                  onSubmit(ref.current.value);
+                }}
+              >
+                Verify pasted proof
+              </Button>
+            </div>
+          </div>
+        </details>
         <div className="flex flex-wrap justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={submitting}>
             Cancel
@@ -514,19 +552,6 @@ function ProofScanCard({ session, secondsLeft, submitting, onSubmit, onCancel, m
               Trigger mock claim
             </Button>
           ) : null}
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            loading={submitting}
-            data-testid="proof-submit-button"
-            onClick={() => {
-              if (!ref.current) return;
-              onSubmit(ref.current.value);
-            }}
-          >
-            Verify proof
-          </Button>
         </div>
         <p className="text-[11px] text-[var(--color-text-dim)]">
           Session id <code className="font-mono">{session.id.slice(0, 8)}…</code>
