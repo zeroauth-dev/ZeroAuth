@@ -56,13 +56,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # Minimum: API 30 (our minSdk) + API 34 (target / compile)
+          # sdkmanager wants packages as a single space-separated string,
+          # NOT a YAML multi-line block (the block joins lines with \n,
+          # which sdkmanager parses as one giant package name and dies).
+          # AGP only ever compiles against compileSdk = 34; the API 30
+          # platform install is for Robolectric's runtime classpath.
           # build-tools 34.0.0 covers both AGP 8.5 + Robolectric needs.
-          packages: |
-            platforms;android-34
-            platforms;android-30
-            build-tools;34.0.0
-            platform-tools
+          packages: 'platforms;android-34 platforms;android-30 build-tools;34.0.0 platform-tools'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
