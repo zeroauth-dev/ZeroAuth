@@ -31,7 +31,6 @@ zxing-core                = "3.5.3"
 # Networking + serialization
 okhttp                    = "4.12.0"
 retrofit                  = "2.11.0"
-retrofit-kotlinx          = "1.0.0"
 kotlinx-serialization     = "1.7.1"
 # Logging (debug only — see ZeroAuthApp.kt)
 timber                    = "5.0.1"
@@ -106,7 +105,12 @@ zxing-core                         = { group = "com.google.zxing",     name = "c
 okhttp                             = { group = "com.squareup.okhttp3", name = "okhttp",                         version.ref = "okhttp" }
 okhttp-logging-interceptor         = { group = "com.squareup.okhttp3", name = "logging-interceptor",            version.ref = "okhttp" }
 retrofit-core                      = { group = "com.squareup.retrofit2", name = "retrofit",                     version.ref = "retrofit" }
-retrofit-kotlinx-serialization     = { group = "com.jakewharton.retrofit", name = "retrofit2-kotlinx-serialization-converter", version.ref = "retrofit-kotlinx" }
+# The JakeWharton retrofit2-kotlinx-serialization-converter was rolled
+# into the official retrofit project as of retrofit 2.10.0; the package
+# path stays `retrofit2.converter.kotlinx.serialization.asConverterFactory`
+# either way, but only the official artifact resolves cleanly with
+# retrofit 2.11.0 on the classpath.
+retrofit-kotlinx-serialization     = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }
 kotlinx-serialization-json         = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json",    version.ref = "kotlinx-serialization" }
 
 # Logging
