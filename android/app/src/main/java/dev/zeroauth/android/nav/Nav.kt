@@ -9,8 +9,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import dev.zeroauth.android.ui.DoneScreen
 import dev.zeroauth.android.ui.EnrollScreen
-import dev.zeroauth.android.ui.ScanScreen
 import dev.zeroauth.android.ui.SplashScreen
+import dev.zeroauth.android.ui.scan.ScanScreen
 
 /**
  * Navigation graph. Sealed class describes the destinations, with the

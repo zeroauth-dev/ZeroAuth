@@ -16,12 +16,37 @@
 
     <!-- Scan -->
     <string name="scan_caption">Point at the QR on your laptop</string>
+    <string name="scan_paste_fallback">Type the code instead</string>
     <string name="scan_permission_title">Camera access needed</string>
     <string name="scan_permission_body">ZeroAuth uses the camera only to read the desktop login QR. Nothing is recorded.</string>
     <string name="scan_permission_cta">Allow camera</string>
+    <string name="scan_permission_open_settings">Open settings</string>
     <string name="scan_invalid_payload">That QR did not match the ZeroAuth desktop-login format. Refresh the laptop and try again.</string>
 
-    <!-- Done -->
+    <!-- Approve -->
+    <string name="approve_title">Sign in to %1$s?</string>
+    <string name="approve_title_fallback">Sign in to this desktop?</string>
+    <string name="approve_subtitle">This will release a one-shot proof to %1$s. The proof reveals no biometric data — only that you are the enrolled user.</string>
+    <string name="approve_cta">Approve</string>
+    <string name="approve_cancel">Cancel</string>
+
+    <!-- Awaiting biometric -->
+    <string name="biometric_waiting">Confirm with your fingerprint or face</string>
+
+    <!-- Proving -->
+    <string name="proving_title">Generating zero-knowledge proof…</string>
+    <string name="proving_subtitle">~5 seconds. Don\'t switch apps while we work.</string>
+
+    <!-- Proof ready -->
+    <string name="proof_ready_title">Show this to the laptop\'s webcam</string>
+    <string name="proof_ready_subtitle">Hold your phone up to the desktop\'s camera. The desktop will sign you in automatically.</string>
+    <string name="proof_ready_cta">Done</string>
+
+    <!-- Error -->
+    <string name="error_title">Something went sideways</string>
+    <string name="error_retry">Try again</string>
+
+    <!-- Done (legacy stub, retained for nav-graph compat) -->
     <string name="done_title">QR captured</string>
     <string name="done_subtitle">In the next iteration this screen will generate the Groth16 proof and complete the handshake. For now it confirms the QR decoded cleanly.</string>
     <string name="done_session_label">Session</string>

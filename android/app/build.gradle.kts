@@ -97,6 +97,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.activity.compose)
 
     // Compose — BOM aligns the constellation
@@ -128,8 +129,21 @@ dependencies {
 
     // Test
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.turbine)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockito.kotlin)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
+}
+
+// Robolectric needs Android resources for inflation. Most of our unit
+// tests don't touch resources but the safety toggle prevents a flaky
+// "resource not found" if a future test references a string.
+android.testOptions {
+    unitTests {
+        isIncludeAndroidResources = true
+    }
 }
 
 // ─── ADR-0010 prover-asset integrity gate ─────────────────────────────────
