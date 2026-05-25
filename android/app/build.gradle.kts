@@ -144,6 +144,10 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockito.kotlin)
+    // androidx.test:core for ApplicationProvider — used by Robolectric
+    // tests under app/src/test/ (notably AndroidKeystoreManagerTest).
+    // Instrumented tests get it transitively from androidx.test.ext:junit.
+    testImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
 }
