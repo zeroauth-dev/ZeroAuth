@@ -16,15 +16,26 @@
                 unlock paths (BiometricGate is stubbed for now).
 
   Components:
-    * .MainActivity  — single-activity host, Compose root. Hosts the
-                WebViewMobileProver inline in the main process today
-                (see TODO in WebViewMobileProver.kt and the "Deferred:
-                WebView process isolation" note in ADR-0010 §"WebView
-                is process-isolated and CSP-locked"). Process
-                isolation is gated on the IPC plumbing — a Messenger
-                or AIDL binder between MainActivity and a future
-                ProverActivity running android:process=":prover".
-                Scheduled work, not stubbed scaffolding.
+    * .MainActivity     — single-activity host, Compose root. Lives in
+                the default process. Holds the Keystore-bound
+                credential briefly between biometric approval and the
+                outbound IPC to the prover Service.
+    * .prover.ProverService
+                — snarkjs WebView host. Runs in android:process=":prover"
+                with android:isolatedProcess="true": no filesystem
+                access to the app data dir, no Keystore, no
+                SharedPreferences, no ContentProvider authority. The
+                biometric secret is shipped to this process as a one-
+                shot Parcelable via Messenger ([ProverIpc.kt]) — once
+                the proof completes, the unwrapped secret is closed in
+                main and the entire :prover process is torn down on
+                unbind. A renderer compromise inside the WebView can
+                reach at most the in-flight witness for the CURRENT
+                proof; past proofs and the Keystore-wrapped credential
+                remain unreachable. This is the threat mitigation
+                docs/threat_model.md A-17 ("WebView supply chain") and
+                A-24 ("side-channel leakage on the phone") cite as
+                ADR-0010's deliverable.
 
   No <queries> needed today — no package introspection.
 -->
@@ -64,31 +75,30 @@
         </activity>
 
         <!--
-          DEFERRED: dedicated prover activity in android:process=":prover".
+          ProverService — bound Service in :prover with isolatedProcess="true".
 
-          ADR-0010 §"WebView is process-isolated and CSP-locked" calls for
-          hosting the snarkjs WebView in its own OS process. The W3 prover
-          (WebViewMobileProver.kt) currently lives inline in the main
-          activity's process because the IPC plumbing — Messenger / AIDL
-          binder between MainActivity and a future ProverActivity — is its
-          own ~day-of-work and we shipped W3 without it. Threat model
-          A-17 acknowledges the residual risk: a WebView renderer
-          compromise has line-of-sight into the main process where the
-          Keystore-unwrapped biometric secret lives during proof
-          generation.
+          ADR-0010 §"WebView is process-isolated and CSP-locked" promises this
+          isolation; IsolatedMobileProver + ProverIpc + ProverService realise it.
+          See the kdoc on ProverService.kt for the threat-confinement story
+          and the kdoc on ProverIpc.kt for the Parcelable wire format.
 
-          To uncomment when the IPC layer lands (W4+):
+          The flags here are NOT optional:
 
-          <activity
-              android:name=".prover.ProverActivity"
-              android:exported="false"
-              android:process=":prover"
-              android:theme="@style/Theme.ZeroAuth.Prover" />
-
-          (The asset loader at https://appassets.androidplatform.net is
-          configured per-WebView by WebViewMobileProver — no manifest
-          provider needed even after the move.)
+            * android:process=":prover"        — separate OS process.
+            * android:isolatedProcess="true"   — separate UID with NO access
+                                                 to the app's data dir,
+                                                 Keystore, or SharedPreferences.
+            * android:exported="false"         — bind only from this app's
+                                                 own components (Messenger
+                                                 enforces this for free
+                                                 since there's no Intent
+                                                 filter).
         -->
+        <service
+            android:name=".prover.ProverService"
+            android:exported="false"
+            android:process=":prover"
+            android:isolatedProcess="true" />
 
     </application>
 

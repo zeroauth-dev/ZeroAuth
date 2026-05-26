@@ -49,14 +49,27 @@ import kotlin.coroutines.resumeWithException
  * `suspendCancellableCoroutine` while JS does its work. Background
  * crash detection runs through [WebViewClient.onRenderProcessGone].
  *
- * NB: ADR-0010 §"WebView is process-isolated" calls for hosting this
- * WebView in a dedicated `android:process=":prover"` activity so a
- * renderer compromise can't reach the Keystore-bound credential in
- * the main process. The hosting activity is the UI engineer's
- * responsibility (see `ui/scan/ScanScreen.kt` + the manifest stub).
- * If a future caller instantiates [WebViewMobileProver] directly in
- * the main process for tests or demos, that's a P2 deferred
- * remediation — file an issue referencing ADR-0010.
+ * **Production code does NOT instantiate this class directly.** The
+ * production app uses [IsolatedMobileProver], which runs an instance
+ * of this class inside a bound [ProverService] hosted in
+ * `android:process=":prover"` with `android:isolatedProcess="true"`.
+ * That separation is what fulfils ADR-0010 §"WebView is process-
+ * isolated and CSP-locked" and the threat-model rows A-17 + A-24 —
+ * the WebView is sandboxed in its own UID with no access to Keystore,
+ * SharedPreferences, or the app's private data dir.
+ *
+ * This class remains in tree for two reasons:
+ *
+ *   1. The [ProverService] uses it as its internal worker — the
+ *      WebView wiring is the same on either side of the process
+ *      boundary, so we share the implementation.
+ *   2. Unit tests target the WebView contract directly without an
+ *      IPC bridge (see WebViewMobileProverTest), and the in-process
+ *      fallback is convenient for Robolectric paths where standing up
+ *      a full `:prover` Service binding would be more ceremony than
+ *      payoff. Robolectric's WebView shadow doesn't actually execute
+ *      JS, so the test surface is input-validation and lifecycle, not
+ *      end-to-end proof generation.
  */
 class WebViewMobileProver(
     context: Context,

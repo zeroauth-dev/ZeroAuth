@@ -92,19 +92,48 @@ The hosting `WebView` is configured with:
 - `setDomStorageEnabled(false)` — no localStorage / IndexedDB inside
   the prover sandbox
 
-**Process isolation — DEFERRED to W4+.** The W3 build hosts the
-WebView inline in the main activity's process (see
-[`WebViewMobileProver.kt`](../android/app/src/main/java/dev/zeroauth/android/prover/WebViewMobileProver.kt)
-class doc). Moving the WebView into its own
-`android:process=":prover"` activity requires a Messenger or AIDL
-binder layer between MainActivity and the prover process, which is
-its own day-of-work. The deferred state is documented inline in
-[`AndroidManifest.xml`](../android/app/src/main/AndroidManifest.xml)
-and acknowledged by threat-model row
-[A-17](../docs/threat_model.md). For the W3 demo the WebView's CSP +
-asset hash-pinning + Android process sandboxing carry the
-defense-in-depth; the dedicated `:prover` process is the next-class
-upgrade.
+**Process isolation — implemented.** The snarkjs WebView runs inside
+a bound Service in `android:process=":prover"` with
+`android:isolatedProcess="true"`. The shape of the implementation:
+
+- [`ProverService.kt`](../android/app/src/main/java/dev/zeroauth/android/prover/ProverService.kt)
+  declares the bound Service and hosts a [`WebViewMobileProver`](../android/app/src/main/java/dev/zeroauth/android/prover/WebViewMobileProver.kt)
+  as its internal worker. Same WebView wiring as the in-process
+  reference, just scoped to the Service's lifetime.
+- [`IsolatedMobileProver.kt`](../android/app/src/main/java/dev/zeroauth/android/prover/IsolatedMobileProver.kt)
+  is the client-side `MobileProver` implementation. It binds to the
+  Service on demand, ships witness inputs across via a Messenger, and
+  surfaces progress events + the terminal proof back to the caller.
+  Sequential `generate()` calls reuse the same binding so the
+  process-start cost (~50–150 ms on a mid-range device) is amortised.
+- [`ProverIpc.kt`](../android/app/src/main/java/dev/zeroauth/android/prover/ProverIpc.kt)
+  defines the Parcelable wire format: a one-shot `ProverRequest`
+  carrying the field-element strings plus the session nonce, and a
+  sealed `ProverResponse` (Progress / Success / Failure). We picked
+  Messenger over AIDL because the contract is request/response and
+  doesn't benefit from AIDL's sync-call ergonomics; Messenger keeps us
+  off the AIDL-codegen treadmill.
+- The manifest entry in [`AndroidManifest.xml`](../android/app/src/main/AndroidManifest.xml)
+  pins `android:isolatedProcess="true"` and `android:exported="false"`.
+  Isolated process is the load-bearing flag: the `:prover` UID has no
+  filesystem access to the app's data dir, no Keystore, no
+  SharedPreferences, no ContentProvider authority.
+
+A renderer compromise inside the WebView in `:prover` can reach at
+most the in-flight witness for the CURRENT proof — past proofs and
+the Keystore-wrapped credential blob live in the main process and are
+unreachable from the isolated UID. The main process unwraps the
+credential, ships the field-element strings across as a one-shot
+Parcelable, then `close()`s the credential immediately after the proof
+returns. When the last caller unbinds, the entire `:prover` process
+exits and its heap pages are unmapped at the kernel level — there is
+no warm sandbox carrying stale witnesses across sessions.
+
+This is the mitigation that threat-model rows
+[A-17](../docs/threat_model.md#a-17--webview-supply-chain-attack-on-the-snarkjs-build)
+("WebView supply-chain") and
+[A-24](../docs/threat_model.md#a-24--side-channel-leakage-on-the-phone-during-proof-generation)
+("side-channel leakage") cite as ADR-0010's deliverable.
 
 ### Build-time integrity gate
 
@@ -211,5 +240,7 @@ enforcement.
   https://developer.android.com/reference/androidx/webkit/WebViewAssetLoader
 
 ---
-LAST_UPDATED: 2026-05-25
+LAST_UPDATED: 2026-05-25 (process isolation implemented — bound Service
+in `:prover` with `isolatedProcess=true`; see the §"WebView is
+process-isolated and CSP-locked" section above)
 OWNER: Pulkit Pareek
