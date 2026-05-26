@@ -371,6 +371,61 @@ export interface ProofPairingSession {
   created_at: Date;
 }
 
+// ─── Play Integrity (W3 enforcement; ADR-0009, threat A-18) ─────────
+
+/**
+ * The subset of Play Integrity verdict labels we recognise. The values
+ * mirror the names Google emits in the device-integrity verdict but
+ * are kept as a closed enum here so a future Play API change doesn't
+ * silently widen what counts as "strong".
+ *
+ * Ranks (higher = stronger):
+ *   0 — absent or UNKNOWN     (no signal)
+ *   1 — INTEGRITY_NOT_EVALUATED  (Play didn't evaluate)
+ *   2 — MEETS_BASIC_INTEGRITY (rooted phones, custom ROMs)
+ *   3 — MEETS_DEVICE_INTEGRITY (stock Android, Play Protect on)
+ *   4 — MEETS_STRONG_INTEGRITY (StrongBox-equivalent, locked bootloader)
+ */
+export type PlayIntegrityVerdict =
+  | 'MEETS_STRONG_INTEGRITY'
+  | 'MEETS_DEVICE_INTEGRITY'
+  | 'MEETS_BASIC_INTEGRITY'
+  | 'INTEGRITY_NOT_EVALUATED'
+  | 'UNKNOWN';
+
+/** Numeric rank so policy comparison reduces to a single `>=`. */
+export function verdictRank(v: string | undefined | null): number {
+  switch (v) {
+    case 'MEETS_STRONG_INTEGRITY': return 4;
+    case 'MEETS_DEVICE_INTEGRITY': return 3;
+    case 'MEETS_BASIC_INTEGRITY': return 2;
+    case 'INTEGRITY_NOT_EVALUATED': return 1;
+    default: return 0;
+  }
+}
+
+/**
+ * Per-tenant security policy stored as JSONB on `tenants.security_policy`.
+ * All fields are optional; absent fields mean "permissive" (any verdict
+ * accepted, including absent). A demo tenant runs with `{}`; a BFSI
+ * pilot enforces `require_strong_integrity: true` + `allow_play_integrity_absent: false`.
+ */
+export interface TenantSecurityPolicy {
+  /** Require MEETS_STRONG_INTEGRITY (rank ≥ 4) on every submit. */
+  require_strong_integrity?: boolean;
+  /** Require MEETS_DEVICE_INTEGRITY (rank ≥ 3) on every submit. */
+  require_device_integrity?: boolean;
+  /** Require MEETS_BASIC_INTEGRITY (rank ≥ 2) on every submit. */
+  require_basic_integrity?: boolean;
+  /**
+   * When any of the above requires is true, this knob controls what
+   * happens to a submit with NO presented verdict. Default behaviour
+   * (false): reject with 400 `play_integrity_required`. Set true to
+   * permit submits while the field plumbing rolls out client-side.
+   */
+  allow_play_integrity_absent?: boolean;
+}
+
 // ─── Lead Types ─────────────────────────────────────────────────────
 
 export interface LeadRow {

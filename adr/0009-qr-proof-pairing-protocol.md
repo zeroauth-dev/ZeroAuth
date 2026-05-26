@@ -162,10 +162,7 @@ for the cleanup sweep.
 - **Production rapidsnark on Android.** W3 ships snarkjs-in-WebView.
   rapidsnark via JNI is ADR-0011, scheduled for W5+.
 - **iOS app.** Android-only for W3.
-- **Play Integrity attestation gate.** Recommended as a tenant-policy
-  knob; the request payload reserves `clientMeta.playIntegrityVerdict`
-  for the field. Server-side enforcement is W4 work tracked under the
-  security punch list.
+- **Play Integrity attestation gate** — **landed in W3** ([`src/services/play-integrity.ts`](../src/services/play-integrity.ts) + [`tests/play-integrity.test.ts`](../tests/play-integrity.test.ts)). Tenants set `tenants.security_policy.require_{strong,device,basic}_integrity` to gate `/submit` on the presented `clientMeta.playIntegrityVerdict`. Default is permissive (`security_policy = '{}'`) so the demo tenant flow is unchanged. Two new error codes (`play_integrity_required` 400, `play_integrity_insufficient` 401) are documented in [`docs/error_codes.md`](../docs/error_codes.md) and the policy shape lives in [`docs/api_contract.md`](../docs/api_contract.md) under "Tenant policy". Threat-model row [A-18](../docs/threat_model.md) updated to reflect active enforcement.
 - **Per-tenant rate limit on `/submit`.** Existing tenant rate limiter
   applies; a tighter `/submit`-specific limit (30/min/tenant + 5/min/
   session-id) is recommended in [A-20] but lands as a follow-up.

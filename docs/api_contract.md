@@ -200,6 +200,26 @@ data: {"id":"…","error":"pairing_nonce_mismatch","message":"…"}
 
 Error variants on `/submit` (all return `{ "error": "<code>", "message": "<human>" }`): see [`docs/error_codes.md`](error_codes.md) under "Proof pairing".
 
+#### Tenant policy
+
+Per-tenant security knobs live in the `tenants.security_policy` JSONB column. The current consumer is the Play Integrity verdict gate on `/submit`. All fields are optional; absent = permissive default (any verdict accepted, including absent).
+
+```json
+{
+  "require_strong_integrity": false,
+  "require_device_integrity": false,
+  "require_basic_integrity": false,
+  "allow_play_integrity_absent": false
+}
+```
+
+Rank order (highest wins when multiple flags set): `require_strong_integrity` (rank 4) > `require_device_integrity` (rank 3) > `require_basic_integrity` (rank 2). Demo tenants ship with `{}`. BFSI / regulated tenants flip `require_strong_integrity: true` and `allow_play_integrity_absent: false`.
+
+Failure modes:
+- Verdict absent + policy requires one + `allow_play_integrity_absent` false → `400 play_integrity_required`.
+- Verdict rank < required rank → `401 play_integrity_insufficient`.
+- Both write an `audit_events` row with action `pairing.integrity_rejected` carrying the presented verdict + the policy snapshot (no PII; never `did`).
+
 ### Legacy `/api/auth/*` surface
 
 These exist for backwards compatibility with internal tooling that pre-dates the `/v1/*` rollout. The legacy SAML and OIDC callbacks are gated by `ENABLE_DEMO_AUTH` for the same reason as their `/v1/*` counterparts. Document but plan to deprecate.

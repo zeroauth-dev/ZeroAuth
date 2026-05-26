@@ -145,6 +145,8 @@ jest.mock('../src/services/proof-pairing', () => {
   class PairingTenantMismatch extends Error { code = 'pairing_tenant_mismatch'; }
   class TooManyPendingSessions extends Error { code = 'too_many_pending_sessions'; }
   class VerifierUnavailable extends Error { code = 'verifier_unavailable'; }
+  class PlayIntegrityRequired extends Error { code = 'play_integrity_required'; }
+  class PlayIntegrityInsufficient extends Error { code = 'play_integrity_insufficient'; }
   return {
     createSession: (...args: unknown[]) => createSessionMock(...args),
     submitProof: (...args: unknown[]) => submitProofMock(...args),
@@ -164,6 +166,8 @@ jest.mock('../src/services/proof-pairing', () => {
     PairingTenantMismatch,
     TooManyPendingSessions,
     VerifierUnavailable,
+    PlayIntegrityRequired,
+    PlayIntegrityInsufficient,
   };
 });
 
@@ -178,6 +182,8 @@ import {
   PairingDidUnknown,
   PairingProofInvalid,
   TooManyPendingSessions,
+  PlayIntegrityRequired,
+  PlayIntegrityInsufficient,
 } from '../src/services/proof-pairing';
 
 const app = createApp();
@@ -629,5 +635,72 @@ describe('GET /v1/proof-pairing/sessions/:id/public', () => {
     const res = await request(app).get(`/v1/proof-pairing/sessions/${id}/public`);
     expect(res.status).toBe(200);
     expect(getSessionPublicMinimalMock).toHaveBeenLastCalledWith(id);
+  });
+});
+
+describe('POST /submit Play Integrity enforcement', () => {
+  // Reuse the existing submit-route mock surface. The route layer
+  // calls submitProofMock(...); we drive policy outcomes by making
+  // the mock throw the appropriate Play Integrity error class.
+
+  it('permissive tenant accepts submit without verdict (default policy)', async () => {
+    submitProofMock.mockResolvedValueOnce({
+      session: { id: uuid(), state: 'consumed', expiresAt: '2026-12-01T00:00:00.000Z', boundAt: '2026-05-25T10:00:00.000Z' },
+      verification: { id: uuid() },
+      tokens: { accessToken: 't', refreshToken: 'r', tokenType: 'Bearer', expiresIn: 3600 },
+    });
+    const res = await request(app)
+      .post(`/v1/proof-pairing/sessions/${uuid()}/submit`)
+      .set('Cookie', 'zeroauth_pair_bind=ok')
+      .send(defaultSubmitBody());
+    expect(res.status).toBe(200);
+    expect(res.body.session.state).toBe('consumed');
+  });
+
+  it('400 play_integrity_required when tenant requires verdict but body has none', async () => {
+    submitProofMock.mockRejectedValueOnce(
+      new PlayIntegrityRequired('Tenant policy requires a Play Integrity verdict on the submit body.'),
+    );
+    const res = await request(app)
+      .post(`/v1/proof-pairing/sessions/${uuid()}/submit`)
+      .set('Cookie', 'zeroauth_pair_bind=ok')
+      .send(defaultSubmitBody());
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('play_integrity_required');
+  });
+
+  it('401 play_integrity_insufficient when verdict weaker than policy', async () => {
+    submitProofMock.mockRejectedValueOnce(
+      new PlayIntegrityInsufficient("Presented Play Integrity verdict is weaker than the tenant's required rank (4)."),
+    );
+    const body = defaultSubmitBody();
+    (body as { clientMeta?: Record<string, unknown> }).clientMeta = {
+      ...(body.clientMeta ?? {}),
+      playIntegrityVerdict: 'MEETS_DEVICE_INTEGRITY',
+    };
+    const res = await request(app)
+      .post(`/v1/proof-pairing/sessions/${uuid()}/submit`)
+      .set('Cookie', 'zeroauth_pair_bind=ok')
+      .send(body);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('play_integrity_insufficient');
+  });
+
+  it('200 when verdict meets policy', async () => {
+    submitProofMock.mockResolvedValueOnce({
+      session: { id: uuid(), state: 'consumed', expiresAt: '2026-12-01T00:00:00.000Z', boundAt: '2026-05-25T10:00:00.000Z' },
+      verification: { id: uuid() },
+      tokens: { accessToken: 't', refreshToken: 'r', tokenType: 'Bearer', expiresIn: 3600 },
+    });
+    const body = defaultSubmitBody();
+    (body as { clientMeta?: Record<string, unknown> }).clientMeta = {
+      ...(body.clientMeta ?? {}),
+      playIntegrityVerdict: 'MEETS_STRONG_INTEGRITY',
+    };
+    const res = await request(app)
+      .post(`/v1/proof-pairing/sessions/${uuid()}/submit`)
+      .set('Cookie', 'zeroauth_pair_bind=ok')
+      .send(body);
+    expect(res.status).toBe(200);
   });
 });

@@ -46,6 +46,14 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_tenants_email ON tenants(email);
   CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status);
 
+  -- W3: per-tenant security knobs. The current consumer is the Play
+  -- Integrity verdict gate on /v1/proof-pairing/sessions/:id/submit
+  -- (src/services/play-integrity.ts), but the column is JSONB so we
+  -- can stack additional policy keys here without another migration.
+  -- Default '{}' = permissive across the board (the demo tenant stays
+  -- unchanged). BFSI tenants flip require_strong_integrity=true.
+  ALTER TABLE tenants ADD COLUMN IF NOT EXISTS security_policy JSONB NOT NULL DEFAULT '{}'::jsonb;
+
   -- ─── Pending signups (F-2 v2: byte-identical /api/console/signup) ───
   -- Holds a hashed password + intended company name keyed by a single-use
   -- verification token. Created when POST /api/console/signup is called

@@ -25,6 +25,8 @@ import {
   PairingSessionAlreadyBound,
   PairingSessionLocked,
   PairingSessionBindMismatch,
+  PlayIntegrityRequired,
+  PlayIntegrityInsufficient,
   PairingNonceMismatch,
   PairingDidUnknown,
   PairingProofInvalid,
@@ -105,6 +107,12 @@ function mapError(err: unknown): MappedError {
   }
   if (err instanceof VerifierUnavailable) {
     return { status: 503, error: err.code, message: 'Verifier loopback unavailable. Retry shortly.' };
+  }
+  if (err instanceof PlayIntegrityRequired) {
+    return { status: 400, error: err.code, message: err.message };
+  }
+  if (err instanceof PlayIntegrityInsufficient) {
+    return { status: 401, error: err.code, message: err.message };
   }
   return { status: 500, error: 'pairing_failed', message: 'Pairing failed.' };
 }

@@ -112,6 +112,8 @@ Some responses carry extra fields (`docs`, `retryAfterSeconds`, `currentScopes`,
 | `pairing_unavailable` | `503` | Verifier unreachable at session creation; pairing temporarily disabled. |
 | `verifier_unavailable` | `503` | Verifier loopback call timed out on this submit. Retryable. |
 | `too_many_pending_sessions` | `429` | Tenant has more than 50 open `issued` sessions. |
+| `play_integrity_required` | `400` | The tenant's `security_policy` requires a Play Integrity verdict on the submit body and the field is absent. |
+| `play_integrity_insufficient` | `401` | The presented `clientMeta.playIntegrityVerdict` is weaker than the tenant's required rank (strong > device > basic). |
 
 ---
 LAST_UPDATED: 2026-05-22

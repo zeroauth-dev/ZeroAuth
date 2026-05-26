@@ -39,7 +39,9 @@ import {
   AuthToken,
   ProofPairingSession,
   ProofPairingState,
+  TenantSecurityPolicy,
 } from '../types';
+import { evaluateVerdict } from './play-integrity';
 
 // ─── Tunables ──────────────────────────────────────────────────────────
 
@@ -106,6 +108,16 @@ export class TooManyPendingSessions extends Error {
 export class VerifierUnavailable extends Error {
   readonly code = 'verifier_unavailable';
   constructor(message = 'Verifier loopback unavailable') { super(message); }
+}
+
+export class PlayIntegrityRequired extends Error {
+  readonly code = 'play_integrity_required';
+  constructor(message = 'Tenant policy requires a Play Integrity verdict') { super(message); }
+}
+
+export class PlayIntegrityInsufficient extends Error {
+  readonly code = 'play_integrity_insufficient';
+  constructor(message = 'Presented Play Integrity verdict is weaker than the tenant policy') { super(message); }
 }
 
 // ─── Public interface shapes ───────────────────────────────────────────
@@ -260,6 +272,33 @@ async function incrementFailureCount(sessionId: string, errorCode: string): Prom
     [sessionId, errorCode, MAX_FAILURES_BEFORE_LOCK],
   );
   return result.rows[0]?.failure_count ?? 0;
+}
+
+/**
+ * Read the tenant's `security_policy` JSONB. Returns an empty object
+ * for tenants that haven't set one — the permissive default. Failures
+ * here are routed to a permissive default + a warn log so a temporary
+ * Postgres blip on this read doesn't block legitimate submits. A
+ * BFSI tenant whose policy MUST be enforced shouldn't tolerate
+ * permissive fallback; address that in the W4 "strict-policy-fail-closed"
+ * follow-up.
+ */
+async function loadTenantSecurityPolicy(tenantId: string): Promise<TenantSecurityPolicy> {
+  try {
+    const pool = getPool();
+    const result = await pool.query<{ security_policy: TenantSecurityPolicy | null }>(
+      `SELECT security_policy FROM tenants WHERE id = $1`,
+      [tenantId],
+    );
+    const raw = result.rows[0]?.security_policy;
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch (err) {
+    logger.warn('proof-pairing: failed to load tenant security_policy, defaulting permissive', {
+      tenantId,
+      error: (err as Error).message,
+    });
+    return {};
+  }
 }
 
 async function loadSessionRow(
@@ -495,6 +534,47 @@ export async function submitProof(
       : new Date(row.expires_at as unknown as string).getTime();
     if (expiresMs <= Date.now()) {
       throw new PairingSessionExpired();
+    }
+
+    // ─── Check 3a: tenant Play Integrity policy (A-18) ────────────
+    // Done BEFORE the bind-cookie check + verifier call so a tenant
+    // gating on STRONG can shed bogus submits without paying for the
+    // Groth16 verify or even the audit-log write fanout. Failure
+    // increments the per-session failure_count so a flood of weak-verdict
+    // submits hits the MAX_FAILURES_BEFORE_LOCK lock-out (A-20).
+    const policy = await loadTenantSecurityPolicy(tenantId);
+    const policyDecision = evaluateVerdict(clientMeta?.playIntegrityVerdict, policy);
+    if (!policyDecision.ok) {
+      await incrementFailureCount(sessionId, policyDecision.code).catch(err => {
+        logger.warn('proof-pairing: failure-count increment failed on integrity reject', {
+          error: (err as Error).message,
+        });
+      });
+      // A-18: audit the rejection with the presented verdict + the
+      // required rank. NO PII (no `did`); we're recording a policy
+      // outcome, not the user's identity.
+      await recordAuditEvent(tenantId, {
+        environment,
+        actorType: 'api_key',
+        action: 'pairing.integrity_rejected',
+        entityType: 'pairing_session',
+        entityId: sessionId,
+        status: 'failure',
+        summary: `Play Integrity rejection: ${policyDecision.code}`,
+        metadata: {
+          presented_verdict: clientMeta?.playIntegrityVerdict ?? null,
+          policy: {
+            require_strong_integrity: policy.require_strong_integrity ?? false,
+            require_device_integrity: policy.require_device_integrity ?? false,
+            require_basic_integrity: policy.require_basic_integrity ?? false,
+            allow_play_integrity_absent: policy.allow_play_integrity_absent ?? false,
+          },
+        },
+      });
+      if (policyDecision.code === 'play_integrity_required') {
+        throw new PlayIntegrityRequired(policyDecision.message);
+      }
+      throw new PlayIntegrityInsufficient(policyDecision.message);
     }
 
     // ─── Check 3: session_bind cookie sha256 match ────────────────
