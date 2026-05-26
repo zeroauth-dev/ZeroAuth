@@ -424,6 +424,21 @@ export interface TenantSecurityPolicy {
    * permit submits while the field plumbing rolls out client-side.
    */
   allow_play_integrity_absent?: boolean;
+  /**
+   * W3 demo bypass. When `true` (the default for newly-created tenants
+   * during the W3 cycle), `/v1/proof-pairing/sessions/:id/submit`
+   * accepts submits whose `did` matches the demo pattern
+   * `did:zeroauth:demo:*` and skips the per-user commitment / nonce /
+   * Groth16 checks for THAT path only. Real DIDs (no `:demo:` segment)
+   * still go through the full crypto pipeline.
+   *
+   * Set to `false` before any pilot. The companion audit row writes
+   * `action='pairing.demo_bypass'` so every demo flow is observable
+   * in the dashboard's Audit page and easy to grep out of production
+   * traffic. Disabled tenants get the normal `pairing_did_unknown` /
+   * `pairing_nonce_mismatch` / `pairing_proof_invalid` rejections.
+   */
+  pairing_demo_mode?: boolean;
 }
 
 // ─── Lead Types ─────────────────────────────────────────────────────
