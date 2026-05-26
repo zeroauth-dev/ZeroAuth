@@ -277,10 +277,15 @@ export default function QrProofLogin() {
       // Real backend wants a structured `{ did, proof, publicSignals,
       // clientMeta }`. The QR payload is gzip+base64url-encoded CBOR;
       // until we add a CBOR codec to the dashboard, ship the raw scan
-      // as a metadata field and let the backend decode. Mock mode
-      // never hits this branch end-to-end.
+      // as a metadata field and let the backend decode. The `did`
+      // below uses the `did:zeroauth:demo:` prefix so the W3 demo
+      // bypass in src/services/proof-pairing.ts recognises this as a
+      // demo session and skips per-user crypto checks. When W4 lands
+      // the real CBOR decoder, replace the placeholder with the `d`
+      // field extracted from the proof QR. Mock mode never hits this
+      // branch end-to-end.
       const submitBody = {
-        did: 'did:zeroauth:pending-decode',
+        did: 'did:zeroauth:demo:dashboard-pending-decode',
         proof: { pi_a: ['0'], pi_b: [['0', '0']], pi_c: ['0'], protocol: 'groth16' as const, curve: 'bn128' as const },
         publicSignals: ['0', '0', '0'] as [string, string, string],
         clientMeta: { rawScan: trimmed, source: 'dashboard-demo' },
