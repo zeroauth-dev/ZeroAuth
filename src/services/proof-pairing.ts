@@ -406,7 +406,11 @@ async function verifierVerify(
 export async function createSession(
   tenantId: string,
   environment: ApiKeyEnvironment,
-  apiKeyId: string,
+  // Nullable so the console proxy (which authenticates via JWT, not an
+  // API key) can call this directly. When null the audit row records
+  // actorType='console' with no actorId; when present, actorType
+  // stays 'api_key' (the production /v1 path).
+  apiKeyId: string | null,
   desktopIp: string | null,
   desktopUserAgent: string | null,
 ): Promise<CreateSessionResult> {
@@ -460,7 +464,7 @@ export async function createSession(
   // high-volume, non-critical event). Failure to write still logs.
   void recordAuditEvent(tenantId, {
     environment,
-    actorType: 'api_key',
+    actorType: apiKeyId ? 'api_key' : 'console',
     actorId: apiKeyId,
     action: 'pairing.created',
     entityType: 'pairing_session',

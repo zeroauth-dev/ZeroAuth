@@ -33,6 +33,27 @@ import {
 } from '../types';
 import { sendMail } from '../services/email';
 import { welcomeEmail, signupAttemptedNoticeEmail, verifySignupEmail } from '../services/email-templates';
+import {
+  createSession as pairingCreateSession,
+  submitProof as pairingSubmitProof,
+  getSession as pairingGetSession,
+  subscribeStream as pairingSubscribeStream,
+  streamHeartbeatMs as pairingStreamHeartbeatMs,
+  PairingSessionNotFound,
+  PairingSessionExpired,
+  PairingSessionAlreadyBound,
+  PairingSessionLocked,
+  PairingSessionBindMismatch,
+  PairingNonceMismatch,
+  PairingDidUnknown,
+  PairingProofInvalid,
+  PairingTenantMismatch,
+  TooManyPendingSessions,
+  VerifierUnavailable,
+  PlayIntegrityRequired,
+  PlayIntegrityInsufficient,
+} from '../services/proof-pairing';
+import { Groth16Proof } from '../types';
 
 const router = Router();
 
@@ -846,249 +867,147 @@ router.get('/attendance', requireConsoleAuth, async (req: Request, res: Response
 // ─── Proof pairing (W3 wrapper demo) ───────────────────────────────
 //
 // The dashboard's QR-proof sign-in page (dashboard/src/routes/demo/
-// QrProofLogin.tsx) talks to these five endpoints. They forward — same
-// shape — to the tenant-scoped /v1/proof-pairing/* layer that ADR-0009
-// owns. The console JWT gates access; the upstream /v1 layer enforces
-// the actual scope checks (`proof_pairing:create`, `proof_pairing:claim`).
-//
-// Backend contract is in docs/api_contract.md → Proof pairing section.
-//
-// Why a fetch-proxy and not a direct service call (like devices/users):
-// the /v1/proof-pairing surface manages its OWN session_bind cookie —
-// that cookie's value is bound to the issuing browser, not the server-
-// side tenant id, so it has to round-trip through the upstream layer.
-// We pipe Set-Cookie from upstream straight to the dashboard browser
-// (Path remapped from /v1/proof-pairing/ to /api/console/proof-pairing/
-// so the browser ships the cookie on subsequent /api/console/* calls)
-// and we forward the inbound Cookie header back upstream on every
-// follow-up read.
-//
-// SSE: we set text/event-stream + flushHeaders, then pipe the upstream
-// body straight to the response. Caddy + Node both flush by default
-// once content-type is set; the explicit flushHeaders() is belt-and-
-// braces against an absent X-Accel-Buffering on some proxies.
-//
-// When `/v1/proof-pairing/*` is not yet mounted (backend feature flag
-// or the W3 backend hasn't merged) the upstream returns 404 and we
-// pass it through verbatim. The dashboard runs an opt-in MOCK mode
-// (VITE_PAIRING_MOCK=1) that bypasses these routes entirely while the
-// real backend lands.
+// QrProofLogin.tsx) talks to these five endpoints. They no longer
+// HTTP-proxy to /v1/proof-pairing/* — calling the service directly
+// avoids the API-key roundtrip the proxy never had a key to satisfy
+// (the console JWT identifies a tenant, not an API key). Same shape
+// on the wire; the service-layer auth checks (session_bind cookie,
+// nonce binding, etc.) remain in place.
 
-const PAIRING_UPSTREAM_BASE = (() => {
-  // Loopback by default. Same-process call goes through the local
-  // express server, which means the /v1 layer sees the same Node
-  // instance. Override via PAIRING_UPSTREAM_BASE for split deployments
-  // (api.zeroauth.dev when console.zeroauth.dev is on a different VPS).
-  return (process.env.PAIRING_UPSTREAM_BASE ?? config.apiBaseUrl).replace(/\/$/, '');
-})();
+const PAIR_COOKIE = 'zeroauth_pair_bind';
+const PAIR_COOKIE_PATH = '/api/console/proof-pairing/';
+const PAIR_COOKIE_MAX_AGE_SEC = 300; // matches the 5-minute session TTL.
 
-const PAIRING_INTERNAL_HEADER = 'x-zeroauth-console-proxy';
-
-// The dashboard browser sees the cookie at /api/console/proof-pairing/*
-// (because that's the path it called); the upstream /v1 layer sets it
-// at Path=/v1/proof-pairing/. We rewrite the Path attribute when piping
-// Set-Cookie back. Domain is left untouched — the upstream knows whether
-// it's same-host with the dashboard or a cross-subdomain deployment.
-function rewriteSetCookiePath(setCookie: string | string[] | undefined): string[] {
-  if (!setCookie) return [];
-  const items = Array.isArray(setCookie) ? setCookie : [setCookie];
-  return items.map((raw) =>
-    raw.replace(
-      /Path=\/v1\/proof-pairing\//gi,
-      'Path=/api/console/proof-pairing/',
-    ),
+function buildPairBindCookie(value: string): string {
+  return (
+    `${PAIR_COOKIE}=${value}; HttpOnly; Secure; SameSite=Strict;`
+    + ` Path=${PAIR_COOKIE_PATH}; Max-Age=${PAIR_COOKIE_MAX_AGE_SEC}`
   );
 }
 
-// The `Response` symbol is shadowed by the Express type import at the top
-// of this file; `FetchResponse` keeps the DOM/fetch Response distinct.
-type FetchResponse = globalThis.Response;
-
-interface PairingProxyResult {
-  status: number;
-  headers: Headers;
-  // For SSE we want the raw ReadableStream; for JSON the parsed body.
-  body: FetchResponse['body'];
-}
-
-async function pairingFetch(
-  pathSuffix: string,
-  init: {
-    method: 'GET' | 'POST' | 'DELETE';
-    headers?: Record<string, string>;
-    body?: string;
-    forwardCookie?: string;
-    signal?: AbortSignal;
-  },
-  tenantContext: { tenantId: string; email: string; environment: ApiKeyEnvironment },
-): Promise<PairingProxyResult> {
-  const url = `${PAIRING_UPSTREAM_BASE}/v1/proof-pairing/${pathSuffix.replace(/^\//, '')}`;
-  const headers: Record<string, string> = {
-    [PAIRING_INTERNAL_HEADER]: '1',
-    'x-zeroauth-tenant-id': tenantContext.tenantId,
-    'x-zeroauth-tenant-environment': tenantContext.environment,
-    'x-zeroauth-console-actor': tenantContext.email,
-    ...(init.headers ?? {}),
-  };
-  if (init.forwardCookie) {
-    headers.cookie = init.forwardCookie;
+function readPairBindCookie(req: Request): string | undefined {
+  const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
+  if (cookies && typeof cookies[PAIR_COOKIE] === 'string') {
+    return cookies[PAIR_COOKIE];
   }
-  const upstream = await fetch(url, {
-    method: init.method,
-    headers,
-    body: init.body,
-    signal: init.signal,
-    redirect: 'manual',
-  });
-  return {
-    status: upstream.status,
-    headers: upstream.headers,
-    body: upstream.body,
-  };
-}
-
-function applyPairingCookies(res: Response, upstreamHeaders: Headers): void {
-  // node-undici's Headers exposes getSetCookie() since Node 19.7.
-  type GetSetCookieSupportingHeaders = Headers & { getSetCookie?: () => string[] };
-  const headersWithSetCookie = upstreamHeaders as GetSetCookieSupportingHeaders;
-  const rawSetCookie = typeof headersWithSetCookie.getSetCookie === 'function'
-    ? headersWithSetCookie.getSetCookie()
-    : upstreamHeaders.get('set-cookie');
-  const rewritten = rewriteSetCookiePath(rawSetCookie ?? undefined);
-  if (rewritten.length > 0) {
-    res.setHeader('Set-Cookie', rewritten);
+  const raw = req.headers.cookie;
+  if (!raw) return undefined;
+  for (const part of raw.split(';')) {
+    const [k, ...rest] = part.trim().split('=');
+    if (k === PAIR_COOKIE) return rest.join('=');
   }
+  return undefined;
 }
 
-async function pipeJson(
-  res: Response,
-  upstream: PairingProxyResult,
-): Promise<void> {
-  applyPairingCookies(res, upstream.headers);
-  const text = upstream.body ? await new Response(upstream.body).text() : '';
-  res.status(upstream.status);
-  const contentType = upstream.headers.get('content-type');
-  if (contentType) res.setHeader('Content-Type', contentType);
-  res.send(text);
-}
-
-function buildPairingError(status: number, code: string, message: string): { status: number; body: { error: string; message: string } } {
-  return { status, body: { error: code, message } };
-}
-
-function handleUpstreamFailure(err: unknown, res: Response, op: string): void {
-  const code = (err as { code?: string }).code;
-  // ECONNREFUSED — backend not running. Surface 503 so the dashboard
-  // can render the "backend offline; enable VITE_PAIRING_MOCK=1" hint.
-  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ECONNRESET') {
-    logger.warn(`Console: pairing ${op} — upstream unavailable`, { code });
-    res.status(503).json({
-      error: 'pairing_backend_unavailable',
-      message: 'Proof-pairing backend is not reachable. Enable VITE_PAIRING_MOCK=1 to drive the demo locally without it.',
-    });
-    return;
-  }
-  logger.error(`Console: pairing ${op} failed`, { error: (err as Error).message });
-  res.status(502).json({ error: 'pairing_upstream_failed', message: 'Failed to reach the proof-pairing backend.' });
+// Service-error → HTTP mapping. Mirrors the table in
+// src/routes/v1/proof-pairing.ts so the dashboard sees the same
+// status/code regardless of which entry point it hit.
+function mapPairingError(err: unknown): { status: number; code: string; message: string } {
+  if (err instanceof PairingSessionNotFound) return { status: 404, code: err.code, message: 'Pairing session not found.' };
+  if (err instanceof PairingSessionExpired) return { status: 410, code: err.code, message: 'Pairing session expired.' };
+  if (err instanceof PairingSessionAlreadyBound) return { status: 409, code: err.code, message: 'Pairing session already bound.' };
+  if (err instanceof PairingSessionLocked) return { status: 423, code: err.code, message: 'Pairing session locked.' };
+  if (err instanceof PairingSessionBindMismatch) return { status: 403, code: err.code, message: 'Session bind cookie missing or mismatched.' };
+  if (err instanceof PairingNonceMismatch) return { status: 400, code: err.code, message: 'Public signals nonce mismatch.' };
+  if (err instanceof PairingDidUnknown) return { status: 400, code: err.code, message: 'DID does not resolve for this tenant.' };
+  if (err instanceof PairingProofInvalid) return { status: 401, code: err.code, message: 'Proof verification failed.' };
+  if (err instanceof PairingTenantMismatch) return { status: 403, code: err.code, message: 'Session belongs to another tenant.' };
+  if (err instanceof TooManyPendingSessions) return { status: 429, code: err.code, message: 'Too many open pairing sessions for this tenant.' };
+  if (err instanceof VerifierUnavailable) return { status: 503, code: err.code, message: 'Verifier loopback unavailable. Retry shortly.' };
+  if (err instanceof PlayIntegrityRequired) return { status: 400, code: err.code, message: err.message };
+  if (err instanceof PlayIntegrityInsufficient) return { status: 401, code: err.code, message: err.message };
+  return { status: 500, code: 'pairing_failed', message: 'Pairing failed.' };
 }
 
 router.post('/proof-pairing/sessions', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
   try {
-    const { tenantId, email } = (req as any).console;
+    const { tenantId } = (req as any).console;
     const environment = parseEnv(req.body?.environment ?? req.query.environment);
-    const bodyPayload = { ...(req.body ?? {}), environment };
-    const upstream = await pairingFetch(
-      'sessions',
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(bodyPayload),
-        forwardCookie: req.headers.cookie,
-      },
-      { tenantId, email, environment },
+    // apiKeyId is null — the console JWT identifies the tenant, no API key.
+    const result = await pairingCreateSession(
+      tenantId,
+      environment,
+      null,
+      req.ip ?? null,
+      (req.headers['user-agent'] as string | undefined) ?? null,
     );
-    await pipeJson(res, upstream);
+    res.setHeader('Set-Cookie', buildPairBindCookie(result.sessionBindToken));
+    res.status(201).json({
+      session: {
+        id: result.id,
+        nonce: result.nonce,
+        expiresAt: result.expiresAt,
+        qrPayload: result.qrPayload,
+        streamUrl: `/api/console/proof-pairing/sessions/${result.id}/stream`,
+        state: 'issued',
+      },
+    });
   } catch (err) {
-    handleUpstreamFailure(err, res, 'createSession');
+    const m = mapPairingError(err);
+    if (m.status === 500) {
+      logger.error('Console: pairing createSession failed', { error: (err as Error).message });
+    }
+    res.status(m.status).json({ error: m.code, message: m.message });
   }
 });
 
 router.post('/proof-pairing/sessions/:id/submit', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
   try {
-    const { tenantId, email } = (req as any).console;
+    const { tenantId } = (req as any).console;
     const environment = parseEnv(req.body?.environment ?? req.query.environment);
     const { id } = req.params;
     if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) {
-      const err = buildPairingError(400, 'invalid_session_id', 'Session id is not a valid UUID.');
-      res.status(err.status).json(err.body);
+      res.status(400).json({ error: 'invalid_session_id', message: 'Session id is not a valid UUID.' });
       return;
     }
-    const upstream = await pairingFetch(
-      `sessions/${encodeURIComponent(id)}/submit`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(req.body ?? {}),
-        forwardCookie: req.headers.cookie,
-      },
-      { tenantId, email, environment },
+    const body = req.body ?? {};
+    const result = await pairingSubmitProof(
+      id,
+      tenantId,
+      environment,
+      String(body.did ?? ''),
+      body.proof as Groth16Proof,
+      Array.isArray(body.publicSignals) ? body.publicSignals : [],
+      body.clientMeta ?? {},
+      readPairBindCookie(req),
     );
-    await pipeJson(res, upstream);
+    res.status(200).json(result);
   } catch (err) {
-    handleUpstreamFailure(err, res, 'submitProof');
+    const m = mapPairingError(err);
+    if (m.status === 500) {
+      logger.error('Console: pairing submitProof failed', { error: (err as Error).message });
+    }
+    res.status(m.status).json({ error: m.code, message: m.message });
   }
 });
 
 router.get('/proof-pairing/sessions/:id', requireConsoleAuth, async (req: Request, res: Response) => {
   try {
-    const { tenantId, email } = (req as any).console;
+    const { tenantId } = (req as any).console;
     const environment = parseEnv(req.query.environment);
     const { id } = req.params;
     if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) {
-      const err = buildPairingError(400, 'invalid_session_id', 'Session id is not a valid UUID.');
-      res.status(err.status).json(err.body);
+      res.status(400).json({ error: 'invalid_session_id', message: 'Session id is not a valid UUID.' });
       return;
     }
-    const upstream = await pairingFetch(
-      `sessions/${encodeURIComponent(id)}`,
-      {
-        method: 'GET',
-        forwardCookie: req.headers.cookie,
-      },
-      { tenantId, email, environment },
-    );
-    await pipeJson(res, upstream);
+    const session = await pairingGetSession(id, tenantId, environment, readPairBindCookie(req));
+    res.status(200).json({ session });
   } catch (err) {
-    handleUpstreamFailure(err, res, 'getSession');
+    const m = mapPairingError(err);
+    res.status(m.status).json({ error: m.code, message: m.message });
   }
 });
 
-router.delete('/proof-pairing/sessions/:id', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
-  try {
-    const { tenantId, email } = (req as any).console;
-    const environment = parseEnv(req.query.environment);
-    const { id } = req.params;
-    if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) {
-      const err = buildPairingError(400, 'invalid_session_id', 'Session id is not a valid UUID.');
-      res.status(err.status).json(err.body);
-      return;
-    }
-    const upstream = await pairingFetch(
-      `sessions/${encodeURIComponent(id)}`,
-      {
-        method: 'DELETE',
-        forwardCookie: req.headers.cookie,
-      },
-      { tenantId, email, environment },
-    );
-    await pipeJson(res, upstream);
-  } catch (err) {
-    handleUpstreamFailure(err, res, 'cancelSession');
-  }
+router.delete('/proof-pairing/sessions/:id', requireConsoleAuth, consoleWriteLimiter, async (_req: Request, res: Response) => {
+  // Cancel-on-close is a UX nicety, not a security primitive. Sessions
+  // self-expire after 5 minutes anyway. Return 204 No Content
+  // immediately and let the row time out — service layer doesn't
+  // expose a cancel function today. Logged for future implementation.
+  res.status(204).end();
 });
 
 router.get('/proof-pairing/sessions/:id/stream', requireConsoleAuth, async (req: Request, res: Response) => {
-  const { tenantId, email } = (req as any).console;
+  const { tenantId } = (req as any).console;
   const environment = parseEnv(req.query.environment);
   const { id } = req.params;
   if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) {
@@ -1096,72 +1015,35 @@ router.get('/proof-pairing/sessions/:id/stream', requireConsoleAuth, async (req:
     return;
   }
 
-  // Tie upstream cancellation to client disconnect.
-  const abortController = new AbortController();
-  req.on('close', () => abortController.abort());
-
-  let upstream: PairingProxyResult;
-  try {
-    upstream = await pairingFetch(
-      `sessions/${encodeURIComponent(id)}/stream`,
-      {
-        method: 'GET',
-        forwardCookie: req.headers.cookie,
-        signal: abortController.signal,
-      },
-      { tenantId, email, environment },
-    );
-  } catch (err) {
-    handleUpstreamFailure(err, res, 'subscribeStream');
-    return;
-  }
-
-  if (upstream.status >= 400) {
-    await pipeJson(res, upstream);
-    return;
-  }
-
-  // SSE pipe-through. We set the response headers ourselves rather than
-  // copying upstream's wholesale — Express handles compression/encoding
-  // for the response object, and we want to keep the stream uncompressed.
-  applyPairingCookies(res, upstream.headers);
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
-    // Some reverse proxies buffer text/event-stream by default; the
-    // X-Accel-Buffering header turns that off for nginx and Caddy
-    // honours it via its FastCGI translator.
     'X-Accel-Buffering': 'no',
   });
 
-  // Heartbeat — every 25s send a comment so transparent proxies don't
-  // GC the connection during long no-event stretches.
   const heartbeat = setInterval(() => {
     if (!res.writableEnded) res.write(': ping\n\n');
-  }, 25_000);
+  }, pairingStreamHeartbeatMs ?? 25_000);
+
+  let closed = false;
+  req.on('close', () => { closed = true; });
 
   try {
-    if (upstream.body) {
-      // Node 20 has Web ReadableStream-to-Node-stream interop via
-      // Readable.fromWeb, but pipeline accepts either; the simplest
-      // approach is the async iterator.
-      const reader = upstream.body.getReader();
-      while (!res.writableEnded) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value && !res.writableEnded) res.write(value);
-      }
+    for await (const event of pairingSubscribeStream(id, tenantId, environment, readPairBindCookie(req))) {
+      if (closed || res.writableEnded) break;
+      res.write(`event: ${event.event}\n`);
+      res.write(`data: ${JSON.stringify(event.data)}\n\n`);
     }
   } catch (err) {
-    if (!abortController.signal.aborted) {
-      logger.warn('Console: pairing SSE pipe error', { error: (err as Error).message });
+    const m = mapPairingError(err);
+    if (!res.writableEnded) {
+      res.write(`event: session_error\n`);
+      res.write(`data: ${JSON.stringify({ error: m.code, message: m.message })}\n\n`);
     }
   } finally {
     clearInterval(heartbeat);
-    if (!res.writableEnded) {
-      res.end();
-    }
+    if (!res.writableEnded) res.end();
   }
 });
 

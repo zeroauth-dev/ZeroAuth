@@ -110,9 +110,26 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
     const code = errBody.error ?? `http_${res.status}`;
     const msg = errBody.message ?? res.statusText ?? 'Request failed';
 
-    // 401 from the console means our token is gone or expired — purge it
-    // so the next render kicks the user to /login.
-    if (res.status === 401 && path.startsWith('/api/console/')) {
+    // 401 from the console can mean two different things:
+    //   1. The console JWT itself is gone/expired (`unauthorized` /
+    //      `session_expired` from requireConsoleAuth). The token is
+    //      dead; purge it so RequireAuth kicks the user to /login.
+    //   2. The route authenticated the JWT fine, but a downstream
+    //      auth check failed (e.g. the proof-pairing proxy not having
+    //      a tenant API key with the right scope → `missing_api_key`).
+    //      The JWT is still good; clearing the token here would log
+    //      the user out for a tenant-side configuration issue, which
+    //      is exactly the "click Start over → signed out" bug we hit
+    //      on the W3 QR-pair page.
+    //
+    // Narrow the purge to the JWT-specific machine codes that
+    // requireConsoleAuth in src/routes/console.ts emits.
+    const JWT_DEAD_CODES = new Set(['unauthorized', 'session_expired']);
+    if (
+      res.status === 401
+      && path.startsWith('/api/console/')
+      && JWT_DEAD_CODES.has(code)
+    ) {
       setToken(null);
     }
 
