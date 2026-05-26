@@ -414,7 +414,17 @@ function buildPairingStream(sessionId: string, options: { mock?: boolean } = {})
   };
 
   if (!options.mock && typeof EventSource !== 'undefined') {
-    const url = `/api/console/proof-pairing/sessions/${encodeURIComponent(sessionId)}/stream`;
+    // EventSource has no way to set custom headers, so we can't ship
+    // the console JWT via Authorization: Bearer. Server-side
+    // requireConsoleAuth accepts `?access_token=` as a fallback exactly
+    // for this case. The token already lives in localStorage and never
+    // leaves the same-origin server, so the query-string exposure is
+    // limited to whatever ends up in our own access logs.
+    const token = readToken();
+    const base = `/api/console/proof-pairing/sessions/${encodeURIComponent(sessionId)}/stream`;
+    const url = token
+      ? `${base}?access_token=${encodeURIComponent(token)}`
+      : base;
     eventSource = new EventSource(url, { withCredentials: true });
 
     const wireOne = (name: PairingStreamEvent['type']) => {

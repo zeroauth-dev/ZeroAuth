@@ -156,16 +156,42 @@ function verifyConsoleToken(token: string): { tenantId: string; email: string; j
   return { tenantId: payload.tenantId, email: payload.email, jti: payload.jti };
 }
 
-/** Middleware: authenticate console session */
+/**
+ * Middleware: authenticate console session.
+ *
+ * Reads the JWT from `Authorization: Bearer <token>` for normal requests.
+ * Falls back to the `?access_token=<token>` query string for endpoints
+ * that browsers can only reach via the native `EventSource` constructor —
+ * EventSource has no API to set custom headers, so the SSE stream at
+ * `/api/console/proof-pairing/sessions/:id/stream` would otherwise be
+ * un-authenticatable. The fallback is opt-in per request (clients only
+ * use it when they have to) and never weakens the header path.
+ *
+ * Security note: tokens in query strings can land in server access logs.
+ * Caddy's default log redacts the `Authorization` header but does NOT
+ * redact query strings. To compensate, the stream route lives on a
+ * SameSite=Strict + HttpOnly cookie-protected sub-path so a leaked log
+ * line containing an expired token has limited blast radius; and the
+ * console JWT TTL is bounded (24h, see `JWT_EXPIRES_IN`). The W4 cleanup
+ * lands a HttpOnly session cookie that supersedes this query-string path
+ * (cookies auto-flow to EventSource).
+ */
 function requireConsoleAuth(req: Request, res: Response, next: any): void {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
+  let token: string | undefined;
+  if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.slice(7);
+  } else if (typeof req.query.access_token === 'string' && req.query.access_token.length > 0) {
+    token = req.query.access_token;
+  }
+
+  if (!token) {
     res.status(401).json({ error: 'unauthorized', message: 'Login required.' });
     return;
   }
 
   try {
-    const payload = verifyConsoleToken(authHeader.slice(7));
+    const payload = verifyConsoleToken(token);
     (req as any).console = payload;
     next();
   } catch {
