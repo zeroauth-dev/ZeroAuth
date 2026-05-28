@@ -293,3 +293,23 @@ export async function registerFaceFirstIdentity(
     createdAt: row.created_at.toISOString(),
   };
 }
+
+/**
+ * Look up a tenant-scoped user by DID. Returns null if not enrolled.
+ * Used by the face-first verify path to assert the commitment in the
+ * proof's publicSignals matches the stored value.
+ */
+export async function findUserByDid(
+  tenantId: string,
+  environment: 'live' | 'test',
+  did: string,
+): Promise<{ id: string; commitment: string | null } | null> {
+  const pool = getPool();
+  const result = await pool.query<{ id: string; commitment: string | null }>(
+    `SELECT id, commitment FROM tenant_users
+      WHERE tenant_id = $1 AND environment = $2 AND did = $3
+      LIMIT 1`,
+    [tenantId, environment, did],
+  );
+  return result.rows[0] ?? null;
+}
