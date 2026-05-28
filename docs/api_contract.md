@@ -70,6 +70,34 @@ Console-side device endpoints (require console JWT):
 
 Enrollment code format: `ZA-XXXX-XXXX`, 8 entropy chars from a 27-symbol Crockford-base32 alphabet (no `0`, `1`, `I`, `L`, `O`, `U`). The deeplink format is `zeroauth://enroll?code=<code>` and is stable across V1.
 
+### Central API — end-user registration ceremony (`/v1/registrations`)
+
+The three-QR end-user signup flow. See [ADR 0023](../adr/0023-three-qr-signup-ceremony.md) for design + state machine + threat-model deltas. The biometric never touches the server side; only the Poseidon commitment (step 2) and the Groth16 proof (step 3) do.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/v1/registrations` | `users:write` | Open a session. Body: `{ profile?: object }`. Returns `{ session, pair: { code, expires_at, deeplink } }`. Render `pair.deeplink` as QR1. |
+| `GET` | `/v1/registrations/:id` | `users:read` | Poll state. Response redacts all code hashes + challenge nonce. |
+| `DELETE` | `/v1/registrations/:id` | `users:write` | Abandon (idempotent). Voids outstanding codes; row retained for audit. |
+| `POST` | `/v1/registrations/pair-device` | **none — `pair_code` is bearer** | Step 1. Body: `{ pair_code, fingerprint, attestation_kind? }`. Phone scans QR1. Server claims a device row (reuses ADR 0022 fingerprint binding), attaches to session, mints `enroll_code` for step 2. Returns `{ session_id, device_id, next: { step: 'enroll', code, expires_at, deeplink } }`. |
+| `POST` | `/v1/registrations/submit-commitment` | **none — `enroll_code` is bearer** | Step 2. Body: `{ enroll_code, did, commitment, attestation_kind? }`. Phone scans QR2 after capturing biometric locally. Server stores (did, commitment), mints `verify_code` + `challenge_nonce` for step 3. Returns `{ session_id, next: { step: 'verify', code, expires_at, deeplink, challenge_nonce } }`. |
+| `POST` | `/v1/registrations/complete` | **none — `verify_code` is bearer** | Step 3. Body: `{ verify_code, challenge_nonce, proof, public_signals }`. Phone scans QR3, re-captures biometric, produces Groth16 proof. Server asserts `challenge_nonce` matches, asserts `publicSignals[0]` equals stored commitment, verifies proof off-chain, creates `tenant_user`. Returns `{ session_id, tenant_user, device }`. |
+
+State machine: `awaiting_device → awaiting_commitment → awaiting_verification → completed` (or `abandoned`). Whole-session TTL is 30 min; each code's TTL is 15 min. Phone-side endpoints are rate-limited at 20 req/min per IP via `pgRateLimit`.
+
+Failure-mode surface (uniform envelopes to defeat enumeration):
+
+| Code | When |
+|---|---|
+| `400 invalid_request` | Required field missing or malformed at the JSON layer. |
+| `404 pair_failed` | Step 1: unknown / expired pair_code, invalid fingerprint, session expired. |
+| `404 enroll_failed` | Step 2: unknown / expired enroll_code, wrong session state. |
+| `404 verify_failed` | Step 3: unknown / expired verify_code, challenge mismatch, commitment mismatch, proof verification failed. |
+| `404 session_not_found` | Tenant poll: id does not exist in this tenant/environment. |
+| `429` | Phone-side rate-limit (20/min/IP) exceeded. |
+
+The deeplink schema is `zeroauth://reg?step=<pair|enroll|verify>&session=<uuid>&code=<code>[&challenge=<hex>]` and is stable across V1.
+
 ### Central API — users (`/v1/users`)
 
 | Method | Path | Scope | Description |

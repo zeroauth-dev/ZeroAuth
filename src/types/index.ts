@@ -329,6 +329,45 @@ export interface Device {
   updated_at: Date;
 }
 
+/**
+ * Three-step end-user signup ceremony (ADR 0023).
+ *
+ *   awaiting_device      — pair_code outstanding, no device yet
+ *   awaiting_commitment  — device paired, enroll_code outstanding
+ *   awaiting_verification — commitment stored, verify_code outstanding
+ *   completed            — tenant_user created
+ *   abandoned            — session expired or admin-cancelled
+ */
+export type RegistrationSessionState =
+  | 'awaiting_device'
+  | 'awaiting_commitment'
+  | 'awaiting_verification'
+  | 'completed'
+  | 'abandoned';
+
+export interface RegistrationSession {
+  id: string;
+  tenant_id: string;
+  environment: ApiKeyEnvironment;
+  profile: Record<string, unknown>;
+  state: RegistrationSessionState;
+  device_id: string | null;
+  did: string | null;
+  commitment: string | null;
+  tenant_user_id: string | null;
+  // Plaintext codes never live on the row — only their SHA-256 hashes.
+  pair_code_hash: string | null;
+  pair_code_expires_at: Date | null;
+  enroll_code_hash: string | null;
+  enroll_code_expires_at: Date | null;
+  verify_code_hash: string | null;
+  verify_code_expires_at: Date | null;
+  verify_challenge_nonce: string | null;
+  expires_at: Date;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export interface TenantUser {
   id: string;
   tenant_id: string;
