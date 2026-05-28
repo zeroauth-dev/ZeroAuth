@@ -248,9 +248,31 @@
 | **Class** | Tampering / Repudiation (STRIDE: T + R) |
 | **Surface** | `audit_events` writes for new actions `pairing.created`, `pairing.claimed`, `pairing.expired`, `pairing.failed`, `pairing.replay_blocked`, `pairing.cross_tenant_blocked`, `pairing.session_bind_mismatch`, `pairing.integrity_rejected`, `pairing.race_lost`, `pairing.session_locked`, `pairing.duress_observed` |
 | **Description** | (1) Today's `recordAuditEvent` calls are fire-and-forget (`void recordAuditEvent(...).catch(...)`). DB failure produces only a Winston warn that no one reads. (2) `audit_events` has no INSERT-only constraint at DB level (existing open item). |
-| **Mitigation** | (a) Pairing handlers must `await recordAuditEvent(...)` on the critical-path events (`pairing.claimed`, `pairing.cross_tenant_blocked`, `pairing.replay_blocked`, `pairing.session_bind_mismatch`). Audit-write failure on these paths returns 500 — better to fail the login than to mint a session with no audit trail. (b) High-volume nuisance events (`pairing.failed`, `pairing.race_lost`) stay fire-and-forget but increment a Prometheus counter on `.catch()`. (c) DB-level: add a `BEFORE UPDATE OR DELETE` trigger on `audit_events` raising an exception (filed as ADR-0011, pilot blocker). |
-| **Test status** | **Required before merge.** Per action verb: `pairing.X writes an audit row with the expected actor + metadata`. |
-| **Audit signal** | Recursive: `audit.write_failure` metric + page-the-on-call when audit writes fail at > 0.1 % rate. |
+| **Mitigation** | (a) Pairing handlers must `await recordAuditEvent(...)` on the critical-path events (`pairing.claimed`, `pairing.cross_tenant_blocked`, `pairing.replay_blocked`, `pairing.session_bind_mismatch`). Audit-write failure on these paths returns 500 — better to fail the login than to mint a session with no audit trail. (b) High-volume nuisance events (`pairing.failed`, `pairing.race_lost`) stay fire-and-forget but increment a Prometheus counter on `.catch()`. (c) **MITIGATED PHASE 0 C-012**: hash chain over `audit_events` (ADR 0013, `src/services/audit.ts`). Every row carries `previous_hash` + `event_hash`; replay via `/api/admin/audit-integrity` detects any mutation. (d) DB-level: add a `BEFORE UPDATE OR DELETE` trigger on `audit_events` raising an exception — deferred to phase 2 once the backfill is complete. (e) **MITIGATED PHASE 1 C-015**: daily on-chain anchor on Base L2 (ADR 0014) so the bank's auditor can independently verify history without trusting any ZeroAuth process. |
+| **Test status** | **Required before merge.** Per action verb: `pairing.X writes an audit row with the expected actor + metadata`. Hash chain replay covered by `tests/audit-chain.test.ts` + integration suite. |
+| **Audit signal** | Recursive: `audit.write_failure` metric + page-the-on-call when audit writes fail at > 0.1 % rate. Plus `audit.integrity_check` rows from every invocation of the admin endpoint. |
+
+### A-27 — Demo-DID prover bypass (P0 audit finding C-1, CLOSED)
+
+| | |
+|---|---|
+| **Class** | Tampering / Authentication bypass (STRIDE: T + S) |
+| **Surface** | `POST /v1/proof-pairing/sessions/:id/submit` |
+| **Description** | The prior `pairing_demo_mode` branch in `src/services/proof-pairing.ts` accepted any DID starting with `did:zeroauth:demo:` and short-circuited checks 4..8 (user lookup, commitment compare, nonce binding, Groth16 verification). Default behaviour was `pairing_demo_mode === undefined ⇒ accept demo`, making the entire crypto pipeline a soft opt-in. Any tenant that forgot to flip the flag to `false` before pilot would silently accept canned-signal proofs. |
+| **Mitigation** | **MITIGATED PHASE 0 C-004 (commit 02e1734).** The bypass branch is removed. All DIDs go through the standard lookup; a DID with a demo prefix gets the same uniform `pairing_did_unknown` response as any other unknown DID. The `pairing_demo_mode` field on the `TenantSecurityPolicy` type is marked `@deprecated` and ignored by the verifier. |
+| **Test status** | **Pinned.** `tests/proof-pairing.test.ts::"P0 audit finding C-1 closure"` — (a) demo-prefixed DID returns 400 / `pairing_did_unknown`, (b) source-grep guard rejects re-introduction of `DEMO_DID_PREFIX`, `did:zeroauth:demo:`, `pairing_demo_mode`, or `demoBypassAllowed` symbols in `src/services/proof-pairing.ts`. |
+| **Audit signal** | No special signal. Demo-prefixed unknown DIDs land in the standard `pairing_did_unknown` audit row. |
+
+### A-28 — JWT-in-URL log leak via SSE auth fallback (P0 audit finding C-3, CLOSED)
+
+| | |
+|---|---|
+| **Class** | Information disclosure (STRIDE: I) — DPDP §8 risk |
+| **Surface** | `?access_token=<jwt>` query string on `/api/console/*` endpoints, esp. `/api/console/proof-pairing/sessions/:id/stream` (SSE) |
+| **Description** | The console-auth middleware previously accepted the JWT either in `Authorization: Bearer …` or as a `?access_token=` query parameter so EventSource clients (which cannot set custom headers) could authenticate. Query strings land in Caddy access logs even when the `Authorization` header is redacted, so a leaked log line was a session-replay primitive for the JWT's TTL. |
+| **Mitigation** | **MITIGATED PHASE 0 C-005 (commit ee6aad4).** The query-string fallback is removed. The replacement is an HttpOnly, SameSite=Strict cookie `zeroauth_console_jwt` set at login + verify-signup, scoped to `/api/console`. EventSource reaches authenticated routes via `withCredentials: true` so the cookie auto-flows without code change. |
+| **Test status** | **Pinned.** `tests/console-auth.test.ts::"P0 audit finding C-3"` — (a) `?access_token=` returns 401 on protected and SSE routes, (b) HttpOnly cookie path works, (c) login response carries Set-Cookie with HttpOnly + SameSite=Strict + Path=/api/console, (d) source-grep guard rejects re-introduction of `req.query.access_token` reads. |
+| **Audit signal** | None directly. Any 401 with no Bearer header is a candidate signal for an unauthenticated SSE attempt. |
 
 ### A-22 — PII in pairing logs and responses
 
