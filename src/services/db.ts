@@ -283,6 +283,29 @@ const SCHEMA = `
   ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS previous_hash TEXT;
   ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS event_hash TEXT;
   CREATE INDEX IF NOT EXISTS idx_audit_events_chain ON audit_events(tenant_id, environment, id);
+
+  -- ─── Audit Anchors (ADR 0014) ────────────────────────────
+  -- One row per (tenant_id, environment, day_utc) recording the
+  -- on-chain anchor of the audit-events chain terminal hash for
+  -- that day. tx_hash and block_number are NULL until the staged
+  -- transaction is signed and broadcast by the off-process signer
+  -- (Base Sepolia keys are not loaded inside the API container).
+  -- recordAnchor() on contracts/AuditAnchor.sol (C-016, d6c6a4e)
+  -- enforces write-once on chain; the UNIQUE constraint mirrors
+  -- that in the DB so a second stage call for the same key is a no-op.
+  CREATE TABLE IF NOT EXISTS audit_anchors (
+    id              BIGSERIAL PRIMARY KEY,
+    tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment     VARCHAR(10) CHECK (environment IN ('live','test')),
+    day_utc         DATE NOT NULL,
+    terminal_hash   TEXT NOT NULL,
+    row_count       BIGINT NOT NULL,
+    tx_hash         TEXT,
+    block_number    BIGINT,
+    anchored_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, environment, day_utc)
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_anchors_day ON audit_anchors(day_utc DESC);
 `;
 
 export async function initDb(): Promise<void> {
