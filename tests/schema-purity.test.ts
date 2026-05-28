@@ -124,6 +124,26 @@ describe('schema-purity (tenant-scoped tables)', () => {
     expect(unexpected).toEqual([]);
   });
 
+  // ─── audit_anchors (ADR 0014) ─────────────────────────────────────
+
+  it('audit_anchors has only the ADR 0014 allowed columns', () => {
+    const ALLOWED_AUDIT_ANCHORS = new Set([
+      'id',
+      'tenant_id',
+      'environment',
+      'day_utc',
+      'terminal_hash',
+      'row_count',
+      'tx_hash',
+      'block_number',
+      'anchored_at',
+    ]);
+    const body = extractTableBody('audit_anchors');
+    const cols = extractColumnNames(body);
+    const unexpected = cols.filter(c => !ALLOWED_AUDIT_ANCHORS.has(c));
+    expect(unexpected).toEqual([]);
+  });
+
   // ─── Forbidden biometric column-name patterns ─────────────────────
 
   const FORBIDDEN_PATTERNS = [
@@ -144,6 +164,7 @@ describe('schema-purity (tenant-scoped tables)', () => {
     'verification_events',
     'attendance_events',
     'audit_events',
+    'audit_anchors',
     'proof_pairing_sessions',
     'api_keys',
     'usage_logs',
@@ -181,6 +202,7 @@ describe('schema-purity (tenant-scoped tables)', () => {
       'attendance_events',
       'proof_pairing_sessions',
       'audit_events',
+      'audit_anchors',
     ]);
     const createTableRe = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)/gi;
     const tables = new Set<string>();
