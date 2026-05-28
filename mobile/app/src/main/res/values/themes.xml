@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Pramaan banking app — XML theme.
+
+        Compose owns the in-content theme via dev.zeroauth.ui.theme.Theme.kt.
+        The XML theme below covers the launch surface only — the window
+        background, the status-bar colour, and the no-action-bar choice
+        for the (deliberately-empty) splash window. This window is what
+        the user sees in the ~120 ms between MainActivity#onCreate
+        firing and setContent { ZeroAuthTheme { … } } populating the
+        Compose tree.
+
+        Theme.Material3.DayNight.NoActionBar is the recommended parent
+        for a Material 3 + Compose app per
+        developer.android.com/jetpack/compose/setup. NoActionBar keeps
+        the Compose surface as the only top chrome, avoiding the
+        double-top-bar look.
+    -->
+    <style name="Theme.ZeroAuth" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/zeroauth_white</item>
+        <item name="android:statusBarColor">@color/zeroauth_white</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

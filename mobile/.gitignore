@@ -1,0 +1,38 @@
+# mobile/.gitignore — keep the Android workspace clean of build artefacts,
+# IDE noise, and (most importantly) signing material that would burn a real
+# release if it ever landed in the repo. The repo-root .gitignore also has
+# a `mobile/**/build/` rule so artefacts are doubly ignored from the top
+# down too.
+
+# ── Build output ─────────────────────────────────────────────────────────
+build/
+**/build/
+.gradle/
+captures/
+out/
+
+# ── IDE: Android Studio / IntelliJ ──────────────────────────────────────
+*.iml
+.idea/
+local.properties
+
+# ── Native artefacts (rapidsnark JNI POC lands in C-104) ───────────────
+.cxx/
+.externalNativeBuild/
+
+# ── Signing material — NEVER commit ────────────────────────────────────
+# Release keystore lives only in CI secrets + the operator's vault. The
+# four ZEROAUTH_RELEASE_* env vars consumed by app/build.gradle.kts at
+# release time are exported by .github/workflows/ when the time comes.
+**/*.keystore
+**/*.jks
+keystore.properties
+
+# ── Tooling cruft ──────────────────────────────────────────────────────
+.DS_Store
+*.log
+
+# ── Test reports ───────────────────────────────────────────────────────
+app/release/
+**/test-results/
+**/reports/

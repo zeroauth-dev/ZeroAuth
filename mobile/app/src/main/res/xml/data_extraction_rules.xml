@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Pramaan banking app — Android 12+ backup/data-transfer policy.
+
+    Deny EVERYTHING. The banking app's only persistent state is the
+    StrongBox-bound key wrap of the biometric helper data (landing in
+    C-144) and a session-id cache that is meaningless off-device. Both
+    are intentionally device-local and must never be transferred:
+
+      * cloud-backup     — would re-create a `users` row's worth of
+        helper data outside the StrongBox boundary, defeating the wrap.
+      * device-transfer  — the new device would inherit the StrongBox
+        keys it cannot actually use (key handles are bound to the
+        original secure element), so the helper data would be inert
+        AND a residual data exfiltration surface. Easier to deny.
+
+    Re-enrollment is the canonical recovery path. The Q&A in
+    `docs/plan/bfsi-v1/02-bank-demo.md` explicitly answers
+    "what if the customer loses their phone?" with "re-enrol — 90 s
+    flow." Backup would muddy that story without changing the
+    recovery experience.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+    </device-transfer>
+</data-extraction-rules>

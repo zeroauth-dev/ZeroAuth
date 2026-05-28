@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Adaptive launcher icon stub for the Pramaan banking app.
+
+    Both layers point to the same flat colour swatches at scaffold time
+    (C-101). The real ZeroAuth fingerprint mark lands in a later commit
+    when the design team's icon set enters the tree — at which point
+    drawable/ic_launcher_foreground.xml gets the vector mark and this
+    file is unchanged.
+
+    Targeting v26 (Android 8 Oreo) because adaptive icons are an Oreo+
+    feature; the launcher fallback on older OS versions reads the flat
+    ic_launcher.png. minSdk is 30 so the fallback never actually fires
+    in production, but keeping the file in -anydpi-v26 keeps the
+    convention consistent with the rest of the Android ecosystem.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/zeroauth_white" />
+    <foreground android:drawable="@color/zeroauth_black" />
+</adaptive-icon>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Empty manifest for the :sensors:r307 library module. The real
+    driver (C-145) will add `<uses-feature android:name="android.hardware.usb.host" />`
+    so the device-fleet capability matrix surfaces USB-OTG support and
+    `<uses-permission android:name="android.permission.USB_PERMISSION" />`
+    once the runtime asks the user for access to the connected R307.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

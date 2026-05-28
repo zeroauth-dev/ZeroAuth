@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Pramaan banking app — XML colour palette.
+        These mirror the Compose colour scheme in ui/theme/Theme.kt so the
+        XML-rendered system bars (splash, immediate post-Activity launch
+        before the Compose tree composes) match the in-app palette.
+    -->
+    <color name="zeroauth_black">#FF000000</color>
+    <color name="zeroauth_white">#FFFFFFFF</color>
+</resources>

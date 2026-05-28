@@ -32,6 +32,16 @@ artifacts/
 cache/
 typechain-types/
 
+# ─── Android (mobile/ — Phase 1 banking app, C-101 onwards) ───
+# Duplicates the rules in mobile/.gitignore so an accidental top-level
+# `git add .` outside the subtree still skips the noisy artefacts.
+mobile/.gradle/
+mobile/local.properties
+mobile/**/build/
+mobile/**/.cxx/
+mobile/**/*.keystore
+mobile/**/*.jks
+
 # ─── Coverage / logs ────────────────────────────────────
 coverage/
 *.log

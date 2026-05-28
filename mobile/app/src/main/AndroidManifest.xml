@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    mobile/app/src/main/AndroidManifest.xml — Pramaan banking app manifest.
+
+    Permissions are NOT requested at this scaffold (C-101). The full
+    permission list (camera for CameraX, biometric for BiometricPrompt,
+    USB-OTG host for the R307 driver, network for the central API) lands
+    alongside the feature commits that need them:
+
+      * CAMERA + USE_BIOMETRIC + INTERNET     → C-143 (enrollment flow)
+      * Class-3 biometric usage attribute     → C-144 (StrongBox key wrap)
+      * USB host feature                      → C-145 (R307 USB-OTG driver)
+
+    Requesting them now would trigger the "permission requested but never
+    used" Lint warning that the CI lint job is configured to escalate.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:name=".ZeroAuthApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ZeroAuth"
+        tools:targetApi="34">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.ZeroAuth">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>

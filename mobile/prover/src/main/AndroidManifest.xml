@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Empty manifest for the :prover library module.
+
+    AGP 8.x derives the namespace from `android { namespace = ... }` in
+    build.gradle.kts so this manifest does not need to declare a
+    `package` attribute. It is present because (a) some downstream
+    tooling still expects a manifest to exist and (b) the manifest
+    becomes non-trivial once C-104 wires the rapidsnark JNI bridge —
+    the native library declaration goes here.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
