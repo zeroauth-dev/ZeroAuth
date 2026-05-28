@@ -87,15 +87,19 @@
 
 ### Identity + ZKP (`/v1/auth/zkp/*`, `/v1/identity/*`)
 
+ADR 0017 introduced the face-first identity surface at `/v1/identity/register` + `/v1/identity/verify`. These are the **production** integration points; the `/v1/auth/zkp/*` endpoints are retained for backward compat with the W3 demo client and are deprecated for new integrations.
+
 | Method | Path | Scope | Description |
 |---|---|---|---|
-| `POST` | `/v1/auth/zkp/register` | `zkp:register` | Hash biometric → DID, anchor on Base Sepolia, return secrets to the client once. |
-| `POST` | `/v1/auth/zkp/verify` | `zkp:verify` | Verify Groth16 proof, issue session JWT on success. |
-| `GET` | `/v1/auth/zkp/nonce` | `nonce:create` | Fresh nonce, 5-minute lifetime. |
-| `GET` | `/v1/auth/zkp/circuit-info` | `zkp:verify` | Circuit metadata for client SDKs. |
+| `POST` | `/v1/identity/register` | `zkp:register` | **Face-first register.** Accepts the on-device-computed `(did, commitment)` tuple. No biometric template ever crosses the wire. Optional `externalId` + `attestation` fields. Returns `201 { userId, did, commitment, createdAt }`. Conflicts: `409 did_already_registered`. |
+| `POST` | `/v1/identity/verify` | `zkp:verify` | **Face-first verify.** Accepts `{ did, proof, publicSignals, nonce, timestamp }`. Looks up user by DID, asserts `publicSignals[0]` matches the stored commitment, runs snarkjs.groth16.verify against the boot-pinned vkey. On success returns 200 with `accessToken / refreshToken / sessionId / did`. Uniform `401 verification_failed` for did_unknown, commitment_mismatch, proof_invalid (enumeration defence). |
 | `GET` | `/v1/identity/me` | `identity:read` | User profile from a session JWT (passed via `X-Session-Token`). |
 | `POST` | `/v1/identity/logout` | `identity:read` | Invalidate a session. |
 | `POST` | `/v1/identity/refresh` | `identity:read` | Refresh-token → new access token. |
+| `POST` | `/v1/auth/zkp/register` | `zkp:register` | **DEPRECATED.** Accepts a base64 `biometricTemplate`. Computes commitment server-side and registers. Retained for the W3 demo client + existing fixtures. New integrations MUST use `/v1/identity/register` per ADR 0017. |
+| `POST` | `/v1/auth/zkp/verify` | `zkp:verify` | **DEPRECATED for new integrations.** Verifies a Groth16 proof without a DID lookup. Use `/v1/identity/verify` which adds the commitment-vs-DID match check before running snarkjs. |
+| `GET` | `/v1/auth/zkp/nonce` | `nonce:create` | Fresh nonce, 5-minute lifetime. |
+| `GET` | `/v1/auth/zkp/circuit-info` | `zkp:verify` | Circuit metadata for client SDKs. |
 
 ### SAML + OIDC (`/v1/auth/saml/*`, `/v1/auth/oidc/*`)
 
