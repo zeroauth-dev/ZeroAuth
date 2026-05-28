@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { authenticateAdmin } from '../middleware/auth';
 import { sessionStore } from '../services/session-store';
 import { getBlockchainInfo, isBlockchainReady } from '../services/blockchain';
+import { verifyAuditChain, appendAuditEvent } from '../services/audit';
+import { logger } from '../services/logger';
 
 const router = Router();
 
@@ -75,6 +77,91 @@ router.get('/blockchain', async (_req: Request, res: Response) => {
       status: 'error',
       error: (err as Error).message,
     });
+  }
+});
+
+/**
+ * GET /api/admin/audit-integrity
+ *
+ * Replay a tenant's audit_events hash chain and report whether it
+ * reconstructs to the recorded event_hash on every row. Closes
+ * Phase 0 commit C-014. ADR 0013 defines the chain; this endpoint
+ * is the bank-facing read-only verification surface.
+ *
+ * Query:
+ *   - tenant_id      (required) UUID of the tenant.
+ *   - environment    optional 'live' | 'test'. Omitted = check both.
+ *   - start_id       optional bigint, default 0 (full chain).
+ *   - limit          optional bigint, default 100_000.
+ *
+ * Returns:
+ *   - 200 { status: 'pass', tenantId, environment, rowsChecked }
+ *   - 200 { status: 'fail', tenantId, environment, brokenAt, reason }
+ *
+ * The endpoint is itself audited — invoking the check writes a row.
+ */
+router.get('/audit-integrity', async (req: Request, res: Response) => {
+  const tenantId = String(req.query.tenant_id ?? '').trim();
+  const environment = req.query.environment === 'live' || req.query.environment === 'test'
+    ? (req.query.environment as 'live' | 'test')
+    : null;
+  const startId = String(req.query.start_id ?? '0').trim();
+  const limit = Number.parseInt(String(req.query.limit ?? '100000'), 10);
+
+  if (!tenantId || !/^[0-9a-f-]{36}$/i.test(tenantId)) {
+    res.status(400).json({ error: 'invalid_tenant_id', message: 'tenant_id must be a UUID.' });
+    return;
+  }
+  if (Number.isNaN(limit) || limit < 1 || limit > 1_000_000) {
+    res.status(400).json({ error: 'invalid_limit', message: 'limit must be 1..1000000.' });
+    return;
+  }
+
+  try {
+    const result = await verifyAuditChain(tenantId, environment, { startId, limit });
+    if (result.ok) {
+      // Audit-of-the-audit: record that the integrity check ran.
+      void appendAuditEvent({
+        tenant_id: tenantId,
+        environment,
+        actor_type: 'system',
+        actor_id: null,
+        action: 'audit.integrity_check',
+        entity_type: 'tenant',
+        entity_id: tenantId,
+        status: 'success',
+        summary: 'Audit hash chain verified',
+        metadata: { startId, limit },
+      }).catch(err => logger.warn('audit-integrity self-audit failed', {
+        error: (err as Error).message,
+      }));
+      res.json({ status: 'pass', tenantId, environment, startId, limit });
+      return;
+    }
+    void appendAuditEvent({
+      tenant_id: tenantId,
+      environment,
+      actor_type: 'system',
+      actor_id: null,
+      action: 'audit.integrity_check',
+      entity_type: 'tenant',
+      entity_id: tenantId,
+      status: 'failure',
+      summary: 'Audit hash chain broken',
+      metadata: { brokenAt: result.brokenAt, reason: result.reason, startId, limit },
+    }).catch(err => logger.warn('audit-integrity self-audit failed', {
+      error: (err as Error).message,
+    }));
+    res.json({
+      status: 'fail',
+      tenantId,
+      environment,
+      brokenAt: result.brokenAt,
+      reason: result.reason,
+    });
+  } catch (err) {
+    logger.error('audit-integrity check threw', { error: (err as Error).message });
+    res.status(500).json({ error: 'audit_integrity_error' });
   }
 });
 
