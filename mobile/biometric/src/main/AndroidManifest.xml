@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  :biometric — face embedding + commitment pipeline.
+
+  Library module, no components declared. The TFLite runtime requires
+  the Android packaging system to bundle the .tflite file from assets/;
+  no Activity / Service / Receiver / Provider is exposed.
+
+  The biometric authentication permission (USE_BIOMETRIC) is declared
+  by the host :app — the salt provider talks to the Keystore via the
+  hardware-backed key store, not via BiometricPrompt directly. Strong
+  authentication is the responsibility of the upstream FaceCapture +
+  liveness gate, not this module.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+</manifest>
