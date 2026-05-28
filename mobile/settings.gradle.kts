@@ -12,6 +12,10 @@
 //   :prover                       — rapidsnark JNI bridge (impl lands C-104)
 //   :sensors:r307                 — R307 USB-OTG driver (impl lands C-145)
 //   :sensors:biometric_prompt     — BiometricPrompt fallback (impl lands C-144)
+//   :face                         — CameraX + ML Kit face capture flow
+//                                   (produces the 112×112 bitmap consumed by
+//                                   the on-device biometric/embedder pipeline;
+//                                   Scene 1 step 4 in 02-bank-demo.md).
 //
 // The existing android/ subtree (the W3 desktop-login WebView spike) is
 // independent: it has its own settings.gradle.kts and Gradle root. Android
@@ -51,3 +55,4 @@ include(":app")
 include(":prover")
 include(":sensors:r307")
 include(":sensors:biometric_prompt")
+include(":face")

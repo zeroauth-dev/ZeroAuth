@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    mobile/face/src/main/res/drawable/face_viewfinder.xml — circular
+    viewfinder ring rendered as a Compose overlay during face capture.
+
+    A 280 dp square SVG with a centred 132-unit-radius circle stroke at
+    8-unit width. The Compose layer (FaceCaptureScreen.kt) sizes the
+    ImageView via VIEWFINDER_SIZE_DP so the stroke scales with the
+    user's display density. The colour is opaque white at 70 % alpha so
+    it remains visible against light and dark backgrounds without
+    fighting the live preview underneath.
+
+    The drawable is intentionally just a ring — no chin-line, no
+    crosshair, no targeting reticule. The v1 stability gate fires when
+    the face has been continuously detected for 1.5 s; the visual hint
+    is just "centre your face inside this circle". When the
+    full-liveness module (C-148) lands it will replace this with an
+    instruction sheet ("Look left", "Blink") plus an animated frame.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="280dp"
+    android:height="280dp"
+    android:viewportWidth="280"
+    android:viewportHeight="280">
+
+    <path
+        android:strokeColor="#B3FFFFFF"
+        android:strokeWidth="8"
+        android:fillColor="#00000000"
+        android:pathData="M 140,8 a 132,132 0 1,0 0.001,0" />
+
+</vector>
