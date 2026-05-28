@@ -55,7 +55,10 @@ router.post('/register',
         return;
       }
 
-      const result = await registerIdentity(templateBuffer);
+      // ADR 0017 — pass the tenant's security_policy so registerIdentity
+      // can gate the on-chain DIDRegistry write behind the resolved
+      // `did_provider`. Default tenants run pure-DB enrollment.
+      const result = await registerIdentity(templateBuffer, tenant.security_policy);
 
       logger.info('v1: ZKP identity registered', {
         tenantId: tenant.id,

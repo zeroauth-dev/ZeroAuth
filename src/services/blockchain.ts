@@ -44,35 +44,88 @@ async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
   throw new Error(`${label}: all retries exhausted`);
 }
 
+/**
+ * Wire up the optional blockchain layer. ADR 0017 — this service is
+ * BEST-EFFORT. Missing env vars (no private key, no RPC URL, no
+ * registry/verifier addresses) leave the service in "unavailable"
+ * mode; the platform boots cleanly and tenants whose
+ * `did_provider='off-chain'` (the default) never notice. Tenants who
+ * opted into a chain provider see their `registerIdentityOnChain`
+ * calls reject with "DIDRegistry contract not initialized" — that's
+ * the contract; misconfigured opt-in is the operator's problem.
+ *
+ * This function MUST NOT throw and MUST NOT call `process.exit`. The
+ * caller in `src/server.ts` already wraps it in a try/catch and warns,
+ * but the inner guards here mean a network blip on `getNetwork()`
+ * doesn't even bubble up to that handler — the platform stays in a
+ * known partially-degraded mode.
+ */
 export async function initBlockchain(): Promise<void> {
   if (!config.blockchain.privateKey) {
-    logger.warn('Blockchain: No private key configured — blockchain features disabled');
+    logger.warn('Blockchain: No private key configured — blockchain features disabled (ADR 0017 default)');
     return;
   }
 
-  provider = new JsonRpcProvider(config.blockchain.rpcUrl);
-  wallet = new Wallet(config.blockchain.privateKey, provider);
+  try {
+    provider = new JsonRpcProvider(config.blockchain.rpcUrl);
+    wallet = new Wallet(config.blockchain.privateKey, provider);
+  } catch (err) {
+    logger.warn('Blockchain: provider/wallet construction failed — features disabled', {
+      error: (err as Error).message,
+    });
+    provider = null;
+    wallet = null;
+    return;
+  }
 
-  const network = await provider.getNetwork();
-  logger.info(`Blockchain: Connected to ${network.name} (chainId: ${network.chainId})`);
-  logger.info(`Blockchain: Deployer address: ${wallet.address}`);
+  // Best-effort network probe. An RPC outage at boot must NOT abort
+  // the server; we log and leave `provider` populated so a later call
+  // can still try (the JsonRpcProvider is lazy and will reconnect).
+  try {
+    const network = await provider.getNetwork();
+    logger.info(`Blockchain: Connected to ${network.name} (chainId: ${network.chainId})`);
+    logger.info(`Blockchain: Deployer address: ${wallet.address}`);
+  } catch (err) {
+    logger.warn('Blockchain: RPC network probe failed — proceeding in degraded mode', {
+      error: (err as Error).message,
+      rpcUrl: config.blockchain.rpcUrl,
+    });
+  }
 
   if (config.blockchain.didRegistryAddress) {
-    didRegistryContract = new Contract(
-      config.blockchain.didRegistryAddress,
-      DID_REGISTRY_ABI,
-      wallet,
-    );
-    logger.info(`Blockchain: DIDRegistry at ${config.blockchain.didRegistryAddress}`);
+    try {
+      didRegistryContract = new Contract(
+        config.blockchain.didRegistryAddress,
+        DID_REGISTRY_ABI,
+        wallet,
+      );
+      logger.info(`Blockchain: DIDRegistry at ${config.blockchain.didRegistryAddress}`);
+    } catch (err) {
+      logger.warn('Blockchain: DIDRegistry contract bind failed', {
+        error: (err as Error).message,
+      });
+      didRegistryContract = null;
+    }
+  } else {
+    logger.info('Blockchain: DIDRegistry address not configured — on-chain DID registration unavailable');
   }
 
   if (config.blockchain.verifierAddress) {
-    verifierContract = new Contract(
-      config.blockchain.verifierAddress,
-      VERIFIER_ABI,
-      wallet,
-    );
-    logger.info(`Blockchain: Verifier at ${config.blockchain.verifierAddress}`);
+    try {
+      verifierContract = new Contract(
+        config.blockchain.verifierAddress,
+        VERIFIER_ABI,
+        wallet,
+      );
+      logger.info(`Blockchain: Verifier at ${config.blockchain.verifierAddress}`);
+    } catch (err) {
+      logger.warn('Blockchain: Verifier contract bind failed', {
+        error: (err as Error).message,
+      });
+      verifierContract = null;
+    }
+  } else {
+    logger.info('Blockchain: Verifier address not configured — on-chain proof verification unavailable');
   }
 }
 
