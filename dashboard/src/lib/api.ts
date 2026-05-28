@@ -286,6 +286,46 @@ export interface DeviceEnrollmentInvite {
   };
 }
 
+// ─── Three-QR end-user signup ceremony (ADR 0023) ────────────────
+
+export type RegistrationSessionState =
+  | 'awaiting_device'
+  | 'awaiting_commitment'
+  | 'awaiting_verification'
+  | 'completed'
+  | 'abandoned';
+
+/**
+ * Server-redacted shape of the registration_sessions row. The
+ * console proxy strips pair_code_hash, enroll_code_hash,
+ * verify_code_hash, and verify_challenge_nonce before this hits
+ * the browser — the plaintext codes are returned only at issuance
+ * (and only to the issuing browser).
+ */
+export interface RegistrationSession {
+  id: string;
+  tenant_id: string;
+  environment: Environment;
+  profile: Record<string, unknown>;
+  state: RegistrationSessionState;
+  device_id: string | null;
+  did: string | null;
+  commitment: string | null;
+  tenant_user_id: string | null;
+  pair_code_expires_at: string | null;
+  enroll_code_expires_at: string | null;
+  verify_code_expires_at: string | null;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RegistrationStartResponse {
+  environment: Environment;
+  session: RegistrationSession;
+  pair: { code: string; expires_at: string; deeplink: string };
+}
+
 export interface User {
   id: string;
   external_id: string;
@@ -721,6 +761,52 @@ export const api = {
       lastSeenAt?: string;
     },
   ) => request<{ environment: Environment; device: Device }>(`/api/console/devices/${encodeURIComponent(deviceId)}`, { method: 'PATCH', body: input }),
+
+  // Registrations — three-QR signup ceremony (ADR 0023). Console
+  // proxies live at /api/console/registrations/*. The plaintext
+  // pair_code is returned exactly once on POST; subsequent codes
+  // (enroll_code, verify_code) only travel from the server to the
+  // phone via the next-step deeplinks, never to the dashboard.
+  startRegistration: (input: {
+    environment: Environment;
+    profile?: Record<string, unknown>;
+  }) =>
+    request<RegistrationStartResponse>('/api/console/registrations', { method: 'POST', body: input }),
+  pollRegistration: (sessionId: string, params: { environment: Environment }) =>
+    request<{ environment: Environment; session: RegistrationSession }>(
+      `/api/console/registrations/${encodeURIComponent(sessionId)}`,
+      { query: params },
+    ),
+  abandonRegistration: (sessionId: string, params: { environment: Environment }) =>
+    request<{ environment: Environment; session: RegistrationSession }>(
+      `/api/console/registrations/${encodeURIComponent(sessionId)}`,
+      { method: 'DELETE', body: params },
+    ),
+  // Phone-side endpoints — the demo's "Simulate phone" panel calls
+  // these directly so the operator can drive the ceremony from one
+  // browser window without an actual phone. In production the phone
+  // hits these via /v1/registrations/* on the public origin.
+  __phonePair: (input: { pair_code: string; fingerprint: string; attestation_kind?: string }) =>
+    request<{
+      session_id: string;
+      device_id: string | null;
+      next: { step: string; code: string; expires_at: string; deeplink: string };
+    }>('/v1/registrations/pair-device', { method: 'POST', body: input, auth: false }),
+  __phoneSubmitCommitment: (input: { enroll_code: string; did: string; commitment: string; attestation_kind?: string }) =>
+    request<{
+      session_id: string;
+      next: { step: string; code: string; expires_at: string; deeplink: string; challenge_nonce: string };
+    }>('/v1/registrations/submit-commitment', { method: 'POST', body: input, auth: false }),
+  __phoneComplete: (input: {
+    verify_code: string;
+    challenge_nonce: string;
+    proof: unknown;
+    public_signals: unknown[];
+  }) =>
+    request<{ session_id: string; tenant_user: Record<string, unknown>; device: Record<string, unknown> | null }>(
+      '/v1/registrations/complete',
+      { method: 'POST', body: input, auth: false },
+    ),
 
   // Users
   listUsers: (params: { environment: Environment; status?: User['status']; limit?: number }) =>
