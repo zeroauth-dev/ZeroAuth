@@ -9,13 +9,11 @@ import kotlin.test.assertFailsWith
 /**
  * CommitmentBuilderTest — end-to-end wiring with mocks.
  *
- * The pipeline currently terminates at the [Poseidon.hash2] stub. This
- * test asserts that everything *upstream* of Poseidon (quantising,
- * hashing, salt-fetch) is correctly wired by checking that
- * [CommitmentBuilder.buildFromEmbedding] reaches the Poseidon stub
- * and surfaces its NotImplementedError. When the real Poseidon lands,
- * this test upgrades from "throws NotImplementedError" to "produces a
- * valid commitment matching the circomlibjs reference vector".
+ * The pipeline now terminates at the real [Poseidon.hash2] implementation
+ * (vendored from `android/app/src/main/java/dev/zeroauth/android/sec/Poseidon.kt`
+ * per ADR 0019). Tests assert the full chain produces a valid 32-byte
+ * commitment + 32-byte salt + 32-byte secret + did:zeroauth:* DID, and
+ * that the same (embedding, salt) pair is deterministically reproducible.
  *
  * We exercise [CommitmentBuilder.buildFromEmbedding] rather than
  * [CommitmentBuilder.build] because the latter requires a real
@@ -60,7 +58,7 @@ class CommitmentBuilderTest {
     }
 
     @Test
-    fun `pipeline reaches Poseidon and surfaces the stub error`() = runTest {
+    fun `pipeline produces a valid 32-byte commitment end-to-end`() = runTest {
         val embedder = MockFaceEmbedder(fixtureEmbedding())
         val saltProvider = MockSaltProvider(ByteArray(32) { 0x11 })
         val builder = CommitmentBuilder(embedder, saltProvider)
@@ -70,10 +68,13 @@ class CommitmentBuilderTest {
         // Android runtime). The bitmap-bearing build() variant is
         // exercised by the instrumented test in the FaceCapture
         // commit; this test asserts the rest of the pipeline is
-        // wired correctly.
-        assertFailsWith<NotImplementedError> {
-            builder.buildFromEmbedding(fixtureEmbedding())
-        }
+        // wired correctly end-to-end against the real Poseidon impl.
+        val commitment = builder.buildFromEmbedding(fixtureEmbedding())
+
+        kotlin.test.assertEquals(32, commitment.value.size)
+        kotlin.test.assertEquals(32, commitment.salt.size)
+        kotlin.test.assertEquals(32, commitment.secret.size)
+        kotlin.test.assertTrue(commitment.did.startsWith("did:zeroauth:"))
 
         // Sanity: the salt provider was called exactly once (the
         // pipeline reached Stage 4). If a future refactor reorders
@@ -81,6 +82,25 @@ class CommitmentBuilderTest {
         // because buildFromEmbedding skips the embedding stage.
         kotlin.test.assertEquals(0, embedder.called)
         kotlin.test.assertEquals(1, saltProvider.called)
+    }
+
+    @Test
+    fun `pipeline is deterministic — same embedding + salt yields same commitment`() = runTest {
+        val embedder = MockFaceEmbedder(fixtureEmbedding())
+        val saltProvider = MockSaltProvider(ByteArray(32) { 0x11 })
+        val builder = CommitmentBuilder(embedder, saltProvider)
+
+        val first = builder.buildFromEmbedding(fixtureEmbedding())
+        val second = builder.buildFromEmbedding(fixtureEmbedding())
+
+        // Same inputs MUST produce the same commitment value, salt,
+        // secret, and DID. The same-device-same-customer happy path
+        // depends on this property — without it, no two enrollments
+        // would line up at verification.
+        kotlin.test.assertEquals(first.value.toList(), second.value.toList())
+        kotlin.test.assertEquals(first.secret.toList(), second.secret.toList())
+        kotlin.test.assertEquals(first.salt.toList(), second.salt.toList())
+        kotlin.test.assertEquals(first.did, second.did)
     }
 
     @Test
