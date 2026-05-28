@@ -177,6 +177,19 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_tenant_users_tenant ON tenant_users(tenant_id, environment, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_tenant_users_status ON tenant_users(tenant_id, environment, status);
 
+  -- ADR 0017 face-first platform pivot.
+  -- The on-device biometric → embedding → secret → Poseidon commitment
+  -- pipeline produces the (did, commitment) tuple. The platform stores
+  -- only these — never a biometric template, never an image. The
+  -- Phase 1 PII-strip migration will retire full_name/email/phone, but
+  -- the new columns land now so the face-flow has a target schema.
+  ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS did TEXT;
+  ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS commitment TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_users_did
+    ON tenant_users(tenant_id, environment, did) WHERE did IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_tenant_users_commitment
+    ON tenant_users(tenant_id, environment, commitment) WHERE commitment IS NOT NULL;
+
   -- ─── Verification Events ─────────────────────────────────
   CREATE TABLE IF NOT EXISTS verification_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
