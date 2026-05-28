@@ -37,8 +37,8 @@ LAST_UPDATED: 2026-05-28
 
 | ID | Title | Status | Closing commit | Notes |
 |---|---|---|---|---|
-| **C-13** | CORS is wildcard-allowed | **OPEN — sprint 2** | — | Per-tenant `allowed_origins` rolled out by C-027. |
-| **C-14** | No CVE monitoring; supply-chain attacks invisible until they bite | **OPEN — sprint 2** | — | Nightly CVE monitor workflow tracked as C-032. |
+| **C-13** | CORS is wildcard-allowed | **PARTIALLY CLOSED** | `src/config/index.ts` `parseCorsOrigins` | The global CORS layer reads from `CORS_ORIGINS` env var with a non-wildcard production fallback (`api.zeroauth.dev`, `console.zeroauth.dev`, `docs.zeroauth.dev`, `zeroauth.dev`, `www.zeroauth.dev`). No `*` is ever set. The per-tenant `allowed_origins` field (the fully-granular version) remains a sprint-2 ticket; the global non-wildcard list closes the audit class. |
+| **C-14** | No CVE monitoring; supply-chain attacks invisible until they bite | **CLOSED** | `f8a756c` | Nightly CVE monitor at `.github/workflows/cve-monitor.yml` with high-severity alert routing. |
 | **C-15** | No automated dependency-ADR audit; new deps can land without an ADR | **OPEN — phase 1 sprint 1** | — | Pre-commit hook + CI mirror tracked as C-001 + sprint-1 CI work. |
 | **C-16** | No production deploy pipeline — production changes are SSH'd in by hand | **OPEN — phase 1** | — | The pipeline exists (`.github/workflows/deploy.yml`) but lacks branch protection on `main`. ADR 0011 (commit `51bc705`) captures the workflow; protected-branch settings tracked as a sprint-2 ops ticket. |
 

@@ -17,7 +17,36 @@ ZeroAuth is on the BFSI v1 production plan. The plan is the source of truth for 
 
 Phase 0 (weeks 1-2) closes the 21 Phase 0 audit findings (tracked in [docs/security/audit-findings.md](docs/security/audit-findings.md)). Phase 1 (weeks 3-12) builds the Anchor Bank demo end-to-end.
 
-Phase 0 closed P0 findings as of LAST_UPDATED: C-1 (demo bypass), C-3 (access_token query fallback), C-4 (audit hash chain), C-6 (direct INSERT guard), C-8 (biometric-payload guard). C-2 (fake mobile prover) tracks to Phase 1 Sprint 3.
+Phase 0 closed P0 findings as of LAST_UPDATED: C-1 (demo bypass), C-3 (access_token query fallback), C-4 (audit hash chain), C-6 (direct INSERT guard), C-7 (vkey integrity), C-8 (biometric-payload guard), C-10 (rate-limit), C-12 (cross-tenant matrix), C-14 (CVE monitor). C-2 (fake mobile prover) tracks to Phase 1 Sprint 3.
+
+## Blockchain-agnostic pivot (ADR 0017)
+
+The platform is **blockchain-agnostic by default**. Per [adr/0017-blockchain-agnostic-posture.md](adr/0017-blockchain-agnostic-posture.md), the on-chain anchor + DIDRegistry + on-chain verifier are now **opt-in providers** keyed on `tenant.security_policy`:
+
+- `did_provider`: `off-chain` (default) | `base-sepolia` | `base-mainnet` | `custom-chain`
+- `verifier_provider`: `off-chain` (default) | `on-chain`
+- `audit_anchor_provider`: `none` (default) | `signed-transcript` | `base-sepolia` | `base-mainnet` | `witness-cosign`
+
+A default tenant boots with zero `BLOCKCHAIN_PRIVATE_KEY`, zero contract address, zero RPC dependency. The Pramaan ZK protocol + hash-chained audit log work end-to-end off-chain. The Auth0 differentiation pitch ([docs/why-zeroauth/vs-auth0.md](docs/why-zeroauth/vs-auth0.md)) does not require any blockchain to hold.
+
+## Face-first identity surface (ADR 0017)
+
+The production register + verify endpoints are:
+
+- `POST /v1/identity/register` — accepts on-device-computed `(did, commitment)` only. No biometric template, no image, no embedding ever crosses the wire.
+- `POST /v1/identity/verify` — looks up user by DID, asserts `publicSignals[0]` matches stored commitment, runs `snarkjs.groth16.verify` against the boot-pinned vkey, mints session.
+
+The legacy `/v1/auth/zkp/register` (which accepts a base64 biometricTemplate) and `/v1/auth/zkp/verify` (no DID lookup) are retained for backward compat with the W3 demo client and carry `Deprecation: true` + `Sunset: 2026-12-31` headers. New integrations MUST use `/v1/identity/*`.
+
+On-device commitment pipeline lives in [mobile/biometric/](mobile/biometric/):
+
+- `FaceEmbedder` (TFLite MobileFaceNet) → 128-dim L2-normalised embedding
+- `Quantizer` → 256-byte deterministic int16 BE
+- `Sha256` (with buffer zeroing) → 32-byte secret
+- `Poseidon.hash2(secret, salt)` → 32-byte commitment (BN128 field element, byte-identical to `circomlibjs.poseidon2`)
+- `Keccak256(commitment)[:20]` → DID suffix
+
+CameraX face-capture + ML Kit detection lives in [mobile/face/](mobile/face/).
 
 ## What this repo is
 
