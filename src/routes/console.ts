@@ -55,6 +55,7 @@ import {
   PlayIntegrityInsufficient,
 } from '../services/proof-pairing';
 import { Groth16Proof } from '../types';
+import { subscribeVerifications } from '../services/verification-events';
 
 const router = Router();
 
@@ -899,6 +900,84 @@ router.get('/verifications', requireConsoleAuth, async (req: Request, res: Respo
   } catch {
     res.status(500).json({ error: 'verification_list_failed' });
   }
+});
+
+/**
+ * GET /api/console/verifications/stream
+ *
+ * Server-Sent Events stream of live verification audit rows for the
+ * authenticated tenant. Backs the live verifications dashboard view
+ * at `/dashboard/tenant/verifications`.
+ *
+ * Auth: requireConsoleAuth (Authorization: Bearer OR HttpOnly
+ * `zeroauth_console_jwt` cookie per ADR/console-auth — P0 audit
+ * finding C-3 removed the `?access_token=` query fallback).
+ *
+ * Wire shape: one `event: verification` per row, with the JSON
+ * payload defined in `src/services/verification-events.ts`. A `:
+ * ping` comment frame goes out every 25 s as the heartbeat — same
+ * cadence the proof-pairing SSE route uses (see
+ * `pairingStreamHeartbeatMs` above).
+ *
+ * Per-tenant isolation: the subscription wires the listener through
+ * `subscribeVerifications(tenantId, …)`. The emitter key is the
+ * tenant id, so tenant A's subscriber never sees tenant B's rows.
+ *
+ * Scope: this is a v1 in-process emitter. Multi-pod scale-out
+ * requires a Redis pub/sub backing — tracked in
+ * `src/services/verification-events.ts`. Today the deployment is
+ * single-pod, so subscribers see every row written by the platform.
+ */
+router.get('/verifications/stream', requireConsoleAuth, async (req: Request, res: Response) => {
+  const { tenantId } = (req as any).console;
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  // First write — flush headers immediately so the client's
+  // EventSource transitions from CONNECTING to OPEN. Without this
+  // the browser may sit on the response for the heartbeat interval.
+  res.write(': connected\n\n');
+
+  // Heartbeat every 25 s — matches the proof-pairing stream cadence
+  // and the EventSource default reconnect window. Comment frames
+  // (lines starting with `:`) are valid SSE that the client parses
+  // and discards; they keep middleboxes from idling out the socket.
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) res.write(': ping\n\n');
+  }, 25_000);
+
+  // Subscribe the SSE consumer to the per-tenant emitter. The
+  // listener forwards every verification payload as a single
+  // `event: verification` SSE frame. Per-tenant isolation is
+  // enforced in subscribeVerifications().
+  const subscription = subscribeVerifications(tenantId, (payload) => {
+    if (res.writableEnded) return;
+    try {
+      res.write('event: verification\n');
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    } catch {
+      // Socket closed between the writableEnded check and write —
+      // common on client disconnect. The close handler below
+      // already tears down the subscription.
+    }
+  });
+
+  // Tear-down on client disconnect. Without this the listener
+  // leaks for the lifetime of the Node process.
+  const cleanup = (): void => {
+    clearInterval(heartbeat);
+    subscription.close();
+    if (!res.writableEnded) {
+      try { res.end(); } catch { /* ignore */ }
+    }
+  };
+  req.on('close', cleanup);
+  req.on('aborted', cleanup);
 });
 
 // ─── Attendance (read-only on the console) ────────────────────────
