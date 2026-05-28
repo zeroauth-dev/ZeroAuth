@@ -296,6 +296,70 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_pps_state_expires
     ON proof_pairing_sessions(state, expires_at) WHERE state = 'issued';
 
+  -- ─── Registration Sessions (ADR 0023) ─────────────────────
+  -- The end-user signup ceremony: a tenant SDK calls
+  -- POST /v1/registrations to start a session, gets back a
+  -- pair_code; the user's phone scans QR1 to enroll the device,
+  -- captures a biometric, scans QR2 to submit the commitment, then
+  -- scans QR3 to submit a Groth16 proof binding (commitment,
+  -- challenge_nonce). The tenant_user is created only when the
+  -- proof verifies. The biometric NEVER touches the server — only
+  -- the commitment and the proof do.
+  --
+  -- State machine:
+  --   awaiting_device      — pair_code outstanding, no device yet
+  --   awaiting_commitment  — device paired, enroll_code outstanding
+  --   awaiting_verification — commitment stored, verify_code outstanding
+  --   completed            — tenant_user created
+  --   abandoned            — session expired or admin-cancelled
+  --
+  -- Three independent codes (each a one-time SHA-256-hashed bearer
+  -- credential, each with its own 15-minute TTL) prevent confused-
+  -- deputy reuse across steps: a captured QR1 cannot satisfy QR2's
+  -- handler, and so on.
+  CREATE TABLE IF NOT EXISTS registration_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL
+      CHECK (environment IN ('live', 'test')),
+    -- Free-form profile blob the tenant SDK passes through (name,
+    -- email, employee_code, etc.). Validation is the tenant's
+    -- responsibility; we treat it as opaque JSON. NO biometric data
+    -- ever lives here; the biometric column-name guard in
+    -- tests/schema-purity.test.ts asserts this.
+    profile JSONB NOT NULL DEFAULT '{}',
+    state VARCHAR(32) NOT NULL DEFAULT 'awaiting_device'
+      CHECK (state IN ('awaiting_device', 'awaiting_commitment', 'awaiting_verification', 'completed', 'abandoned')),
+    -- Bound progressively as the ceremony advances:
+    device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
+    did TEXT,
+    commitment TEXT,
+    tenant_user_id UUID REFERENCES tenant_users(id) ON DELETE SET NULL,
+    -- Three single-use bearer codes, one per step. SHA-256 of plaintext.
+    pair_code_hash TEXT,
+    pair_code_expires_at TIMESTAMPTZ,
+    enroll_code_hash TEXT,
+    enroll_code_expires_at TIMESTAMPTZ,
+    verify_code_hash TEXT,
+    verify_code_expires_at TIMESTAMPTZ,
+    -- Server-issued nonce baked into the QR3 payload; the phone
+    -- echoes it back with the proof. Single-use, scoped to this row.
+    verify_challenge_nonce TEXT,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_registration_sessions_tenant
+    ON registration_sessions(tenant_id, environment, state, created_at DESC);
+  -- Hot paths: phone-side endpoints find rows by code hash. Partial
+  -- index because most rows have no outstanding code in any one step.
+  CREATE INDEX IF NOT EXISTS idx_registration_sessions_pair_code
+    ON registration_sessions(pair_code_hash) WHERE pair_code_hash IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_registration_sessions_enroll_code
+    ON registration_sessions(enroll_code_hash) WHERE enroll_code_hash IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_registration_sessions_verify_code
+    ON registration_sessions(verify_code_hash) WHERE verify_code_hash IS NOT NULL;
+
   -- ─── Audit Events ────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS audit_events (
     id BIGSERIAL PRIMARY KEY,

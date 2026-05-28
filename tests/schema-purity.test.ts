@@ -172,6 +172,7 @@ describe('schema-purity (tenant-scoped tables)', () => {
     'audit_events',
     'audit_anchors',
     'proof_pairing_sessions',
+    'registration_sessions',
     'api_keys',
     'usage_logs',
     'usage_monthly',
@@ -257,6 +258,13 @@ describe('schema-purity (tenant-scoped tables)', () => {
       // not (tenant_id, environment); tenant scope lives in the
       // session JWT, not in the row.
       'user_sessions',
+      // ADR 0023 three-QR signup ceremony. Tenant-scoped; listed
+      // in TENANT_SCOPED_TABLES above so the biometric-column-name
+      // guard runs on it too. The `profile` JSONB column is the
+      // only free-form slot and sanitizeProfile in
+      // src/services/registration.ts strips suspicious keys at
+      // ingest time as a defence-in-depth backstop.
+      'registration_sessions',
     ]);
     const createTableRe = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)/gi;
     const tables = new Set<string>();
