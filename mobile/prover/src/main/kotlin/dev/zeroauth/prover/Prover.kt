@@ -38,6 +38,31 @@ package dev.zeroauth.prover
  * | C-101   | This interface + DefaultProver throwing stub. (scaffold) |
  * | C-104   | `RapidsnarkProver` backed by native rapidsnark via JNI.  |
  * | (future) | Streaming proof support for larger witness shapes.      |
+ *
+ * ### Production prover available today (W3 reference impl)
+ *
+ * A fully-working WebView-isolated snarkjs prover already lives at
+ * `android/app/src/main/java/dev/zeroauth/android/prover/` (W3 demo,
+ * commits `0224be4` and earlier). It includes:
+ *
+ *   - `MobileProver.kt`            — interface (parallel to this one)
+ *   - `WebViewMobileProver.kt`     — runs snarkjs.fullProve in a WebView
+ *   - `IsolatedMobileProver.kt`    — wraps WebViewMobileProver behind
+ *                                    an `android:process=":prover"` IPC
+ *                                    boundary so a compromised renderer
+ *                                    cannot reach the Keystore
+ *   - `ProverService.kt` + `ProverIpc.kt` — the IPC plumbing
+ *   - `assets/prover/{prover.html, prover.js, snarkjs.min.js, poseidon.js}`
+ *
+ * The W3 prover talks to circuit version v1.1 today. The `:mobile/:app`
+ * host activity can consume the W3 prover by either (a) cross-module
+ * Gradle dep on the `android/` project, or (b) vendoring the five .kt
+ * files into `mobile/prover/` alongside the assets bundle. The choice
+ * is deferred to C-104 (the production rapidsnark JNI bridge), which
+ * supersedes both options.
+ *
+ * Until then, this stub is the right thing — every call site that
+ * needs a real proof gets a loud crash, surfacing the missing wiring.
  */
 interface Prover {
 
