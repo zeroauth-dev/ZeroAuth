@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticateTenantApiKey, getTenantContext } from '../../middleware/tenant-auth';
+import { pgRateLimit } from '../../middleware/rate-limit';
 import { verifyBiometricProof, getCircuitInfo } from '../../services/zkp';
 import { registerIdentity } from '../../services/identity';
 import { issueTokens } from '../../services/jwt';
@@ -25,6 +26,11 @@ const router = Router();
  */
 router.post('/register',
   authenticateTenantApiKey(['zkp:register']),
+  // C-026: Postgres-backed rate-limit per-API-key. 30 req / 60s on
+  // the identity-registration path matches the burst quota in
+  // docs/api_contract.md and gives Anchor Bank head-room while
+  // making credential-stuffing futile.
+  pgRateLimit({ route: 'identity:register', windowMs: 60_000, max: 30, keyBy: 'apiKey' }),
   async (req: Request, res: Response) => {
     try {
       const { tenant } = getTenantContext(req);
@@ -91,6 +97,11 @@ router.post('/register',
  */
 router.post('/verify',
   authenticateTenantApiKey(['zkp:verify']),
+  // C-026: Postgres-backed rate-limit per-API-key. 30 req / 60s
+  // matches the verification SLA we promise BFSI tenants and caps a
+  // single compromised key's blast radius. Tenant-level monthly
+  // quotas in tenant-auth.ts still apply on top of this.
+  pgRateLimit({ route: 'zkp:verify', windowMs: 60_000, max: 30, keyBy: 'apiKey' }),
   async (req: Request, res: Response) => {
     try {
       const { tenant } = getTenantContext(req);
