@@ -274,6 +274,15 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_audit_events_tenant ON audit_events(tenant_id, environment, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_audit_events_action ON audit_events(tenant_id, action, created_at DESC);
+
+  -- ─── ADR 0013 hash chain columns ─────────────────────────
+  -- previous_hash and event_hash are computed at INSERT time by
+  -- src/services/audit.ts. Both are NULLABLE during the Phase 1
+  -- backfill window (C-121); after backfill they are constrained
+  -- NOT NULL and a CHECK enforces non-empty hex.
+  ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS previous_hash TEXT;
+  ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS event_hash TEXT;
+  CREATE INDEX IF NOT EXISTS idx_audit_events_chain ON audit_events(tenant_id, environment, id);
 `;
 
 export async function initDb(): Promise<void> {

@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getPool } from './db';
 import { logger } from './logger';
+import { appendAuditEvent } from './audit';
 import {
   ApiKeyEnvironment,
   AttendanceEvent,
@@ -113,6 +114,18 @@ function parseTimestamp(value?: string): Date {
   return parsed;
 }
 
+/**
+ * Append a row to `audit_events` with the ADR 0013 hash chain.
+ *
+ * Every audit row goes through this single entry point — direct
+ * `INSERT INTO audit_events` is forbidden in application code (and
+ * the `tests/audit-chain.test.ts` grep guard catches re-introductions).
+ * The actual chain computation + advisory locking lives in
+ * `src/services/audit.ts::appendAuditEvent`; this wrapper is the
+ * legacy-name surface kept for backward compatibility with the
+ * existing 6+ call sites scattered across platform.ts and the route
+ * layer.
+ */
 export async function recordAuditEvent(
   tenantId: string,
   input: {
@@ -127,24 +140,18 @@ export async function recordAuditEvent(
     metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
-  const pool = getPool();
-  await pool.query(
-    `INSERT INTO audit_events
-      (tenant_id, environment, actor_type, actor_id, action, entity_type, entity_id, status, summary, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [
-      tenantId,
-      input.environment ?? null,
-      input.actorType,
-      input.actorId ?? null,
-      input.action,
-      input.entityType,
-      input.entityId ?? null,
-      input.status,
-      input.summary,
-      sanitizeMetadata(input.metadata),
-    ],
-  );
+  await appendAuditEvent({
+    tenant_id: tenantId,
+    environment: input.environment ?? null,
+    actor_type: input.actorType,
+    actor_id: input.actorId ?? null,
+    action: input.action,
+    entity_type: input.entityType,
+    entity_id: input.entityId ?? null,
+    status: input.status,
+    summary: input.summary,
+    metadata: sanitizeMetadata(input.metadata) as Record<string, unknown>,
+  });
 }
 
 export async function createDevice(
