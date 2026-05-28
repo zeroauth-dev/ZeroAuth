@@ -23,6 +23,14 @@ import { NotFound } from './routes/NotFound';
 // of the main bundle until the operator opens /demo/qr-proof-login.
 const QrProofLogin = lazy(() => import('./routes/demo/QrProofLogin'));
 
+// Live verifications view (SSE-streamed, ADR 0017 face-first flow).
+// Lazy-loaded so the EventSource cost is paid only when the operator
+// opens the live tab. Coexists with the polled /verifications view for
+// the transition window.
+const VerificationsLive = lazy(() => import('./routes/tenant/verifications'));
+const UsersLive = lazy(() => import('./routes/tenant/users'));
+const AuditIntegrityView = lazy(() => import('./routes/tenant/audit-integrity'));
+
 function RouteSuspense({ children }: { children: React.ReactNode }) {
   return (
     <Suspense
@@ -114,6 +122,35 @@ export function App() {
                     element={
                       <RouteSuspense>
                         <QrProofLogin />
+                      </RouteSuspense>
+                    }
+                  />
+
+                  {/* ADR 0017 face-first views — live SSE counterparts to
+                      the polled /verifications + /users. Both coexist
+                      during the transition; the polled views remain for
+                      operators who don't want a live EventSource open. */}
+                  <Route
+                    path="/verifications-live"
+                    element={
+                      <RouteSuspense>
+                        <VerificationsLive />
+                      </RouteSuspense>
+                    }
+                  />
+                  <Route
+                    path="/users-live"
+                    element={
+                      <RouteSuspense>
+                        <UsersLive />
+                      </RouteSuspense>
+                    }
+                  />
+                  <Route
+                    path="/audit-integrity"
+                    element={
+                      <RouteSuspense>
+                        <AuditIntegrityView />
                       </RouteSuspense>
                     }
                   />
