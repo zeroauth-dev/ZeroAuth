@@ -1,34 +1,34 @@
 package dev.zeroauth.biometric
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.math.BigInteger
 
 /**
- * PoseidonTest — interface contract + stub-rejection.
+ * Pins the mobile-side Poseidon port to poseidon-lite's JavaScript output.
  *
- * The actual Poseidon implementation is deferred to a follow-up commit
- * (see [adr/0019-poseidon-implementation-choice.md](../../../../../../../adr/0019-poseidon-implementation-choice.md)).
- * This test asserts:
+ * The constants in [PoseidonConstants] are byte-identical to
+ * poseidon-lite@^0.3.0 (see PoseidonConstants.kt's header for the
+ * regeneration recipe). If a value drifts, either the constants got
+ * corrupted or the core kernel changed shape; either way the
+ * server-side `expected === publicSignals[…]` check in
+ * `tests/proof-pairing.test.ts` will reject every proof until the
+ * drift is repaired, which is the desired blast radius.
  *
- *  1. The class loads (no static-init errors).
- *  2. [Poseidon.FIELD] is the BN128 scalar field modulus we expect.
- *  3. [Poseidon.toField] correctly reduces 32-byte inputs to the field.
- *  4. [Poseidon.hash2] throws NotImplementedError exactly as the stub
- *     contract promises — protecting us from someone accidentally
- *     wiring a fake implementation that returns deterministic noise.
- *
- * When the real implementation lands, the (4) test gets replaced by
- * vectors pinned against circomlibjs. The other three are forward-
- * compatible.
+ * Vectors copied from the `android/` sibling implementation in
+ * `android/app/src/test/java/dev/zeroauth/android/sec/PoseidonTest.kt`
+ * — that file's vectors have been pinned against poseidon-lite since
+ * the W3 cycle. The two files share a single source of truth so the
+ * cross-module compatibility holds without a separate fixture export.
  */
 class PoseidonTest {
 
+    // ─── BN128 field modulus assertion ─────────────────────────────────
+
     @Test
     fun `field modulus matches BN128`() {
-        // From circomlib / circuits/identity_proof.circom — this is
-        // the prime q of the BN128 elliptic-curve scalar group.
         val expected = BigInteger(
             "21888242871839275222246405745257275088548364400416034343698204186575808495617"
         )
@@ -36,52 +36,116 @@ class PoseidonTest {
     }
 
     @Test
-    fun `toField maps 32 zero bytes to BigInteger zero`() {
+    fun `toField reduces 32-byte input below FIELD`() {
+        val highBits = ByteArray(32) { 0xFF.toByte() }
+        val reduced = Poseidon.toField(highBits)
+        assertTrue("reduced value in [0, FIELD)", reduced >= BigInteger.ZERO)
+        assertTrue("reduced value in [0, FIELD)", reduced < Poseidon.FIELD)
+    }
+
+    @Test
+    fun `toField rejects non-32-byte input`() {
+        try {
+            Poseidon.toField(ByteArray(31))
+            assert(false) { "expected IllegalArgumentException" }
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("32") == true)
+        }
+    }
+
+    // ─── JS-reference vector tests (BigInteger interface) ──────────────
+
+    @Test
+    fun `poseidon1Bi(5) matches the JS reference`() {
+        val expected = BigInteger(
+            "19065150524771031435284970883882288895168425523179566388456001105768498065277"
+        )
+        assertEquals(expected, Poseidon.hash1Bi(BigInteger.valueOf(5)))
+    }
+
+    @Test
+    fun `poseidon2Bi(1, 2) matches the JS reference`() {
+        val expected = BigInteger(
+            "7853200120776062878684798364095072458815029376092732009249414926327459813530"
+        )
+        assertEquals(expected, Poseidon.hash2Bi(BigInteger.ONE, BigInteger.valueOf(2)))
+    }
+
+    @Test
+    fun `poseidon2Bi is order-sensitive`() {
+        val ab = Poseidon.hash2Bi(BigInteger.valueOf(7), BigInteger.valueOf(11))
+        val ba = Poseidon.hash2Bi(BigInteger.valueOf(11), BigInteger.valueOf(7))
+        assertNotEquals("poseidon2 must be order-sensitive", ab, ba)
+    }
+
+    @Test
+    fun `poseidon is deterministic`() {
+        val a = Poseidon.hash2Bi(BigInteger.valueOf(42), BigInteger.valueOf(99))
+        val b = Poseidon.hash2Bi(BigInteger.valueOf(42), BigInteger.valueOf(99))
+        assertEquals(a, b)
+    }
+
+    @Test
+    fun `poseidon stays within the BN254 field`() {
+        val almostField = PoseidonConstants.FIELD.subtract(BigInteger.ONE)
+        val out = Poseidon.hash2Bi(almostField, almostField)
+        assertTrue("Poseidon output is non-negative", out >= BigInteger.ZERO)
+        assertTrue("Poseidon output stays in the field", out < PoseidonConstants.FIELD)
+    }
+
+    // ─── Byte-array wrappers (the CommitmentBuilder boundary) ──────────
+
+    @Test
+    fun `hash2(ByteArray) produces a 32-byte output`() {
+        val a = ByteArray(32) { 0x01 }
+        val b = ByteArray(32) { 0x02 }
+        val out = Poseidon.hash2(a, b)
+        assertEquals(32, out.size)
+    }
+
+    @Test
+    fun `hash2(ByteArray) round-trips through toField for the (1, 2) vector`() {
+        val a = ByteArray(32); a[31] = 0x01           // = 1
+        val b = ByteArray(32); b[31] = 0x02           // = 2
+        val bytesResult = Poseidon.hash2(a, b)
+        val biResult = Poseidon.hash2Bi(BigInteger.ONE, BigInteger.valueOf(2))
+        assertEquals(biResult, BigInteger(1, bytesResult))
+    }
+
+    @Test
+    fun `hash2(ByteArray) tolerates 2-bit-overflow inputs via toField`() {
+        val highBitsSet = ByteArray(32) { 0xFF.toByte() }
         val zero = ByteArray(32)
-        assertEquals(BigInteger.ZERO, Poseidon.toField(zero))
+        val out = Poseidon.hash2(highBitsSet, zero)
+        assertEquals(32, out.size)
+        val biOut = BigInteger(1, out)
+        assertTrue("output within field", biOut >= BigInteger.ZERO)
+        assertTrue("output within field", biOut < Poseidon.FIELD)
     }
 
     @Test
-    fun `toField masks high bits and reduces mod FIELD`() {
-        // All-0xFF input. Naively this is 2^256 - 1, which exceeds the
-        // 254-bit BN128 field. The toField helper masks the top two
-        // bits AND reduces mod FIELD so the output is in [0, FIELD).
-        val allOnes = ByteArray(32) { 0xFF.toByte() }
-        val reduced = Poseidon.toField(allOnes)
-        assertTrue(
-            "toField output must be non-negative",
-            reduced >= BigInteger.ZERO,
-        )
-        assertTrue(
-            "toField output must be < FIELD",
-            reduced < Poseidon.FIELD,
-        )
-        // Specifically: ((2^254 - 1) mod FIELD) — sanity-check that
-        // the function actually reduces, not just masks.
-        val expectedMaskedThenReduced = BigInteger.ONE.shiftLeft(254)
-            .subtract(BigInteger.ONE)
-            .mod(Poseidon.FIELD)
-        assertEquals(expectedMaskedThenReduced, reduced)
+    fun `hash1(ByteArray) matches hash1Bi after toField`() {
+        val x = ByteArray(32); x[31] = 0x05   // = 5
+        val bytesResult = Poseidon.hash1(x)
+        val biResult = Poseidon.hash1Bi(BigInteger.valueOf(5))
+        assertEquals(biResult, BigInteger(1, bytesResult))
     }
 
     @Test
-    fun `toField preserves a small value`() {
-        // [0x00, ..., 0x00, 0x05] -> BigInteger(5).
-        val five = ByteArray(32)
-        five[31] = 5
-        assertEquals(BigInteger.valueOf(5), Poseidon.toField(five))
+    fun `hash2(ByteArray) is order-sensitive`() {
+        val a = ByteArray(32); a[31] = 0x07
+        val b = ByteArray(32); b[31] = 0x0B
+        val ab = Poseidon.hash2(a, b).toList()
+        val ba = Poseidon.hash2(b, a).toList()
+        assertNotEquals("hash2 byte-array form is order-sensitive", ab, ba)
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun `toField rejects wrong-length input`() {
-        Poseidon.toField(ByteArray(16))
-    }
-
-    @Test(expected = NotImplementedError::class)
-    fun `hash2 throws NotImplementedError until the real impl lands`() {
-        // This test pins the stub contract — if someone adds a fake
-        // implementation (e.g. SHA-256-as-Poseidon) without landing
-        // ADR-0019's real choice, this fires.
-        Poseidon.hash2(ByteArray(32), ByteArray(32))
+    @Test
+    fun `hash2(ByteArray) is deterministic`() {
+        val a = ByteArray(32) { 0x42 }
+        val b = ByteArray(32) { 0x63 }
+        val a1 = Poseidon.hash2(a, b).toList()
+        val a2 = Poseidon.hash2(a, b).toList()
+        assertEquals(a1, a2)
     }
 }

@@ -1,9 +1,10 @@
 # ADR-0019: Poseidon-BN128 implementation choice (mobile)
 
-- **Status:** Deferred (decision pending implementation commit)
+- **Status:** Accepted — pure-Kotlin port (Option B) implemented
 - **Date:** 2026-05-28
 - **Owner:** Pulkit Pareek
 - **Supersedes:** —
+- **Implementation:** `mobile/biometric/src/main/kotlin/dev/zeroauth/biometric/Poseidon.kt` + `PoseidonConstants.kt` (vendored from `android/app/src/main/java/dev/zeroauth/android/sec/Poseidon.kt`, which has been pinned against `poseidon-lite@^0.3.0` since W3).
 
 ## Context
 
