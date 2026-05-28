@@ -2,6 +2,23 @@
 
 You are working in the **zeroauth.dev API + dashboard + docs** repo. Read this file at the start of every session. It overrides anything in inline comments or sub-folder READMEs that contradicts it.
 
+## Current phase
+
+ZeroAuth is on the BFSI v1 production plan. The plan is the source of truth for everything below — phase boundaries, commit ordering, agent responsibilities. Read these documents alongside this file:
+
+- [docs/plan/bfsi-v1/00-README.md](docs/plan/bfsi-v1/00-README.md) — phase map + the 10 standing constraints.
+- [docs/plan/bfsi-v1/01-pain-points.md](docs/plan/bfsi-v1/01-pain-points.md) — the 10 BFSI pain points ZeroAuth solves; every commit must trace to one.
+- [docs/plan/bfsi-v1/02-bank-demo.md](docs/plan/bfsi-v1/02-bank-demo.md) — the Anchor Bank demo (5 scenes + optional Scene 6); Phase 1 exit gate is "all 6 scenes run end-to-end without operator intervention beyond the script."
+- [docs/plan/bfsi-v1/03-team.md](docs/plan/bfsi-v1/03-team.md) — 50-person roster + KPIs.
+- [docs/plan/bfsi-v1/04-commits.md](docs/plan/bfsi-v1/04-commits.md) — commit-by-commit plan (C-001..C-194 for Phase 0 + Phase 1). Commit subjects in the codebase reference these IDs.
+- [docs/plan/bfsi-v1/05-agents.md](docs/plan/bfsi-v1/05-agents.md) — per-agent week-by-week tickets.
+- [docs/plan/bfsi-v1/agents/](docs/plan/bfsi-v1/agents/) — per-agent daily Mon-Fri tickets for weeks 1-4 with 5-field DoD per ticket.
+- [docs/plan/bfsi-v1/06-ways-of-working.md](docs/plan/bfsi-v1/06-ways-of-working.md) — branch policy, commit gates, sub-agent rules, cadence.
+
+Phase 0 (weeks 1-2) closes the 21 Phase 0 audit findings (tracked in [docs/security/audit-findings.md](docs/security/audit-findings.md)). Phase 1 (weeks 3-12) builds the Anchor Bank demo end-to-end.
+
+Phase 0 closed P0 findings as of LAST_UPDATED: C-1 (demo bypass), C-3 (access_token query fallback), C-4 (audit hash chain), C-6 (direct INSERT guard), C-8 (biometric-payload guard). C-2 (fake mobile prover) tracks to Phase 1 Sprint 3.
+
 ## What this repo is
 
 ZeroAuth is the zero-knowledge identity verification layer for India's regulated industries (BFSI, healthcare, government). This repo holds:
@@ -179,5 +196,5 @@ More skills (`release-cut`, `test-from-threat-model`, `migration-writer`, `adr-w
 
 ---
 
-LAST_UPDATED: 2026-05-12
+LAST_UPDATED: 2026-05-28
 OWNER: Pulkit Pareek (engineering) + Amit Dua (product)
