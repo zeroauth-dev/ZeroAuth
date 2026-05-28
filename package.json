@@ -28,7 +28,8 @@
     "docker:down": "docker compose --profile dev --profile prod down",
     "build:all": "npm run build && cd dashboard && npm run build && cd .. && npm run docs:site:build",
     "wallet:rotate": "tsx scripts/transfer-ownership.ts",
-    "setup": "npm install && cd dashboard && npm install && cd ../website && npm install && cd .. && npm run build:all"
+    "setup": "npm install && cd dashboard && npm install && cd ../website && npm install && cd .. && npm run build:all",
+    "prepare": "husky"
   },
   "dependencies": {
     "circomlibjs": "^0.1.7",
@@ -69,6 +70,7 @@
     "circomlib": "^2.0.5",
     "eslint": "^9.39.4",
     "hardhat": "^2.28.6",
+    "husky": "^9.1.7",
     "jest": "^29.7.0",
     "supertest": "^6.3.3",
     "ts-jest": "^29.4.9",

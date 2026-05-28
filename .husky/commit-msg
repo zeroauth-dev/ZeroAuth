@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Commit-msg hook — enforces the commit-subject rules per
+# docs/plan/bfsi-v1/06-ways-of-working.md § Commit format.
+#
+# Blocks the commit if:
+#   - the body contains a `Co-Authored-By: Claude` trailer
+#   - the subject is > 72 characters
+#   - the subject starts with a Conventional-Commits prefix
+#     (feat:, fix:, chore:, refactor:, docs:, test:, etc.)
+#   - the subject starts with `[bracket]`, `WIP`, or `checkpoint`
+
+set -euo pipefail
+
+MSG_FILE="$1"
+
+# Subject is the first non-blank line.
+SUBJECT=$(awk 'NF{print; exit}' "$MSG_FILE")
+
+# 1. Co-Authored-By: Claude check — only matches an actual trailer line,
+#    i.e. a line beginning with the literal trailer key. ADR docs +
+#    rejection messages that quote the string in prose are fine.
+if grep -iE "^Co-Authored-By:[[:space:]]+Claude" "$MSG_FILE" >/dev/null 2>&1; then
+  echo "✗ Commit message has a 'Co-Authored-By: Claude' trailer line." >&2
+  echo "  This is explicitly forbidden by the user's standing constraints." >&2
+  echo "  Remove the trailer and re-commit." >&2
+  exit 1
+fi
+
+# 2. Subject length
+SUBJECT_LEN=${#SUBJECT}
+if (( SUBJECT_LEN > 72 )); then
+  echo "✗ Commit subject is ${SUBJECT_LEN} chars (> 72)." >&2
+  echo "  Subject: $SUBJECT" >&2
+  echo "  Tighten it; use the body for detail." >&2
+  exit 1
+fi
+
+# 3. No Conventional-Commits prefix
+if echo "$SUBJECT" | grep -E '^(feat|fix|chore|refactor|docs|test|build|ci|perf|style|revert):' >/dev/null; then
+  echo "✗ Commit subject starts with a Conventional-Commits prefix." >&2
+  echo "  Subject: $SUBJECT" >&2
+  echo "  Plain English, imperative mood — see 06-ways-of-working.md." >&2
+  exit 1
+fi
+
+# 4. No bracket / WIP / checkpoint prefix
+if echo "$SUBJECT" | grep -E '^(\[|WIP|wip|Checkpoint|checkpoint)' >/dev/null; then
+  echo "✗ Commit subject starts with a bracket prefix, WIP, or 'checkpoint'." >&2
+  echo "  Subject: $SUBJECT" >&2
+  exit 1
+fi
+
+# 5. No emoji at the start (only the first few chars to avoid catching
+#    inline emoji elsewhere in the subject — though we ban it there too).
+if echo "$SUBJECT" | head -c 4 | LC_ALL=C grep -P '[\x{1F300}-\x{1FAFF}]|[\x{2600}-\x{27BF}]' >/dev/null 2>&1; then
+  echo "✗ Commit subject starts with an emoji." >&2
+  echo "  Subject: $SUBJECT" >&2
+  exit 1
+fi
+
+exit 0
