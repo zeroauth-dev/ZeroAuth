@@ -26,6 +26,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+// The CLAUDE.md non-goal canonical list — these are the EXACT key
+// names that must never be read by an Express handler.
 const FORBIDDEN_KEYS = [
   'image',
   'template',
@@ -36,6 +38,30 @@ const FORBIDDEN_KEYS = [
   'raw_finger',
   'biometric_data',
   'photo',
+];
+
+// Defence-in-depth: compound key names that smuggle biometric data
+// in a different shape (e.g. `biometricTemplate` slipped past the
+// `template` check because it doesn't match `\btemplate\b`).
+// Caught by a separate scan because these read as suffix variants
+// rather than standalone words. Any code site reading
+// `req.body.biometricTemplate` is a P0 audit finding.
+const FORBIDDEN_COMPOUND_KEYS = [
+  'biometricTemplate',
+  'biometric_template',
+  'biometricImage',
+  'biometric_image',
+  'faceTemplate',
+  'face_template',
+  'fingerprintTemplate',
+  'fingerprint_template',
+  'irisTemplate',
+  'iris_template',
+  'voiceprint',
+  'face_image',
+  'fingerprint_image',
+  'rawBiometric',
+  'raw_biometric',
 ];
 
 function stripComments(src: string): string {
@@ -96,6 +122,65 @@ describe('biometric payload-key rejection (source-level guard)', () => {
       expect(offenders).toEqual([]);
     });
   }
+
+  // Compound-key scan. Same patterns as the basic FORBIDDEN_KEYS loop
+  // but for the suffix-variant keys (biometricTemplate, face_template,
+  // etc.) — these are the keys a future contributor might use to
+  // smuggle a biometric payload past the basic word-boundary check.
+  for (const key of FORBIDDEN_COMPOUND_KEYS) {
+    it(`no Express handler reads req.body.${key} (compound-key defence)`, () => {
+      const patterns = [
+        new RegExp(`req\\.body\\.${key}\\b`),
+        new RegExp(`req\\.body\\[['"]${key}['"]\\]`),
+        new RegExp(`req\\.query\\.${key}\\b`),
+        new RegExp(`req\\.query\\[['"]${key}['"]\\]`),
+        new RegExp(`req\\.params\\.${key}\\b`),
+        new RegExp(`req\\.params\\[['"]${key}['"]\\]`),
+      ];
+      const offenders: { file: string; pattern: string }[] = [];
+      for (const file of sourceFiles) {
+        const src = stripComments(fs.readFileSync(file, 'utf8'));
+        for (const pattern of patterns) {
+          if (pattern.test(src)) {
+            offenders.push({ file, pattern: pattern.source });
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+  }
+
+  // Tracked exception: src/routes/v1/zkp.ts uses `biometricTemplate`
+  // as the request-body field for the deprecated POST /v1/auth/zkp/register
+  // endpoint. The endpoint is retained for the W3 demo client +
+  // existing fixtures but is deprecated for new integrations; the
+  // production face-first path lives at POST /v1/identity/register
+  // and accepts (did, commitment) only. This exception is documented
+  // and gated by a single test that asserts the legacy endpoint
+  // never reads biometricTemplate ANYWHERE outside zkp.ts.
+  it('biometricTemplate compound-key is contained to the deprecated zkp.ts register endpoint', () => {
+    const re = new RegExp(`\\bbiometricTemplate\\b`);
+    const offenders: string[] = [];
+    for (const file of sourceFiles) {
+      const src = stripComments(fs.readFileSync(file, 'utf8'));
+      if (re.test(src)) offenders.push(file);
+    }
+    // Allow zkp.ts (the deprecated endpoint) + types/index.ts (the
+    // RegistrationRequest type declaration). Anywhere else means a
+    // new code site was added — fix it before merge.
+    // Allowed legacy code sites — the deprecated POST
+    // /v1/auth/zkp/register endpoint and its plumbing through
+    // identity.ts. New code MUST NOT add itself here without an ADR.
+    const allowed = new Set([
+      path.resolve(__dirname, '../src/routes/v1/zkp.ts'),
+      path.resolve(__dirname, '../src/routes/zkp.ts'),
+      path.resolve(__dirname, '../src/routes/v1/identity.ts'),
+      path.resolve(__dirname, '../src/services/identity.ts'),
+      path.resolve(__dirname, '../src/types/index.ts'),
+    ]);
+    const unexpected = offenders.filter(f => !allowed.has(f));
+    expect(unexpected).toEqual([]);
+  });
 
   it('CLAUDE.md continues to declare these keys forbidden', () => {
     const claudeMd = fs.readFileSync(path.resolve(__dirname, '../CLAUDE.md'), 'utf8');
