@@ -1,12 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Empty manifest for the :prover library module.
+    Manifest for the :prover library module.
+
+    ProverService runs in its own process (`:prover`) so a compromised
+    WebView renderer cannot reach the main process's Keystore-backed
+    key material — see ADR 0010 (android-webview-snarkjs-bundling).
+    The host application (the :app module) inherits this declaration
+    via manifest merging at build time.
 
     AGP 8.x derives the namespace from `android { namespace = ... }` in
-    build.gradle.kts so this manifest does not need to declare a
-    `package` attribute. It is present because (a) some downstream
-    tooling still expects a manifest to exist and (b) the manifest
-    becomes non-trivial once C-104 wires the rapidsnark JNI bridge —
-    the native library declaration goes here.
+    build.gradle.kts so this manifest does not need a `package`
+    attribute.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service
+            android:name="dev.zeroauth.prover.ProverService"
+            android:process=":prover"
+            android:exported="false" />
+    </application>
+</manifest>
