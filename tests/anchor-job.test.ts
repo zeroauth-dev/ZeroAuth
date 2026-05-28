@@ -87,9 +87,17 @@ beforeEach(() => {
 // Classify a query into a route by what the SQL looks like — we cannot
 // rely on identity, only on shape. The route ID lets each test wire up
 // the right responder per call.
+//
+// ADR 0017 — the tenant-listing query now also selects `security_policy`
+// so the loop can resolve providers + skip `audit_anchor_provider=none`
+// tenants without a second round-trip. The classifier accepts either
+// shape so this file's older fixtures keep working alongside the new
+// security_policy responders.
 function classify(text: string): 'list_tenants' | 'terminal' | 'has_anchor' | 'unknown' {
   const normalised = text.replace(/\s+/g, ' ').trim();
-  if (/SELECT id FROM tenants WHERE status = 'active'/i.test(normalised)) {
+  if (
+    /SELECT id(, security_policy)? FROM tenants WHERE status = 'active'/i.test(normalised)
+  ) {
     return 'list_tenants';
   }
   if (/FROM audit_events/i.test(normalised) && /event_hash/i.test(normalised)) {
@@ -99,6 +107,14 @@ function classify(text: string): 'list_tenants' | 'terminal' | 'has_anchor' | 'u
     return 'has_anchor';
   }
   return 'unknown';
+}
+
+// Convenience: a tenant row that opts INTO chain anchoring (so the
+// existing tests, which were written before the ADR 0017 gate, still
+// reach the staging code path). Adding the explicit opt-in here means
+// the gate is exercised on its happy path in every staging assertion.
+function chainAnchorTenant(id: string) {
+  return { id, security_policy: { audit_anchor_provider: 'base-sepolia' } };
 }
 
 describe('computeDailyAnchorPayload', () => {
@@ -149,12 +165,19 @@ describe('computeDailyAnchorPayload', () => {
 
 describe('runDailyAnchorJob', () => {
   it('scans every active tenant', async () => {
-    // Three tenants, none have rows that day. We expect 6 terminal queries
-    // (3 tenants × 2 envs) and 0 anchor checks (the empty windows short-circuit).
+    // Three tenants opted into base-sepolia anchoring, none have rows
+    // that day. We expect 6 terminal queries (3 tenants × 2 envs) and
+    // 0 anchor checks (the empty windows short-circuit).
     queryResponder = call => {
       switch (classify(call.text)) {
         case 'list_tenants':
-          return { rows: [{ id: TENANT_A }, { id: TENANT_B }, { id: TENANT_C }] };
+          return {
+            rows: [
+              chainAnchorTenant(TENANT_A),
+              chainAnchorTenant(TENANT_B),
+              chainAnchorTenant(TENANT_C),
+            ],
+          };
         case 'terminal':
           return { rows: [] };
         case 'has_anchor':
@@ -179,7 +202,7 @@ describe('runDailyAnchorJob', () => {
     queryResponder = call => {
       switch (classify(call.text)) {
         case 'list_tenants':
-          return { rows: [{ id: TENANT_A }, { id: TENANT_B }] };
+          return { rows: [chainAnchorTenant(TENANT_A), chainAnchorTenant(TENANT_B)] };
         case 'terminal':
           // tenant A has rows on live, everyone else is empty
           if (call.values[0] === TENANT_A && call.values[1] === 'live') {
@@ -204,7 +227,7 @@ describe('runDailyAnchorJob', () => {
     queryResponder = call => {
       switch (classify(call.text)) {
         case 'list_tenants':
-          return { rows: [{ id: TENANT_A }] };
+          return { rows: [chainAnchorTenant(TENANT_A)] };
         case 'terminal':
           return { rows: [{ event_hash: SAMPLE_HASH_1, total: '7' }] };
         case 'has_anchor':
@@ -227,7 +250,7 @@ describe('runDailyAnchorJob', () => {
     queryResponder = call => {
       switch (classify(call.text)) {
         case 'list_tenants':
-          return { rows: [{ id: TENANT_A }] };
+          return { rows: [chainAnchorTenant(TENANT_A)] };
         case 'terminal':
           if (call.values[1] === 'live') {
             return { rows: [{ event_hash: SAMPLE_HASH_2, total: '99' }] };
@@ -269,7 +292,7 @@ describe('runDailyAnchorJob', () => {
     queryResponder = call => {
       switch (classify(call.text)) {
         case 'list_tenants':
-          return { rows: [{ id: TENANT_A }, { id: TENANT_B }] };
+          return { rows: [chainAnchorTenant(TENANT_A), chainAnchorTenant(TENANT_B)] };
         case 'terminal':
           if (call.values[0] === TENANT_A) {
             // Both envs present

@@ -35,6 +35,8 @@ import { ethers } from 'ethers';
 import { getPool } from './db';
 import { appendAuditEvent } from './audit';
 import { logger } from './logger';
+import { resolveProviders } from './tenant-providers';
+import type { TenantSecurityPolicy } from '../types';
 
 /**
  * ABI fragment for the contract method we stage. Mirrors the signature
@@ -271,15 +273,35 @@ export async function runDailyAnchorJob(dayUtc?: Date): Promise<AnchorJobReport>
   const day = floorToUtcMidnight(dayUtc ?? yesterdayUtc());
   const pool = getPool();
 
-  const tenantsResult = await pool.query<{ id: string }>(
-    `SELECT id FROM tenants WHERE status = 'active'`,
+  // ADR 0017 — load security_policy alongside the id so we can skip
+  // tenants whose resolved `audit_anchor_provider` is `none`. Default
+  // tenants (the platform default) never reach the on-chain anchor
+  // path; the hash chain itself is the tamper-evidence primitive and
+  // does not need a chain anchor to be auditable.
+  const tenantsResult = await pool.query<{
+    id: string;
+    security_policy: TenantSecurityPolicy | null;
+  }>(
+    `SELECT id, security_policy FROM tenants WHERE status = 'active'`,
   );
   const tenants = tenantsResult.rows;
 
   const staged: AnchorTx[] = [];
   const errors: AnchorJobReport['errors'] = [];
 
-  for (const { id: tenantId } of tenants) {
+  for (const { id: tenantId, security_policy } of tenants) {
+    const providers = resolveProviders(security_policy);
+    if (providers.auditAnchorProvider === 'none') {
+      // Default + signed-transcript-only tenants are NOT anchored on
+      // chain. (Signed-transcript shows up here only when its provider
+      // value lands; today the resolver maps it to a non-'none' value
+      // and a future commit teaches this loop how to stage the signed
+      // transcript instead of a chain tx.) For 'none', skip outright.
+      logger.debug('anchor-job: skipping tenant with audit_anchor_provider=none', {
+        tenantId,
+      });
+      continue;
+    }
     for (const environment of ENVIRONMENTS) {
       try {
         const payload = await computeDailyAnchorPayload(tenantId, environment, day);

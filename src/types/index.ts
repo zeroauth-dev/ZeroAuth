@@ -208,6 +208,14 @@ export interface Tenant {
   rate_limit: number;
   monthly_quota: number;
   metadata: Record<string, unknown>;
+  /**
+   * Per-tenant policy knobs stored as JSONB. Defaults to `{}` at the DB
+   * level (see `src/services/db.ts`). The interpretation lives in
+   * `TenantSecurityPolicy`; consumers go through
+   * `src/services/tenant-providers.ts` for the ADR 0017 provider triple
+   * and `src/services/play-integrity.ts` for the verdict gate.
+   */
+  security_policy: TenantSecurityPolicy | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -446,6 +454,27 @@ export interface TenantSecurityPolicy {
    * `scripts/seed-demo-tenants.ts` (C-108) for the Anchor Bank tenant.
    */
   allowed_origins?: string[];
+
+  // ─── ADR 0017: blockchain-agnostic provider slots ──────────────────
+  // Three independent provider slots, each opt-in per tenant. Defaults
+  // are off-chain across the board so a fresh tenant runs with zero
+  // blockchain dependency. The resolver lives in
+  // `src/services/tenant-providers.ts`; the gates live in
+  // `src/services/identity.ts`, `src/services/anchor-job.ts`, and
+  // `src/services/zkp.ts`. See `adr/0017-blockchain-agnostic-posture.md`.
+
+  /** Where DIDs are registered. Default: 'off-chain' (DB only, no chain). */
+  did_provider?: 'off-chain' | 'base-sepolia' | 'base-mainnet' | 'custom-chain';
+  /** Whether to additionally re-verify proofs on-chain. Default: 'off-chain' (snarkjs only). */
+  verifier_provider?: 'off-chain' | 'on-chain';
+  /** Where the audit chain is anchored. Default: 'none' (hash chain only). */
+  audit_anchor_provider?: 'none' | 'signed-transcript' | 'base-sepolia' | 'base-mainnet' | 'witness-cosign';
+  /** Custom chain provider config (when did_provider='custom-chain'). */
+  base_rpc_url?: string;
+  did_registry_address?: string;
+  groth16_verifier_address?: string;
+  audit_anchor_contract_address?: string;
+  audit_anchor_signing_key_id?: string;
 }
 
 // ─── Lead Types ─────────────────────────────────────────────────────

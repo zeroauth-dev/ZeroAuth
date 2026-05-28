@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'crypto';
 import { logger } from './logger';
 import { registerIdentityOnChain } from './blockchain';
+import { resolveProviders } from './tenant-providers';
+import type { TenantSecurityPolicy } from '../types';
 
 // Poseidon hash from circomlibjs — loaded async at startup
 let poseidon: any = null;
@@ -21,8 +23,19 @@ export async function initPoseidon(): Promise<void> {
  * generate a decentralized identification number (DID) to be
  * associated with the user; and store a mapping value of the
  * biometric identity (ID) to the DID."
+ *
+ * ADR 0017 — the on-chain registration in Step 7 is gated by the
+ * tenant's resolved `did_provider`. A tenant with the default
+ * `did_provider='off-chain'` (or no `security_policy` at all) gets a
+ * pure DB enrollment with `txHash=''` and `blockNumber=0` — the
+ * platform never touches Base Sepolia for that tenant. Tenants that
+ * opt into `base-sepolia` / `base-mainnet` / `custom-chain` still
+ * call `registerIdentityOnChain` as before.
  */
-export async function registerIdentity(biometricTemplate: Buffer): Promise<{
+export async function registerIdentity(
+  biometricTemplate: Buffer,
+  securityPolicy?: TenantSecurityPolicy | null,
+): Promise<{
   did: string;
   biometricIDHash: string;
   commitment: string;
@@ -63,21 +76,32 @@ export async function registerIdentity(biometricTemplate: Buffer): Promise<{
   const didField = BigInt('0x' + didBuffer.subarray(0, 31).toString('hex'));
   const didHash = F.toObject(poseidon([didField]));
 
-  // Step 7: Store biometricID→DID mapping on-chain (Patent Claim 3)
-  // biometricIDHex is the bytes32 key for the contract
+  // Step 7: Store biometricID→DID mapping on-chain — but only when
+  // the tenant's resolved `did_provider` opts in (ADR 0017). The
+  // platform default is `off-chain`, in which case the DB row is the
+  // system-of-record and the chain is never touched. Tenants that
+  // pick a chain provider still flow through the existing call path
+  // and tolerate RPC outages as a soft-degrade (dev-friendly fallback
+  // that pre-dates this ADR).
+  const { didProvider } = resolveProviders(securityPolicy);
   let txHash = '';
   let blockNumber = 0;
-  try {
-    const result = await registerIdentityOnChain(biometricIDHex, did);
-    txHash = result.txHash;
-    blockNumber = result.blockNumber;
-    logger.info('Identity: On-chain registration complete', { txHash, blockNumber });
-  } catch (err) {
-    logger.warn('Identity: On-chain registration failed (blockchain may be unavailable)', {
-      error: (err as Error).message,
-    });
-    // Allow registration to succeed even if blockchain is down in dev
-    txHash = 'offline-' + randomBytes(16).toString('hex');
+  if (didProvider === 'off-chain') {
+    logger.info('Identity: Off-chain DID — skipping on-chain registration', { didProvider });
+  } else {
+    try {
+      const result = await registerIdentityOnChain(biometricIDHex, did);
+      txHash = result.txHash;
+      blockNumber = result.blockNumber;
+      logger.info('Identity: On-chain registration complete', { txHash, blockNumber, didProvider });
+    } catch (err) {
+      logger.warn('Identity: On-chain registration failed (blockchain may be unavailable)', {
+        error: (err as Error).message,
+        didProvider,
+      });
+      // Allow registration to succeed even if blockchain is down in dev
+      txHash = 'offline-' + randomBytes(16).toString('hex');
+    }
   }
 
   // CRITICAL: Biometric template is NOT stored. Only return secrets to client.
