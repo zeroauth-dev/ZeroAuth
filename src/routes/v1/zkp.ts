@@ -32,6 +32,19 @@ router.post('/register',
   // making credential-stuffing futile.
   pgRateLimit({ route: 'identity:register', windowMs: 60_000, max: 30, keyBy: 'apiKey' }),
   async (req: Request, res: Response) => {
+    // ADR 0017 deprecation. This legacy endpoint accepts a base64
+    // biometricTemplate over the wire — which violates the no-raw-
+    // biometric non-goal from CLAUDE.md (it computes the commitment
+    // server-side from the template). The face-first POST
+    // /v1/identity/register endpoint is the production path going
+    // forward; this endpoint is retained for the W3 demo client +
+    // existing test fixtures only. The Deprecation header advertises
+    // the sunset to any integrator who is wiring this up afresh.
+    // RFC 8594 (Sunset header) + IETF deprecation-header draft.
+    res.setHeader('Deprecation', 'true');
+    res.setHeader('Sunset', 'Wed, 31 Dec 2026 23:59:59 GMT');
+    res.setHeader('Link', '</v1/identity/register>; rel="successor-version"');
+
     try {
       const { tenant } = getTenantContext(req);
       const { biometricTemplate } = req.body as RegistrationRequest;
@@ -106,6 +119,16 @@ router.post('/verify',
   // quotas in tenant-auth.ts still apply on top of this.
   pgRateLimit({ route: 'zkp:verify', windowMs: 60_000, max: 30, keyBy: 'apiKey' }),
   async (req: Request, res: Response) => {
+    // ADR 0017 deprecation note. This endpoint verifies a Groth16
+    // proof without doing the (DID → stored commitment) lookup that
+    // the face-first /v1/identity/verify endpoint does — so a valid
+    // proof for the wrong DID would slip through here. Production
+    // integrations should use /v1/identity/verify; the legacy path
+    // remains for W3 demo client + existing test fixtures.
+    res.setHeader('Deprecation', 'true');
+    res.setHeader('Sunset', 'Wed, 31 Dec 2026 23:59:59 GMT');
+    res.setHeader('Link', '</v1/identity/verify>; rel="successor-version"');
+
     try {
       const { tenant } = getTenantContext(req);
       const { proof, publicSignals, nonce, timestamp } = req.body as ZKPVerificationRequest;
