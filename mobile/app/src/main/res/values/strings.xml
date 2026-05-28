@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Pramaan banking app — string resources.
+        The app name shown on the launcher and in the recents grid is
+        intentionally minimal at scaffold time (C-101). The Anchor-Bank
+        co-branded label lands with the C-143 enrollment flow when the
+        tenant configuration enters the tree.
+    -->
+    <string name="app_name">ZeroAuth Banking</string>
+</resources>
