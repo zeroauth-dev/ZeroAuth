@@ -3,7 +3,7 @@
 The procedural runbook for the 6-contributor Phase 2 ceremony that
 produces the proving / verification keys for `identity_proof` v1.2.
 Operational complement to
-[ADR 0015 — Circuit version pinning + upgrade procedure](../../adr/0015-circuit-version-pinning.md):
+[ADR 0015 — Circuit version pinning + upgrade procedure](https://github.com/zeroauth-dev/ZeroAuth/blob/main/adr/0015-circuit-version-pinning.md):
 ADR 0015 says *why* a new ceremony is required when the circuit changes;
 this document says *how* to run one.
 
