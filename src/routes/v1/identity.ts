@@ -5,11 +5,15 @@ import { sessionStore } from '../../services/session-store';
 import { issueTokens, verifyToken } from '../../services/jwt';
 import { logger } from '../../services/logger';
 import { recordAuditEvent } from '../../services/platform';
+import { v4 as uuidv4 } from 'uuid';
 import {
   registerFaceFirstIdentity,
+  findUserByDid,
   IdentityValidationError,
   IdentityAlreadyExistsError,
 } from '../../services/identity';
+import { verifyBiometricProof } from '../../services/zkp';
+import type { UserSession, ZKPVerificationRequest } from '../../types';
 
 const router = Router();
 
@@ -99,6 +103,202 @@ router.post('/register',
       }
       logger.error('v1: face-first identity register error', { error: (err as Error).message });
       res.status(500).json({ error: 'register_failed' });
+    }
+  },
+);
+
+/**
+ * POST /v1/identity/verify
+ *
+ * Face-first identity verification (ADR 0017). The client produces a
+ * Groth16 proof on-device using `mobile/prover` with the actual
+ * commitment + secret + nonce as inputs. The server:
+ *
+ *   1. Looks up the enrolled user by DID.
+ *   2. Asserts publicSignals[0] (the commitment) matches the stored
+ *      commitment for that DID — same-DID-different-face attacks are
+ *      blocked here, not downstream.
+ *   3. Calls verifyBiometricProof() which runs snarkjs.groth16.verify
+ *      against the platform's pinned verification key (ADR 0015).
+ *   4. On success: creates a session, issues access + refresh tokens,
+ *      writes an audit row.
+ *   5. On failure: writes an audit row with the failure reason and
+ *      returns 401.
+ *
+ * Request:
+ *   Authorization: Bearer za_live_xxx
+ *   { did, proof, publicSignals, nonce, timestamp }
+ *
+ * Responses:
+ *   200 { accessToken, refreshToken, tokenType, expiresIn, sessionId, did }
+ *   400 invalid_did / invalid_request
+ *   401 verification_failed / commitment_mismatch / did_unknown
+ *
+ * Requires scope: zkp:verify
+ */
+router.post('/verify',
+  authenticateTenantApiKey(['zkp:verify']),
+  pgRateLimit({ route: 'identity:verify', windowMs: 60_000, max: 30, keyBy: 'apiKey' }),
+  async (req: Request, res: Response) => {
+    const { tenant, apiKey } = getTenantContext(req);
+    const environment = (apiKey.environment === 'live' || apiKey.environment === 'test')
+      ? apiKey.environment
+      : 'live';
+
+    const { did, proof, publicSignals, nonce, timestamp } = req.body ?? {};
+
+    // Format guards.
+    if (typeof did !== 'string' || did.length === 0) {
+      res.status(400).json({ error: 'invalid_did', message: 'did is required (string).' });
+      return;
+    }
+    if (!Array.isArray(publicSignals) || publicSignals.length === 0) {
+      res.status(400).json({
+        error: 'invalid_request',
+        message: 'publicSignals is required (array).',
+      });
+      return;
+    }
+    if (!proof || typeof proof !== 'object') {
+      res.status(400).json({
+        error: 'invalid_request',
+        message: 'proof is required (object).',
+      });
+      return;
+    }
+
+    try {
+      // Step 1: look up user.
+      const user = await findUserByDid(tenant.id, environment, did);
+      if (!user) {
+        // Uniform error for enumeration defence — same response for
+        // unknown DID and commitment-mismatch (Step 2 below).
+        await recordAuditEvent(tenant.id, {
+          environment,
+          actorType: 'api_key',
+          actorId: apiKey.id,
+          action: 'identity.verify',
+          entityType: 'tenant_user',
+          entityId: null,
+          status: 'failure',
+          summary: 'verify: did unknown',
+          metadata: { did, reason: 'did_unknown' },
+        });
+        res.status(401).json({ error: 'verification_failed', message: 'Identity verification failed.' });
+        return;
+      }
+
+      // Step 2: assert commitment match. publicSignals[0] is the
+      // commitment per the circuit's wire layout.
+      const presentedCommitment = String(publicSignals[0] ?? '').toLowerCase();
+      const storedCommitment = (user.commitment ?? '').toLowerCase();
+      if (storedCommitment.length === 0 || presentedCommitment !== storedCommitment) {
+        await recordAuditEvent(tenant.id, {
+          environment,
+          actorType: 'api_key',
+          actorId: apiKey.id,
+          action: 'identity.verify',
+          entityType: 'tenant_user',
+          entityId: user.id,
+          status: 'failure',
+          summary: 'verify: commitment mismatch',
+          metadata: { did, reason: 'commitment_mismatch' },
+        });
+        // Uniform error — see Step 1.
+        res.status(401).json({ error: 'verification_failed', message: 'Identity verification failed.' });
+        return;
+      }
+
+      // Step 3: snarkjs.groth16.verify.
+      const verifyResult = await verifyBiometricProof({
+        proof,
+        publicSignals,
+        nonce,
+        timestamp,
+      } as ZKPVerificationRequest);
+
+      if (!verifyResult.verified) {
+        await recordAuditEvent(tenant.id, {
+          environment,
+          actorType: 'api_key',
+          actorId: apiKey.id,
+          action: 'identity.verify',
+          entityType: 'tenant_user',
+          entityId: user.id,
+          status: 'failure',
+          summary: 'verify: groth16 proof invalid',
+          metadata: { did, reason: 'proof_invalid' },
+        });
+        res.status(401).json({ error: 'verification_failed', message: 'Identity verification failed.' });
+        return;
+      }
+
+      // Step 4: mint session + tokens.
+      const sessionId = verifyResult.sessionId;
+      const userId = user.id;
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 3600000);
+      const session: UserSession = {
+        sessionId,
+        userId,
+        provider: 'zkp',
+        verified: true,
+        createdAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+      };
+      sessionStore.create(session);
+      const tokens = issueTokens({
+        sub: userId,
+        provider: 'zkp',
+        verified: true,
+        sessionId,
+        did,
+      });
+
+      // Step 5: audit row.
+      await recordAuditEvent(tenant.id, {
+        environment,
+        actorType: 'api_key',
+        actorId: apiKey.id,
+        action: 'identity.verify',
+        entityType: 'tenant_user',
+        entityId: userId,
+        status: 'success',
+        summary: `Face-first verification succeeded for DID ${did}`,
+        metadata: { did, sessionId },
+      });
+
+      logger.info('v1: face-first identity verified', {
+        tenantId: tenant.id,
+        environment,
+        did,
+        userId,
+        sessionId,
+      });
+
+      res.json({
+        ...tokens,
+        verified: true,
+        sessionId,
+        did,
+        provider: 'zkp',
+      });
+    } catch (err) {
+      logger.error('v1: face-first identity verify error', { error: (err as Error).message });
+      // Audit even the unexpected-error path so a verifier outage is
+      // attributable.
+      await recordAuditEvent(tenant.id, {
+        environment,
+        actorType: 'api_key',
+        actorId: apiKey.id,
+        action: 'identity.verify',
+        entityType: 'tenant_user',
+        entityId: null,
+        status: 'failure',
+        summary: 'verify: internal error',
+        metadata: { did, reason: 'internal_error', error: (err as Error).message },
+      }).catch(() => undefined);
+      res.status(500).json({ error: 'verify_failed' });
     }
   },
 );
