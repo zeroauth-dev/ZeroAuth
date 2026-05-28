@@ -66,7 +66,7 @@ describe('ADR 0015 boot-time vkey hash check', () => {
         }
         process.env.ZKP_VERIFIER_MODE = 'inline';
         process.env.ZKP_VKEY_PATH = vkeyPath;
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { initZKP } = require('../src/services/zkp') as {
           initZKP: () => Promise<void>;
         };
