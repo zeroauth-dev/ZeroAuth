@@ -247,17 +247,43 @@ export interface UsageSummary {
   }>;
 }
 
+export type DeviceType =
+  | 'mobile_android'
+  | 'mobile_ios'
+  | 'kiosk'
+  | 'iot_bridge'
+  | 'desktop';
+
+export type DeviceEnrollmentState = 'pending' | 'enrolled' | 'revoked';
+
 export interface Device {
   id: string;
   external_id: string;
   name: string;
+  device_type: DeviceType;
   location_id: string | null;
   status: 'active' | 'inactive' | 'retired';
+  enrollment_state: DeviceEnrollmentState;
+  enrollment_code_expires_at: string | null;
+  enrolled_at: string | null;
+  fingerprint_hash: string | null;
+  attestation_kind: string | null;
   battery_level: number | null;
   metadata: Record<string, unknown>;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Response envelope from POST /api/console/devices and the regenerate endpoint. */
+export interface DeviceEnrollmentInvite {
+  environment: Environment;
+  device: Device;
+  enrollment: {
+    code: string;
+    expires_at: string;
+    deeplink: string;
+  };
 }
 
 export interface User {
@@ -646,17 +672,43 @@ export const api = {
   revokeKey: (keyId: string) =>
     request<{ message: string; keyId: string }>(`/api/console/keys/${encodeURIComponent(keyId)}`, { method: 'DELETE' }),
 
-  // Devices — console proxies live at /api/console/devices
-  listDevices: (params: { environment: Environment; status?: Device['status']; limit?: number }) =>
-    request<{ environment: Environment; devices: Device[] }>('/api/console/devices', { query: params }),
+  // Devices — console proxies live at /api/console/devices.
+  // ADR 0022 device enrollment: POST creates a *pending* row and
+  // returns a one-time enrollment code; the device then claims the
+  // slot by hitting /v1/devices/enroll with the code + a hardware
+  // fingerprint. POST /devices/:id/regenerate-code re-issues; DELETE
+  // soft-revokes (sets enrollment_state='revoked', status='retired').
+  listDevices: (params: {
+    environment: Environment;
+    status?: Device['status'];
+    enrollmentState?: DeviceEnrollmentState;
+    limit?: number;
+  }) =>
+    request<{ environment: Environment; devices: Device[] }>('/api/console/devices', {
+      query: {
+        environment: params.environment,
+        status: params.status,
+        enrollment_state: params.enrollmentState,
+        limit: params.limit,
+      },
+    }),
   createDevice: (input: {
     environment: Environment;
     name: string;
-    externalId?: string;
+    deviceType: DeviceType;
     locationId?: string;
-    batteryLevel?: number;
     metadata?: Record<string, unknown>;
-  }) => request<{ environment: Environment; device: Device }>('/api/console/devices', { method: 'POST', body: input }),
+  }) => request<DeviceEnrollmentInvite>('/api/console/devices', { method: 'POST', body: input }),
+  regenerateDeviceCode: (deviceId: string, input: { environment: Environment }) =>
+    request<DeviceEnrollmentInvite>(
+      `/api/console/devices/${encodeURIComponent(deviceId)}/regenerate-code`,
+      { method: 'POST', body: input },
+    ),
+  revokeDevice: (deviceId: string, input: { environment: Environment }) =>
+    request<{ environment: Environment; device: Device }>(
+      `/api/console/devices/${encodeURIComponent(deviceId)}`,
+      { method: 'DELETE', body: input },
+    ),
   updateDevice: (
     deviceId: string,
     input: {
