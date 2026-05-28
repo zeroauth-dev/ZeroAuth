@@ -22,7 +22,7 @@ jest.mock('../src/services/audit', () => ({
   }),
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const auditMod = require('../src/services/audit') as {
   verifyAuditChain: jest.Mock;
   appendAuditEvent: jest.Mock;

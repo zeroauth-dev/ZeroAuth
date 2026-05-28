@@ -131,8 +131,9 @@ describe('console auth', () => {
     it('source carries no req.query.access_token reference in console.ts', () => {
       // Future-proof: anyone re-introducing the query fallback will
       // also have to delete this guard.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const fs = require('fs') as typeof import('fs');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const path = require('path') as typeof import('path');
       const src = fs.readFileSync(
         path.resolve(__dirname, '../src/routes/console.ts'),
@@ -145,7 +146,7 @@ describe('console auth', () => {
 
   describe('login sets HttpOnly cookie', () => {
     it('issues Set-Cookie zeroauth_console_jwt with HttpOnly + SameSite=Strict on successful login', async () => {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const tenants = require('../src/services/tenants') as {
         authenticateTenant: jest.Mock;
       };

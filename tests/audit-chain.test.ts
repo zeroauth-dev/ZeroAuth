@@ -173,8 +173,9 @@ describe('chain integrity (in-memory simulation)', () => {
 
 describe('every audit-writing surface uses appendAuditEvent (grep guard)', () => {
   it('no INSERT INTO audit_events lives outside src/services/audit.ts', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const fs = require('fs') as typeof import('fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const path = require('path') as typeof import('path');
     const root = path.resolve(__dirname, '../src');
 

@@ -729,8 +729,9 @@ describe('POST /submit — did:zeroauth:demo:* is rejected (P0 audit finding C-1
     // Grep guard: a future contributor reintroducing the demo bypass
     // by copy-pasting the prior block fails this test. Treats the
     // service source as documentation of intent.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const fs = require('fs') as typeof import('fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const path = require('path') as typeof import('path');
     const src = fs.readFileSync(
       path.resolve(__dirname, '../src/services/proof-pairing.ts'),
