@@ -276,14 +276,52 @@ export interface TenantContext {
 
 // ─── Central API Domain Types ────────────────────────────────────────
 
+/**
+ * Device-type taxonomy. Drives the dashboard's icon picker and the
+ * default attestation expectation on enrollment (mobile_android →
+ * Play Integrity verdict, mobile_ios → App Attest, kiosk/iot_bridge
+ * → none, desktop → WebAuthn (Phase 2)).
+ */
+export type DeviceType =
+  | 'mobile_android'
+  | 'mobile_ios'
+  | 'kiosk'
+  | 'iot_bridge'
+  | 'desktop';
+
+/**
+ * Enrollment-state machine for a device row. Orthogonal to `status`
+ * (operational state). See ADR 0022.
+ *
+ *   pending  — slot created by admin, awaiting device claim with code
+ *   enrolled — device claimed; hardware fingerprint bound
+ *   revoked  — credentials voided; row retained for audit
+ */
+export type DeviceEnrollmentState = 'pending' | 'enrolled' | 'revoked';
+
 export interface Device {
   id: string;
   tenant_id: string;
   environment: ApiKeyEnvironment;
   external_id: string;
   name: string;
+  device_type: DeviceType;
   location_id: string | null;
   status: DeviceStatus;
+  enrollment_state: DeviceEnrollmentState;
+  // The plaintext enrollment code is never persisted; only its SHA-256.
+  // Cleared (set NULL) once the code is consumed or the slot is cancelled.
+  enrollment_code_hash: string | null;
+  enrollment_code_expires_at: Date | null;
+  enrolled_at: Date | null;
+  // SHA-256 of the device-supplied fingerprint (e.g. android_id +
+  // installation_id, kiosk serial + MAC). Recorded at enrollment, used
+  // to detect device-row re-use on subsequent claims.
+  fingerprint_hash: string | null;
+  // Free-form tag: 'play-integrity' | 'app-attest' | 'webauthn' | 'none'.
+  // The actual attestation blob lives in audit_events.metadata, never
+  // on the device row.
+  attestation_kind: string | null;
   battery_level: number | null;
   metadata: Record<string, unknown>;
   last_seen_at: Date | null;

@@ -129,6 +129,7 @@ describe('tenant isolation — source-level cross-tenant guard', () => {
     { file: 'zkp',           method: 'post', routerPath: '/verify',    reason: 'Public proof verification — body carries DID + commitment' },
     { file: 'zkp',           method: 'get',  routerPath: '/nonce',     reason: 'Anonymous challenge issuance' },
     { file: 'zkp',           method: 'get',  routerPath: '/circuit-info', reason: 'Public capability advertisement' },
+    { file: 'devices',       method: 'post', routerPath: '/enroll',    reason: 'ADR 0022 device enrollment — code is the bearer credential' },
   ];
 
   function isException(route: { file: string; method: string; routerPath: string }): boolean {

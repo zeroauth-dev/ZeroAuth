@@ -50,6 +50,9 @@ jest.mock('../src/services/tenants', () => ({
 const listDevices = jest.fn();
 const createDevice = jest.fn();
 const updateDevice = jest.fn();
+const issueEnrollmentCode = jest.fn();
+const regenerateEnrollmentCode = jest.fn();
+const revokeDevice = jest.fn();
 const listTenantUsers = jest.fn();
 const createTenantUser = jest.fn();
 const updateTenantUser = jest.fn();
@@ -60,6 +63,14 @@ jest.mock('../src/services/platform', () => ({
   listDevices: (...args: any[]) => listDevices(...args),
   createDevice: (...args: any[]) => createDevice(...args),
   updateDevice: (...args: any[]) => updateDevice(...args),
+  issueEnrollmentCode: (...args: any[]) => issueEnrollmentCode(...args),
+  regenerateEnrollmentCode: (...args: any[]) => regenerateEnrollmentCode(...args),
+  revokeDevice: (...args: any[]) => revokeDevice(...args),
+  // The runtime type guard from src/services/platform — used by the
+  // POST /api/console/devices request validator. We pass it through
+  // to the real implementation rather than mocking, so the test
+  // mirrors production validation behaviour.
+  isValidDeviceType: jest.requireActual('../src/services/platform').isValidDeviceType,
   listTenantUsers: (...args: any[]) => listTenantUsers(...args),
   createTenantUser: (...args: any[]) => createTenantUser(...args),
   updateTenantUser: (...args: any[]) => updateTenantUser(...args),
@@ -141,43 +152,55 @@ describe('console proxy: /api/console/devices', () => {
     expect(res.status).toBe(200);
     expect(res.body.environment).toBe('test');
     expect(res.body.devices).toHaveLength(1);
-    expect(listDevices).toHaveBeenCalledWith('tenant-A', 'test', { status: 'active', limit: 10 });
+    expect(listDevices).toHaveBeenCalledWith(
+      'tenant-A',
+      'test',
+      expect.objectContaining({ status: 'active', limit: 10 }),
+    );
   });
 
   it('IGNORES a tenant_id in the request body and uses the JWT tenant (A-10)', async () => {
-    createDevice.mockResolvedValueOnce({ id: 'dev-1', name: 'X', environment: 'live' });
+    issueEnrollmentCode.mockResolvedValueOnce({
+      device: { id: 'dev-1', name: 'X', environment: 'live', enrollment_state: 'pending' },
+      enrollmentCode: 'ZA-TEST-CODE',
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    });
     const tokenA = issueToken('tenant-A');
     const res = await request(app)
       .post('/api/console/devices')
       .set('Authorization', `Bearer ${tokenA}`)
-      .send({ name: 'X', tenantId: 'tenant-B', tenant_id: 'tenant-B' });
+      .send({ name: 'X', deviceType: 'kiosk', tenantId: 'tenant-B', tenant_id: 'tenant-B' });
     expect(res.status).toBe(201);
-    expect(createDevice).toHaveBeenCalledWith(
+    expect(issueEnrollmentCode).toHaveBeenCalledWith(
       'tenant-A',
       'live',
-      expect.objectContaining({ name: 'X' }),
+      expect.objectContaining({ name: 'X', deviceType: 'kiosk' }),
       expect.objectContaining({ type: 'console', id: 'tenant-A', email: 'dev@example.com' }),
     );
+    // Plaintext code surfaces to the operator exactly once.
+    expect(res.body.enrollment.code).toBe('ZA-TEST-CODE');
+    expect(res.body.enrollment.deeplink).toContain('ZA-TEST-CODE');
   });
 
-  it('validates batteryLevel range', async () => {
+  it('rejects POST without a valid device_type (ADR 0022)', async () => {
     const res = await request(app)
       .post('/api/console/devices')
       .set('Authorization', `Bearer ${issueToken('tenant-A')}`)
-      .send({ name: 'X', batteryLevel: 150 });
+      .send({ name: 'X' });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('invalid_request');
-    expect(createDevice).not.toHaveBeenCalled();
+    expect(res.body.message).toMatch(/device_type/);
+    expect(issueEnrollmentCode).not.toHaveBeenCalled();
   });
 
-  it('returns 409 device_external_id_taken when the platform service raises a duplicate-key error', async () => {
-    createDevice.mockImplementationOnce(() => { throw new Error('duplicate key value violates unique constraint "devices_tenant_id_external_id_key"'); });
+  it('rejects POST with an unknown device_type', async () => {
     const res = await request(app)
       .post('/api/console/devices')
       .set('Authorization', `Bearer ${issueToken('tenant-A')}`)
-      .send({ name: 'X', externalId: 'dup' });
-    expect(res.status).toBe(409);
-    expect(res.body.error).toBe('device_external_id_taken');
+      .send({ name: 'X', deviceType: 'toaster' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_request');
+    expect(issueEnrollmentCode).not.toHaveBeenCalled();
   });
 
   it('returns 404 device_not_found when PATCH targets an unknown id', async () => {

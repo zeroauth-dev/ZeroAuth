@@ -13,8 +13,11 @@ import {
   getConsoleOverview,
   listAuditEvents,
   recordAuditEvent,
-  createDevice,
+  isValidDeviceType,
+  issueEnrollmentCode,
   listDevices,
+  regenerateEnrollmentCode,
+  revokeDevice,
   updateDevice,
   createTenantUser,
   listTenantUsers,
@@ -27,6 +30,7 @@ import {
   ApiScope,
   AttendanceEventType,
   AttendanceResult,
+  DeviceEnrollmentState,
   DeviceStatus,
   TenantUserStatus,
   VerificationMethod,
@@ -706,6 +710,7 @@ function parseLimit(raw: unknown): number | undefined {
 }
 
 const DEVICE_STATUSES: DeviceStatus[] = ['active', 'inactive', 'retired'];
+const DEVICE_ENROLLMENT_STATES: DeviceEnrollmentState[] = ['pending', 'enrolled', 'revoked'];
 const USER_STATUSES: TenantUserStatus[] = ['active', 'inactive'];
 const VERIFICATION_METHODS: VerificationMethod[] = ['zkp', 'fingerprint', 'face', 'depth', 'saml', 'oidc', 'manual'];
 const VERIFICATION_RESULTS: VerificationResult[] = ['pass', 'fail', 'challenge'];
@@ -719,6 +724,7 @@ router.get('/devices', requireConsoleAuth, async (req: Request, res: Response) =
     const { tenantId } = (req as any).console;
     const environment = parseEnv(req.query.environment);
     const status = req.query.status as DeviceStatus | undefined;
+    const enrollmentState = req.query.enrollment_state as DeviceEnrollmentState | undefined;
     let limit: number | undefined;
     try { limit = parseLimit(req.query.limit); }
     catch (e) { res.status(400).json({ error: 'invalid_limit', message: (e as Error).message }); return; }
@@ -726,39 +732,126 @@ router.get('/devices', requireConsoleAuth, async (req: Request, res: Response) =
       res.status(400).json({ error: 'invalid_status_filter' });
       return;
     }
-    const devices = await listDevices(tenantId, environment, { status, limit });
+    if (enrollmentState && !DEVICE_ENROLLMENT_STATES.includes(enrollmentState)) {
+      res.status(400).json({ error: 'invalid_enrollment_state_filter' });
+      return;
+    }
+    const devices = await listDevices(tenantId, environment, { status, enrollmentState, limit });
     res.json({ environment, devices });
   } catch {
     res.status(500).json({ error: 'device_list_failed' });
   }
 });
 
+/**
+ * ADR 0022: console-initiated device registration.
+ *
+ * Returns the new pending device row PLUS the one-time enrollment
+ * code (plaintext, returned exactly once — never persisted). The
+ * device claims the slot by POSTing the code + a hardware fingerprint
+ * to /v1/devices/enroll. If the operator loses the code they call
+ * POST /api/console/devices/:id/regenerate-code to mint a new one.
+ *
+ * `device_type` is required because each type has a different
+ * enrollment client (Android app vs kiosk firmware vs USB R307 bridge)
+ * and a different default attestation expectation.
+ */
 router.post('/devices', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
   try {
     const { tenantId, email } = (req as any).console;
     const environment = parseEnv(req.body.environment ?? req.query.environment);
-    const { name, externalId, locationId, batteryLevel, metadata } = req.body;
+    const { name, deviceType, locationId, metadata } = req.body ?? {};
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
       res.status(400).json({ error: 'invalid_request', message: 'name is required' });
       return;
     }
-    if (batteryLevel !== undefined && (!Number.isInteger(batteryLevel) || batteryLevel < 0 || batteryLevel > 100)) {
-      res.status(400).json({ error: 'invalid_request', message: 'batteryLevel must be an integer between 0 and 100' });
+    if (!isValidDeviceType(deviceType)) {
+      res.status(400).json({
+        error: 'invalid_request',
+        message: "device_type is required; one of: 'mobile_android' | 'mobile_ios' | 'kiosk' | 'iot_bridge' | 'desktop'",
+      });
       return;
     }
-    const device = await createDevice(
+    const invite = await issueEnrollmentCode(
       tenantId,
       environment,
-      { name, externalId, locationId, batteryLevel, metadata },
+      { name, deviceType, locationId, metadata },
       { type: 'console', id: tenantId, email },
     );
-    res.status(201).json({ environment, device });
+    res.status(201).json({
+      environment,
+      device: invite.device,
+      enrollment: {
+        code: invite.enrollmentCode,
+        expires_at: invite.expiresAt.toISOString(),
+        // Convenience: the deep-link the dashboard renders as a QR for
+        // the device-side scanner. Format documented in
+        // docs/api_contract.md.
+        deeplink: `zeroauth://enroll?code=${encodeURIComponent(invite.enrollmentCode)}`,
+      },
+    });
   } catch (err) {
-    if ((err as Error).message.includes('duplicate key')) {
-      res.status(409).json({ error: 'device_external_id_taken' });
+    res.status(500).json({ error: 'device_create_failed', message: (err as Error).message });
+  }
+});
+
+/**
+ * Re-issue the enrollment code on a pending slot. The previous code's
+ * hash is overwritten — there is no way to recover it, and the
+ * previous code will fail at /v1/devices/enroll from this point on.
+ */
+router.post('/devices/:deviceId/regenerate-code', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tenantId, email } = (req as any).console;
+    const environment = parseEnv(req.body.environment ?? req.query.environment);
+    const { deviceId } = req.params;
+    const invite = await regenerateEnrollmentCode(
+      tenantId,
+      environment,
+      deviceId,
+      { type: 'console', id: tenantId, email },
+    );
+    if (!invite) {
+      res.status(404).json({ error: 'device_not_found_or_not_pending' });
       return;
     }
-    res.status(500).json({ error: 'device_create_failed', message: (err as Error).message });
+    res.status(200).json({
+      environment,
+      device: invite.device,
+      enrollment: {
+        code: invite.enrollmentCode,
+        expires_at: invite.expiresAt.toISOString(),
+        deeplink: `zeroauth://enroll?code=${encodeURIComponent(invite.enrollmentCode)}`,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'device_regenerate_failed', message: (err as Error).message });
+  }
+});
+
+/**
+ * Admin-initiated device revocation. Sets enrollment_state='revoked'
+ * and status='retired'. The row is retained for audit-log
+ * traceability — DELETE is intentionally a soft delete.
+ */
+router.delete('/devices/:deviceId', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tenantId, email } = (req as any).console;
+    const environment = parseEnv(req.body.environment ?? req.query.environment);
+    const { deviceId } = req.params;
+    const device = await revokeDevice(
+      tenantId,
+      environment,
+      deviceId,
+      { type: 'console', id: tenantId, email },
+    );
+    if (!device) {
+      res.status(404).json({ error: 'device_not_found' });
+      return;
+    }
+    res.status(200).json({ environment, device });
+  } catch (err) {
+    res.status(500).json({ error: 'device_revoke_failed', message: (err as Error).message });
   }
 });
 

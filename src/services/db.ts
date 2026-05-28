@@ -154,6 +154,35 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_devices_tenant ON devices(tenant_id, environment, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(tenant_id, environment, status);
 
+  -- ADR 0022 production device enrollment.
+  -- A device slot is created in 'pending' state by the dashboard. The
+  -- server issues a one-time human-typeable enrollment code (12 chars
+  -- in Crockford-base32; stored only as SHA-256, expires in 15 min)
+  -- that the device exchanges for 'enrolled' state via
+  -- POST /v1/devices/enroll, binding a hardware fingerprint hash and
+  -- optional attestation kind (Play Integrity / App Attest / none).
+  -- enrollment_state is orthogonal to status (operational state):
+  -- a slot can be 'pending' while its row exists, transition to
+  -- 'enrolled' on claim, and finally 'revoked' if credentials are
+  -- voided. Existing rows backfill enrollment_state='enrolled' and
+  -- device_type='kiosk' so the demo seed stays valid.
+  ALTER TABLE devices ADD COLUMN IF NOT EXISTS device_type VARCHAR(32) NOT NULL DEFAULT 'kiosk'
+    CHECK (device_type IN ('mobile_android', 'mobile_ios', 'kiosk', 'iot_bridge', 'desktop'));
+  ALTER TABLE devices ADD COLUMN IF NOT EXISTS enrollment_state VARCHAR(20) NOT NULL DEFAULT 'enrolled'
+    CHECK (enrollment_state IN ('pending', 'enrolled', 'revoked'));
+  ALTER TABLE devices ADD COLUMN IF NOT EXISTS enrollment_code_hash TEXT;
+  ALTER TABLE devices ADD COLUMN IF NOT EXISTS enrollment_code_expires_at TIMESTAMPTZ;
+  ALTER TABLE devices ADD COLUMN IF NOT EXISTS enrolled_at TIMESTAMPTZ;
+  ALTER TABLE devices ADD COLUMN IF NOT EXISTS fingerprint_hash TEXT;
+  ALTER TABLE devices ADD COLUMN IF NOT EXISTS attestation_kind VARCHAR(32);
+
+  -- Hot path: device-side enroll looks up by SHA-256 of the code.
+  -- Partial index because most rows have no pending code.
+  CREATE INDEX IF NOT EXISTS idx_devices_enrollment_code_hash
+    ON devices(enrollment_code_hash) WHERE enrollment_code_hash IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_devices_enrollment_state
+    ON devices(tenant_id, environment, enrollment_state);
+
   -- ─── Tenant Users / Enrollments ──────────────────────────
   CREATE TABLE IF NOT EXISTS tenant_users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
