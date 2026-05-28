@@ -385,7 +385,7 @@ The bank can confirm directly from the CI history that the test suite has been g
 
 ### Source-of-truth references
 
-- Live reference implementation: <https://zeroauth.dev>.
+- Live reference implementation: [zeroauth.dev](https://zeroauth.dev).
 - API contract: `docs/api_contract.md`.
 - Threat model: `docs/threat_model.md`.
 - Error codes: `docs/error_codes.md`.

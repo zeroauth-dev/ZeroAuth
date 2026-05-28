@@ -26,6 +26,20 @@ const config: Config = {
     locales: ['en'],
   },
 
+  // `format: 'detect'` parses `.mdx` as MDX and `.md` as CommonMark. The
+  // entire `docs/` tree is hand-written CommonMark prose — only
+  // `docs/reference/playground.mdx` uses real JSX (the <ApiPlayground />
+  // component). Without this knob, Docusaurus' default MDX parser
+  // chokes on perfectly valid CommonMark constructs across the docs
+  // tree: autolinks like `<https://example.com>`, comparison literals
+  // like `(<= 6)`, and angle-bracket placeholders like `<name>` in
+  // tables and command examples. Switching to detection mode is the
+  // single-knob fix that keeps the one real MDX file working while
+  // letting the rest of the corpus be plain markdown.
+  markdown: {
+    format: 'detect',
+  },
+
   presets: [
     [
       'classic',
