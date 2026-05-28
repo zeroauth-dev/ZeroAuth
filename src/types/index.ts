@@ -434,6 +434,18 @@ export interface TenantSecurityPolicy {
    * JSON across all rows (planned for Phase 1).
    */
   pairing_demo_mode?: boolean;
+  /**
+   * Per-tenant browser origin allowlist for tenant-scoped surfaces
+   * (kiosk + admin dashboard for the Anchor Bank demo, partner-branded
+   * surfaces later). Carried inside `security_policy` rather than its
+   * own column so we can extend the JSONB without another migration.
+   * The platform CORS allowlist still lives at `config.cors.origins`;
+   * this field is consulted only when a route already knows which
+   * tenant the request belongs to (e.g. a kiosk paired to a tenant).
+   * Empty / undefined ⇒ no per-tenant restriction. Seeded by
+   * `scripts/seed-demo-tenants.ts` (C-108) for the Anchor Bank tenant.
+   */
+  allowed_origins?: string[];
 }
 
 // ─── Lead Types ─────────────────────────────────────────────────────
