@@ -53,9 +53,22 @@
 
 | Method | Path | Scope | Description |
 |---|---|---|---|
-| `POST` | `/v1/devices` | `devices:write` | Register a new device. Body: `{ name, externalId?, locationId?, batteryLevel?, metadata? }`. |
+| `POST` | `/v1/devices` | `devices:write` | **Trusted-service path.** Register a device row in `enrolled` state directly (used by SDK-led bulk provisioning + demo seed scripts). Body: `{ name, deviceType?, externalId?, locationId?, batteryLevel?, metadata? }`. `deviceType` ∈ `mobile_android,mobile_ios,kiosk,iot_bridge,desktop` (defaults to `kiosk`). |
+| `POST` | `/v1/devices/enroll` | **none (code is bearer)** | **Device-side claim.** Exchange a one-time enrollment code (minted by the dashboard) for an enrolled row. Body: `{ enrollment_code, fingerprint, attestation_kind? }`. Rate-limited to 10 req/min per IP. Returns `{ device }` on success, uniform 404 `enrollment_failed` on any failure mode (unknown code, expired code, invalid fingerprint, fingerprint collision). See [ADR 0022](../adr/0022-device-enrollment-flow.md). |
 | `GET` | `/v1/devices` | `devices:read` | List devices for the tenant's environment. `?status=active\|inactive\|retired`, `?limit=…` (≤100). |
 | `PATCH` | `/v1/devices/:deviceId` | `devices:write` | Mutate name, locationId, batteryLevel, status, metadata, lastSeenAt. |
+
+Console-side device endpoints (require console JWT):
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/console/devices` | List devices. `?status=…`, `?enrollment_state=pending\|enrolled\|revoked`, `?limit=…`. |
+| `POST` | `/api/console/devices` | **Mint a pending slot + enrollment code.** Body: `{ name, deviceType, locationId?, metadata? }`. Returns `{ device, enrollment: { code, expires_at, deeplink } }`. The plaintext code is returned exactly once — server keeps only its SHA-256. Code TTL is 15 minutes. |
+| `POST` | `/api/console/devices/:id/regenerate-code` | Re-issue the enrollment code (voids the prior one). Same response shape as POST. |
+| `PATCH` | `/api/console/devices/:id` | Mutate name/location/status/etc. |
+| `DELETE` | `/api/console/devices/:id` | Soft-revoke (sets `enrollment_state='revoked'`, `status='retired'`). Row retained for audit. |
+
+Enrollment code format: `ZA-XXXX-XXXX`, 8 entropy chars from a 27-symbol Crockford-base32 alphabet (no `0`, `1`, `I`, `L`, `O`, `U`). The deeplink format is `zeroauth://enroll?code=<code>` and is stable across V1.
 
 ### Central API — users (`/v1/users`)
 

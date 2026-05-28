@@ -3,6 +3,14 @@ import { getPool } from './db';
 import { logger } from './logger';
 import { appendAuditEvent } from './audit';
 import {
+  ENROLLMENT_CODE_TTL_MS,
+  fingerprintHash,
+  generateEnrollmentCode,
+  isValidFingerprint,
+  normaliseEnrollmentCode,
+  sha256Hex,
+} from './device-enrollment';
+import {
   ApiKeyEnvironment,
   AttendanceEvent,
   AttendanceEventType,
@@ -11,13 +19,28 @@ import {
   AuditEvent,
   AuditStatus,
   Device,
+  DeviceEnrollmentState,
   DeviceStatus,
+  DeviceType,
   TenantUser,
   TenantUserStatus,
   VerificationMethod,
   VerificationRecord,
   VerificationResult,
 } from '../types';
+
+/** Allowed device-type strings; the runtime guard counterpart of the DB CHECK constraint. */
+const DEVICE_TYPES: readonly DeviceType[] = [
+  'mobile_android',
+  'mobile_ios',
+  'kiosk',
+  'iot_bridge',
+  'desktop',
+] as const;
+
+export function isValidDeviceType(v: unknown): v is DeviceType {
+  return typeof v === 'string' && (DEVICE_TYPES as readonly string[]).includes(v);
+}
 
 function sanitizeMetadata(metadata: unknown): Record<string, unknown> {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
@@ -154,12 +177,25 @@ export async function recordAuditEvent(
   });
 }
 
+/**
+ * Direct device-row create for the trusted-service path (POST /v1/devices
+ * called with a tenant API key). The row lands `enrollment_state='enrolled'`
+ * with no enrollment code involved — the caller has already provisioned
+ * the hardware identity and is asserting it on the device's behalf. This
+ * is the path used by SDK-led bulk provisioning and the demo seed scripts.
+ *
+ * The dashboard's "Register device" flow does NOT use this entry point;
+ * it calls `issueEnrollmentCode` (below) to mint a pending slot + code
+ * that the device then exchanges for an enrolled row via
+ * `claimDeviceWithCode` on /v1/devices/enroll.
+ */
 export async function createDevice(
   tenantId: string,
   environment: ApiKeyEnvironment,
   input: {
     externalId?: string;
     name: string;
+    deviceType?: DeviceType;
     locationId?: string;
     batteryLevel?: number;
     metadata?: Record<string, unknown>;
@@ -168,14 +204,17 @@ export async function createDevice(
 ): Promise<Device> {
   const pool = getPool();
   const result = await pool.query(
-    `INSERT INTO devices (tenant_id, environment, external_id, name, location_id, battery_level, metadata, last_seen_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    `INSERT INTO devices
+      (tenant_id, environment, external_id, name, device_type, enrollment_state,
+       location_id, battery_level, metadata, last_seen_at, enrolled_at)
+     VALUES ($1, $2, $3, $4, $5, 'enrolled', $6, $7, $8, NOW(), NOW())
      RETURNING *`,
     [
       tenantId,
       environment,
       defaultExternalId('device', input.externalId),
       input.name.trim(),
+      input.deviceType ?? 'kiosk',
       input.locationId?.trim() || null,
       input.batteryLevel ?? null,
       sanitizeMetadata(input.metadata),
@@ -192,7 +231,321 @@ export async function createDevice(
     entityId: device.id,
     status: 'success',
     summary: `Registered device ${device.external_id}`,
-    metadata: { locationId: device.location_id, name: device.name, ...actorMetadata(actor) },
+    metadata: {
+      locationId: device.location_id,
+      name: device.name,
+      deviceType: device.device_type,
+      via: 'trusted-service',
+      ...actorMetadata(actor),
+    },
+  }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
+
+  return device;
+}
+
+/**
+ * Result envelope for the dashboard's "Register device" call. The
+ * plaintext `enrollmentCode` is the ONLY chance the operator gets to
+ * see the code — we hash and discard the plaintext after this insert.
+ * If the operator loses it, they call `regenerateEnrollmentCode`
+ * (which writes a new audit row and a new hash) — never recovers the
+ * old code, which never existed in clear after this function returned.
+ */
+export interface DeviceEnrollmentInvite {
+  device: Device;
+  enrollmentCode: string;
+  expiresAt: Date;
+}
+
+/**
+ * Console-initiated enrollment slot. Creates a row in `pending` state,
+ * generates a fresh enrollment code, persists its SHA-256 + 15-min
+ * TTL, and returns the plaintext code to the caller exactly once.
+ *
+ * The `external_id` is a placeholder `pending_<uuid>` until the
+ * device claims the slot — at which point `claimDeviceWithCode`
+ * overwrites it with `dev_<sha256_prefix>` so audit-log searches by
+ * device identity stay meaningful.
+ */
+export async function issueEnrollmentCode(
+  tenantId: string,
+  environment: ApiKeyEnvironment,
+  input: {
+    name: string;
+    deviceType: DeviceType;
+    locationId?: string;
+    metadata?: Record<string, unknown>;
+  },
+  actor?: AuditActor,
+): Promise<DeviceEnrollmentInvite> {
+  if (!isValidDeviceType(input.deviceType)) {
+    throw new Error(`invalid device_type: ${input.deviceType}`);
+  }
+  const code = generateEnrollmentCode();
+  const codeHash = sha256Hex(code);
+  const expiresAt = new Date(Date.now() + ENROLLMENT_CODE_TTL_MS);
+
+  const pool = getPool();
+  const result = await pool.query(
+    `INSERT INTO devices
+      (tenant_id, environment, external_id, name, device_type, enrollment_state,
+       enrollment_code_hash, enrollment_code_expires_at,
+       location_id, metadata)
+     VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9)
+     RETURNING *`,
+    [
+      tenantId,
+      environment,
+      defaultExternalId('pending', undefined),
+      input.name.trim(),
+      input.deviceType,
+      codeHash,
+      expiresAt,
+      input.locationId?.trim() || null,
+      sanitizeMetadata(input.metadata),
+    ],
+  );
+
+  const device = result.rows[0] as Device;
+  void recordAuditEvent(tenantId, {
+    environment,
+    actorType: actor?.type ?? 'console',
+    actorId: actor?.id ?? null,
+    action: 'device.enrollment_code_issued',
+    entityType: 'device',
+    entityId: device.id,
+    status: 'success',
+    summary: `Issued enrollment code for ${device.name}`,
+    metadata: {
+      deviceType: device.device_type,
+      locationId: device.location_id,
+      expiresAt: expiresAt.toISOString(),
+      // The code's HASH is on the row; we record only the expiry +
+      // device_type here so audit searches don't leak the secret.
+      ...actorMetadata(actor),
+    },
+  }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
+
+  return { device, enrollmentCode: code, expiresAt };
+}
+
+/**
+ * Re-issue an enrollment code on a pending row. Used when the operator
+ * loses the code or the 15-minute TTL elapses. The old hash is
+ * overwritten — there is no way to recover the old code, and the old
+ * code is no longer accepted by `claimDeviceWithCode`.
+ *
+ * Returns `null` if the row doesn't exist, isn't pending, or doesn't
+ * belong to this tenant/environment.
+ */
+export async function regenerateEnrollmentCode(
+  tenantId: string,
+  environment: ApiKeyEnvironment,
+  deviceId: string,
+  actor?: AuditActor,
+): Promise<DeviceEnrollmentInvite | null> {
+  const code = generateEnrollmentCode();
+  const codeHash = sha256Hex(code);
+  const expiresAt = new Date(Date.now() + ENROLLMENT_CODE_TTL_MS);
+
+  const pool = getPool();
+  const result = await pool.query(
+    `UPDATE devices
+     SET enrollment_code_hash = $4,
+         enrollment_code_expires_at = $5,
+         updated_at = NOW()
+     WHERE id = $1 AND tenant_id = $2 AND environment = $3
+       AND enrollment_state = 'pending'
+     RETURNING *`,
+    [deviceId, tenantId, environment, codeHash, expiresAt],
+  );
+
+  const device = result.rows[0] as Device | undefined;
+  if (!device) return null;
+
+  void recordAuditEvent(tenantId, {
+    environment,
+    actorType: actor?.type ?? 'console',
+    actorId: actor?.id ?? null,
+    action: 'device.enrollment_code_reissued',
+    entityType: 'device',
+    entityId: device.id,
+    status: 'success',
+    summary: `Re-issued enrollment code for ${device.name}`,
+    metadata: { expiresAt: expiresAt.toISOString(), ...actorMetadata(actor) },
+  }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
+
+  return { device, enrollmentCode: code, expiresAt };
+}
+
+export class EnrollmentClaimError extends Error {
+  constructor(public reason: 'invalid_fingerprint' | 'code_not_found_or_expired' | 'fingerprint_collision') {
+    super(reason);
+    this.name = 'EnrollmentClaimError';
+  }
+}
+
+/**
+ * Device-side claim. The device POSTs the plaintext code + a hardware
+ * fingerprint string to /v1/devices/enroll; this function:
+ *
+ *   1. Normalises the code (whitespace, hyphens, case).
+ *   2. SHA-256s it and looks up the pending row.
+ *   3. Checks TTL (`enrollment_code_expires_at > NOW()`).
+ *   4. Asserts the fingerprint doesn't collide with another active
+ *      device in the same tenant/environment (prevents a phone from
+ *      enrolling itself as two different rows).
+ *   5. Writes: `external_id = dev_<sha256_prefix>`, `fingerprint_hash`,
+ *      `attestation_kind`, `enrollment_state = 'enrolled'`,
+ *      `enrolled_at = NOW()`, clears the code hash.
+ *   6. Writes a `device.enrolled` audit row.
+ *
+ * Returns the updated row. Failure modes throw `EnrollmentClaimError`
+ * so the route handler can translate to a generic 404/409 without
+ * leaking which condition failed.
+ */
+export async function claimDeviceWithCode(input: {
+  enrollmentCode: string;
+  fingerprint: string;
+  attestationKind?: string;
+  ip?: string | null;
+  userAgent?: string | null;
+}): Promise<Device> {
+  if (!isValidFingerprint(input.fingerprint)) {
+    throw new EnrollmentClaimError('invalid_fingerprint');
+  }
+
+  const normalisedCode = normaliseEnrollmentCode(input.enrollmentCode);
+  const codeHash = sha256Hex(normalisedCode);
+  const fpHash = fingerprintHash(input.fingerprint);
+  const newExternalId = `dev_${fpHash.slice(0, 16)}`;
+
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Step 1: locate the pending row, lock it for update.
+    const found = await client.query(
+      `SELECT * FROM devices
+       WHERE enrollment_code_hash = $1
+         AND enrollment_state = 'pending'
+         AND enrollment_code_expires_at > NOW()
+       FOR UPDATE`,
+      [codeHash],
+    );
+    const pending = found.rows[0] as Device | undefined;
+    if (!pending) {
+      await client.query('ROLLBACK');
+      throw new EnrollmentClaimError('code_not_found_or_expired');
+    }
+
+    // Step 2: assert the fingerprint isn't already bound to another
+    // enrolled row in the same (tenant, environment). A repeat call
+    // from the same device on the same slot (same row) is fine; a
+    // different slot would land an FK-shaped surprise on
+    // tenant_users.primary_device_id, which is why we reject early.
+    const collision = await client.query(
+      `SELECT id FROM devices
+       WHERE tenant_id = $1
+         AND environment = $2
+         AND fingerprint_hash = $3
+         AND id <> $4`,
+      [pending.tenant_id, pending.environment, fpHash, pending.id],
+    );
+    if ((collision.rowCount ?? 0) > 0) {
+      await client.query('ROLLBACK');
+      throw new EnrollmentClaimError('fingerprint_collision');
+    }
+
+    // Step 3: commit the claim.
+    const updated = await client.query(
+      `UPDATE devices
+       SET external_id = $2,
+           fingerprint_hash = $3,
+           attestation_kind = $4,
+           enrollment_state = 'enrolled',
+           enrolled_at = NOW(),
+           enrollment_code_hash = NULL,
+           enrollment_code_expires_at = NULL,
+           last_seen_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [pending.id, newExternalId, fpHash, input.attestationKind ?? 'none'],
+    );
+
+    await client.query('COMMIT');
+    const device = updated.rows[0] as Device;
+
+    void recordAuditEvent(device.tenant_id, {
+      environment: device.environment,
+      actorType: 'device',
+      actorId: device.id,
+      action: 'device.enrolled',
+      entityType: 'device',
+      entityId: device.id,
+      status: 'success',
+      summary: `Device ${device.name} enrolled`,
+      metadata: {
+        deviceType: device.device_type,
+        attestationKind: device.attestation_kind,
+        // Fingerprint plaintext stays out of audit metadata; hash is on
+        // the row already. IP/UA are retained for forensics on hostile
+        // enrollment attempts.
+        enrollIp: input.ip ?? null,
+        userAgent: input.userAgent ?? null,
+      },
+    }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
+
+    return device;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* already rolled back */ }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Admin-initiated device retirement. Sets `enrollment_state='revoked'`
+ * and `status='retired'`. The row stays in the table so audit search
+ * by entity_id keeps working. A revoked device's fingerprint can be
+ * re-enrolled on a NEW pending slot (the collision check above
+ * scopes on `enrollment_state IN ('pending','enrolled')` via the
+ * `fingerprint_hash` lookup — see the test fixtures).
+ */
+export async function revokeDevice(
+  tenantId: string,
+  environment: ApiKeyEnvironment,
+  deviceId: string,
+  actor?: AuditActor,
+): Promise<Device | null> {
+  const pool = getPool();
+  const result = await pool.query(
+    `UPDATE devices
+     SET enrollment_state = 'revoked',
+         status = 'retired',
+         enrollment_code_hash = NULL,
+         enrollment_code_expires_at = NULL,
+         updated_at = NOW()
+     WHERE id = $1 AND tenant_id = $2 AND environment = $3
+     RETURNING *`,
+    [deviceId, tenantId, environment],
+  );
+  const device = result.rows[0] as Device | undefined;
+  if (!device) return null;
+
+  void recordAuditEvent(tenantId, {
+    environment,
+    actorType: actor?.type ?? 'console',
+    actorId: actor?.id ?? null,
+    action: 'device.revoked',
+    entityType: 'device',
+    entityId: device.id,
+    status: 'success',
+    summary: `Revoked device ${device.name}`,
+    metadata: actorMetadata(actor),
   }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
   return device;
@@ -201,7 +554,7 @@ export async function createDevice(
 export async function listDevices(
   tenantId: string,
   environment: ApiKeyEnvironment,
-  options: { status?: DeviceStatus; limit?: number } = {},
+  options: { status?: DeviceStatus; enrollmentState?: DeviceEnrollmentState; limit?: number } = {},
 ): Promise<Device[]> {
   const pool = getPool();
   const params: unknown[] = [tenantId, environment];
@@ -210,6 +563,10 @@ export async function listDevices(
   if (options.status) {
     params.push(options.status);
     query += ` AND status = $${params.length}`;
+  }
+  if (options.enrollmentState) {
+    params.push(options.enrollmentState);
+    query += ` AND enrollment_state = $${params.length}`;
   }
 
   params.push(sanitizeLimit(options.limit));
