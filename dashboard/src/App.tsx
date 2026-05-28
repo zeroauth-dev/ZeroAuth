@@ -22,6 +22,10 @@ import { NotFound } from './routes/NotFound';
 // host today; lazy-loading keeps it (and any future scanner deps) out
 // of the main bundle until the operator opens /demo/qr-proof-login.
 const QrProofLogin = lazy(() => import('./routes/demo/QrProofLogin'));
+// The three-QR end-user signup ceremony demo (ADR 0023). Lazy-loaded
+// because qrcode.react (~30kB after tree-shake) only matters when the
+// operator opens the demo. The bundle main path never imports it.
+const QrRegistration = lazy(() => import('./routes/demo/QrRegistration'));
 
 // Live verifications view (SSE-streamed, ADR 0017 face-first flow).
 // Lazy-loaded so the EventSource cost is paid only when the operator
@@ -122,6 +126,14 @@ export function App() {
                     element={
                       <RouteSuspense>
                         <QrProofLogin />
+                      </RouteSuspense>
+                    }
+                  />
+                  <Route
+                    path="/demo/registration"
+                    element={
+                      <RouteSuspense>
+                        <QrRegistration />
                       </RouteSuspense>
                     }
                   />

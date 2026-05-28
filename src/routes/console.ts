@@ -26,6 +26,11 @@ import {
   listAttendanceEvents,
 } from '../services/platform';
 import {
+  abandonRegistration,
+  getRegistrationSession,
+  startRegistration,
+} from '../services/registration';
+import {
   ApiKeyEnvironment,
   ApiScope,
   AttendanceEventType,
@@ -1281,5 +1286,88 @@ router.get('/proof-pairing/sessions/:id/stream', requireConsoleAuth, async (req:
     if (!res.writableEnded) res.end();
   }
 });
+
+// ─── Registration ceremony proxies (ADR 0023) ─────────────────────
+//
+// Console-facing surfaces over the /v1/registrations service. The
+// dashboard demo at /demo/registration uses these to drive the
+// three-QR flow without needing a tenant API key on the browser
+// side — auth is the console JWT, same pattern as the proof-pairing
+// proxies above.
+
+router.post('/registrations', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tenantId, email } = (req as any).console;
+    const environment = parseEnv(req.body?.environment ?? req.query.environment);
+    const profile = req.body?.profile ?? {};
+    const result = await startRegistration(
+      tenantId,
+      environment,
+      { profile },
+      { type: 'console', id: tenantId, email },
+    );
+    res.status(201).json({
+      environment,
+      session: redactRegistrationSession(result.session),
+      pair: {
+        code: result.pairCode,
+        expires_at: result.pairCodeExpiresAt.toISOString(),
+        deeplink: result.pairDeeplink,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'registration_start_failed', message: (err as Error).message });
+  }
+});
+
+router.get('/registrations/:id', requireConsoleAuth, async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = (req as any).console;
+    const environment = parseEnv(req.query.environment);
+    const session = await getRegistrationSession(tenantId, environment, req.params.id);
+    if (!session) {
+      res.status(404).json({ error: 'session_not_found' });
+      return;
+    }
+    res.status(200).json({ environment, session: redactRegistrationSession(session) });
+  } catch (err) {
+    res.status(500).json({ error: 'registration_poll_failed', message: (err as Error).message });
+  }
+});
+
+router.delete('/registrations/:id', requireConsoleAuth, consoleWriteLimiter, async (req: Request, res: Response) => {
+  try {
+    const { tenantId, email } = (req as any).console;
+    const environment = parseEnv(req.body?.environment ?? req.query.environment);
+    const session = await abandonRegistration(
+      tenantId,
+      environment,
+      req.params.id,
+      { type: 'console', id: tenantId, email },
+    );
+    if (!session) {
+      res.status(404).json({ error: 'session_not_found' });
+      return;
+    }
+    res.status(200).json({ environment, session: redactRegistrationSession(session) });
+  } catch (err) {
+    res.status(500).json({ error: 'registration_abandon_failed', message: (err as Error).message });
+  }
+});
+
+/**
+ * Strip the bearer-grade columns out of the registration_sessions
+ * row before it touches a browser. The plaintext codes are returned
+ * only at issuance time (and only to the same browser that issued
+ * them); the challenge_nonce is part of the QR3 deeplink and the
+ * server keeps it for the verify-step compare. The hashes never
+ * need to leave the server.
+ */
+function redactRegistrationSession(session: object): Record<string, unknown> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { pair_code_hash, enroll_code_hash, verify_code_hash, verify_challenge_nonce, ...safe } =
+    session as Record<string, unknown>;
+  return safe;
+}
 
 export default router;

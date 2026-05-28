@@ -55,7 +55,10 @@ const NAV = [
   // W3 wrapper demo: desktop QR-proof sign-in (ADR-0009). Sits under
   // its own /demo/ namespace so additional wrapper demos can co-locate
   // without polluting the primary console nav.
-  { to: '/demo/qr-proof-login', label: 'Demos', icon: 'qr' },
+  { to: '/demo/qr-proof-login', label: 'QR sign-in', icon: 'qr' },
+  // ADR 0023 three-QR end-user signup ceremony. Demos sit side-by-side
+  // under /demo/ so an operator can pick the flow they're presenting.
+  { to: '/demo/registration', label: 'QR signup', icon: 'qr' },
   { to: '/settings', label: 'Settings', icon: 'gear' },
 ] as const;
 
