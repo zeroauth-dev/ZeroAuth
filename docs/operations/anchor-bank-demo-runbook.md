@@ -866,12 +866,12 @@ A printed wallet card the operator carries with these contacts:
 | Role | Name | Phone | Escalate when |
 |---|---|---|---|
 | CTO (Role 1) | Pulkit Pareek | +91-XXXXX-XXXXX | P0 production incident, demo blocked |
-| VP Backend (Role 2) | <name> | +91-XXXXX-XXXXX | Server returns 5xx |
-| VP Mobile (Role 4) | <name> | +91-XXXXX-XXXXX | App crashes, phone wedged |
-| VP Infra (Role 5) | <name> | +91-XXXXX-XXXXX | Network down, VPS unreachable |
-| Security lead (Role 26) | <name> | +91-XXXXX-XXXXX | Proof rejected (root-cause needed) |
-| Sales lead (Role 42) | <name> | +91-XXXXX-XXXXX | Bank-side follow-up, NDA |
-| External counsel | <firm> | +91-XXXX-XXXX | §2(t) escalation requested |
+| VP Backend (Role 2) | `<name>` | +91-XXXXX-XXXXX | Server returns 5xx |
+| VP Mobile (Role 4) | `<name>` | +91-XXXXX-XXXXX | App crashes, phone wedged |
+| VP Infra (Role 5) | `<name>` | +91-XXXXX-XXXXX | Network down, VPS unreachable |
+| Security lead (Role 26) | `<name>` | +91-XXXXX-XXXXX | Proof rejected (root-cause needed) |
+| Sales lead (Role 42) | `<name>` | +91-XXXXX-XXXXX | Bank-side follow-up, NDA |
+| External counsel | `<firm>` | +91-XXXX-XXXX | §2(t) escalation requested |
 
 ---
 
