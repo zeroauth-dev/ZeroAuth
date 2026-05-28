@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { config } from '../config';
 import { logger } from './logger';
 import { Groth16Proof, ZKPVerificationRequest, ZKPVerificationResponse } from '../types';
@@ -80,6 +81,36 @@ export async function initZKP(): Promise<void> {
   if (fs.existsSync(vkeyPath)) {
     const vkeyData = fs.readFileSync(vkeyPath, 'utf-8');
     verificationKey = JSON.parse(vkeyData);
+    // ADR 0015 boot-time vkey hash check. If EXPECTED_VKEY_SHA256 is
+    // set (production deployment), require an exact match. If the
+    // env var is not set (local dev, freshly-cloned repo before the
+    // operator has computed the hash), log a warning but keep
+    // running so the dev loop is not blocked. In production
+    // (NODE_ENV=production), absence of the env var is itself a
+    // refusal-to-boot condition.
+    const sha = crypto.createHash('sha256').update(vkeyData, 'utf8').digest('hex');
+    const expected = process.env.EXPECTED_VKEY_SHA256;
+    const isProd = (process.env.NODE_ENV ?? 'development') === 'production';
+    if (expected) {
+      if (sha !== expected.replace(/^0x/, '').toLowerCase()) {
+        const message = `ZKP boot refused: verification_key.json SHA-256 = 0x${sha} does not match EXPECTED_VKEY_SHA256 = 0x${expected}`;
+        logger.error(message);
+        throw new Error(message);
+      }
+      logger.info('ZKP: verification key SHA-256 matches EXPECTED_VKEY_SHA256', {
+        path: vkeyPath,
+        sha256: '0x' + sha,
+      });
+    } else if (isProd) {
+      const message = `ZKP boot refused: NODE_ENV=production but EXPECTED_VKEY_SHA256 is not set. Compute it with: sha256sum ${vkeyPath}`;
+      logger.error(message);
+      throw new Error(message);
+    } else {
+      logger.warn('ZKP: EXPECTED_VKEY_SHA256 is unset in non-production — running without the integrity check.', {
+        path: vkeyPath,
+        sha256: '0x' + sha,
+      });
+    }
     logger.info('ZKP: verification key loaded (inline fallback)', { path: vkeyPath });
   } else {
     logger.warn('ZKP: verification key not found — inline fallback will use structural validation only', {
