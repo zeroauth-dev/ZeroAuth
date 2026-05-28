@@ -19,9 +19,19 @@
  */
 
 const mockQuery = jest.fn();
+const mockAppendAuditEvent = jest.fn();
 
 jest.mock('../src/services/db', () => ({
   getPool: () => ({ query: mockQuery }),
+}));
+
+// Audit chain is exercised directly in tests/audit-chain.test.ts. From
+// platform.ts the only API we use is `appendAuditEvent`; mocking it
+// here lets us assert what platform.ts passes to the audit chain
+// without having to set up the pg.PoolClient transaction surface that
+// the real implementation walks through.
+jest.mock('../src/services/audit', () => ({
+  appendAuditEvent: (...args: unknown[]) => mockAppendAuditEvent(...args),
 }));
 
 import {
@@ -39,10 +49,16 @@ describe('services/platform', () => {
   beforeEach(() => {
     mockQuery.mockReset();
     mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
+    mockAppendAuditEvent.mockReset();
+    mockAppendAuditEvent.mockResolvedValue({
+      id: 'audit-1',
+      previousHash: 'genesis',
+      eventHash: '0xdeadbeef',
+    });
   });
 
   describe('recordAuditEvent', () => {
-    it('inserts a row with the full set of columns', async () => {
+    it('forwards to appendAuditEvent with the snake-cased payload', async () => {
       await recordAuditEvent('tenant-A', {
         environment: 'live',
         actorType: 'console',
@@ -55,15 +71,19 @@ describe('services/platform', () => {
         metadata: { plan: 'free' },
       });
 
-      expect(mockQuery).toHaveBeenCalledTimes(1);
-      const sql = mockQuery.mock.calls[0][0] as string;
-      const params = mockQuery.mock.calls[0][1] as unknown[];
-      expect(sql).toMatch(/INSERT INTO audit_events/);
-      expect(params).toEqual([
-        'tenant-A', 'live', 'console', 'tenant-A',
-        'tenant.created', 'tenant', 'tenant-A',
-        'success', 'Created tenant', { plan: 'free' },
-      ]);
+      expect(mockAppendAuditEvent).toHaveBeenCalledTimes(1);
+      expect(mockAppendAuditEvent).toHaveBeenCalledWith({
+        tenant_id: 'tenant-A',
+        environment: 'live',
+        actor_type: 'console',
+        actor_id: 'tenant-A',
+        action: 'tenant.created',
+        entity_type: 'tenant',
+        entity_id: 'tenant-A',
+        status: 'success',
+        summary: 'Created tenant',
+        metadata: { plan: 'free' },
+      });
     });
 
     it('defaults environment / actor_id / metadata to null/{} when omitted', async () => {
@@ -75,12 +95,11 @@ describe('services/platform', () => {
         summary: 'OK',
       });
 
-      const params = mockQuery.mock.calls[0][1] as unknown[];
-      // [tenant, environment, actorType, actorId, action, entityType, entityId, status, summary, metadata]
-      expect(params[1]).toBeNull(); // environment
-      expect(params[3]).toBeNull(); // actor_id
-      expect(params[6]).toBeNull(); // entity_id
-      expect(params[9]).toEqual({}); // metadata
+      const payload = mockAppendAuditEvent.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.environment).toBeNull();
+      expect(payload.actor_id).toBeNull();
+      expect(payload.entity_id).toBeNull();
+      expect(payload.metadata).toEqual({});
     });
 
     it('sanitizes a non-object metadata to {}', async () => {
@@ -92,7 +111,8 @@ describe('services/platform', () => {
         summary: 's',
         metadata: 'not-an-object' as any,
       });
-      expect((mockQuery.mock.calls[0][1] as unknown[])[9]).toEqual({});
+      const payload = mockAppendAuditEvent.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.metadata).toEqual({});
     });
   });
 
@@ -113,11 +133,11 @@ describe('services/platform', () => {
         { type: 'console', id: 't1', email: 'op@example.com' },
       );
 
-      // Second call is the recordAuditEvent INSERT
-      const auditParams = mockQuery.mock.calls[1][1] as unknown[];
-      expect(auditParams[2]).toBe('console');     // actor_type
-      expect(auditParams[3]).toBe('t1');          // actor_id
-      const metadata = auditParams[9] as Record<string, unknown>;
+      // Audit goes through appendAuditEvent now (ADR 0013 chain).
+      const payload = mockAppendAuditEvent.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.actor_type).toBe('console');
+      expect(payload.actor_id).toBe('t1');
+      const metadata = payload.metadata as Record<string, unknown>;
       expect(metadata.actor_email).toBe('op@example.com');
     });
 
@@ -127,18 +147,18 @@ describe('services/platform', () => {
         { name: 'My Device' },
         { type: 'api_key', id: 'key-uuid-123' },
       );
-      const auditParams = mockQuery.mock.calls[1][1] as unknown[];
-      expect(auditParams[2]).toBe('api_key');
-      expect(auditParams[3]).toBe('key-uuid-123');
-      const metadata = auditParams[9] as Record<string, unknown>;
+      const payload = mockAppendAuditEvent.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.actor_type).toBe('api_key');
+      expect(payload.actor_id).toBe('key-uuid-123');
+      const metadata = payload.metadata as Record<string, unknown>;
       expect(metadata.actor_email).toBeUndefined();
     });
 
     it('defaults to actorType=api_key + actor_id=null when no actor is provided', async () => {
       await createDevice('t1', 'live', { name: 'D' });
-      const auditParams = mockQuery.mock.calls[1][1] as unknown[];
-      expect(auditParams[2]).toBe('api_key');
-      expect(auditParams[3]).toBeNull();
+      const payload = mockAppendAuditEvent.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.actor_type).toBe('api_key');
+      expect(payload.actor_id).toBeNull();
     });
   });
 
@@ -154,15 +174,14 @@ describe('services/platform', () => {
         rows: [{ id: 'dev-1', tenant_id: 't1', environment: 'live', external_id: 'd-1', status: 'inactive' }],
         rowCount: 1,
       });
-      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 }); // audit insert
 
       await updateDevice('t1', 'live', 'dev-1', { status: 'inactive' }, {
         type: 'console', id: 't1', email: 'op@example.com',
       });
 
-      const auditParams = mockQuery.mock.calls[1][1] as unknown[];
-      expect(auditParams[2]).toBe('console');
-      expect((auditParams[9] as Record<string, unknown>).actor_email).toBe('op@example.com');
+      const payload = mockAppendAuditEvent.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.actor_type).toBe('console');
+      expect((payload.metadata as Record<string, unknown>).actor_email).toBe('op@example.com');
     });
   });
 
@@ -172,16 +191,15 @@ describe('services/platform', () => {
         rows: [{ id: 'u-1', tenant_id: 't1', environment: 'live', external_id: 'emp-001', full_name: 'Alice' }],
         rowCount: 1,
       });
-      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
       await createTenantUser('t1', 'live', { fullName: 'Alice' }, {
         type: 'console', id: 't1', email: 'op@example.com',
       });
 
-      const auditParams = mockQuery.mock.calls[1][1] as unknown[];
-      expect(auditParams[2]).toBe('console');
-      expect(auditParams[4]).toBe('user.created');
-      expect((auditParams[9] as Record<string, unknown>).actor_email).toBe('op@example.com');
+      const payload = mockAppendAuditEvent.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.actor_type).toBe('console');
+      expect(payload.action).toBe('user.created');
+      expect((payload.metadata as Record<string, unknown>).actor_email).toBe('op@example.com');
     });
 
     it('lower-cases the email field on insert', async () => {
@@ -209,15 +227,14 @@ describe('services/platform', () => {
         rows: [{ id: 'u-1', tenant_id: 't1', environment: 'live', external_id: 'emp-001', full_name: 'Alice', status: 'inactive' }],
         rowCount: 1,
       });
-      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
       await updateTenantUser('t1', 'live', 'u-1', { status: 'inactive' }, {
         type: 'console', id: 't1', email: 'op@example.com',
       });
 
-      const auditParams = mockQuery.mock.calls[1][1] as unknown[];
-      expect(auditParams[2]).toBe('console');
-      expect((auditParams[9] as Record<string, unknown>).actor_email).toBe('op@example.com');
+      const payload = mockAppendAuditEvent.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.actor_type).toBe('console');
+      expect((payload.metadata as Record<string, unknown>).actor_email).toBe('op@example.com');
     });
   });
 
