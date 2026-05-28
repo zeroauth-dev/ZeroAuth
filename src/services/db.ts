@@ -320,6 +320,30 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_audit_anchors_day ON audit_anchors(day_utc DESC);
 
+  -- ─── User sessions (C-025 / audit finding C-9) ─────────
+  --
+  -- Postgres-backed session storage. The in-memory SessionStore
+  -- hydrates this table on boot and writes through asynchronously on
+  -- create/delete, so a process restart no longer loses sessions.
+  --
+  -- Horizontal scale-out (a second API pod reading another pod's
+  -- sessions) is a follow-on — for now reads are still served from
+  -- the local in-memory cache. The DB write is the durability layer.
+  --
+  -- Cleanup of expired rows runs hourly (src/services/session-store.ts).
+  CREATE TABLE IF NOT EXISTS user_sessions (
+    session_id   TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    provider     VARCHAR(20) NOT NULL
+      CHECK (provider IN ('saml', 'oidc', 'zkp')),
+    verified     BOOLEAN NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    did          TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
+
   -- ─── Rate-limit buckets (C-026 / audit finding C-10) ─────
   -- Postgres-backed sliding-window rate-limit counters. One row per
   -- (route, key, window-start) tuple; expired rows GC'd periodically

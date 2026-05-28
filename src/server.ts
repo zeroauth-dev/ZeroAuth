@@ -52,6 +52,20 @@ async function main() {
   // shutdown.
   initRateLimitCleanup();
 
+  // C-025 / audit finding C-9: hydrate the session cache from the
+  // `user_sessions` Postgres table so a process restart no longer
+  // wipes signed-in users. Write-through writes from create()/delete()
+  // keep the table in sync; an hourly cleanup interval prunes
+  // expired rows.
+  try {
+    const { sessionStore } = await import('./services/session-store');
+    await sessionStore.init();
+  } catch (err) {
+    logger.warn('SessionStore init failed — sessions will be in-memory only', {
+      error: (err as Error).message,
+    });
+  }
+
   const app = createApp();
 
   const server = app.listen(config.port, () => {
