@@ -28,6 +28,7 @@
     "docker:down": "docker compose --profile dev --profile prod down",
     "build:all": "npm run build && cd dashboard && npm run build && cd .. && npm run docs:site:build",
     "wallet:rotate": "tsx scripts/transfer-ownership.ts",
+    "jwt:rotate": "tsx scripts/jwt-rotate.ts",
     "setup": "npm install && cd dashboard && npm install && cd ../website && npm install && cd .. && npm run build:all",
     "prepare": "husky"
   },

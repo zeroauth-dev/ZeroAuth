@@ -64,6 +64,17 @@ export const config = {
     secret: requireEnv('JWT_SECRET', 'dev-secret-change-me'),
     expiresIn: process.env.JWT_EXPIRES_IN ?? '1h',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '7d',
+    // C-11 / ADR 0021: RS256 migration. When `algorithm = 'RS256'`,
+    // the JWT service signs with `privateKey` and the verifier
+    // accepts both RS256 (with `publicKey`) and HS256 (the legacy
+    // `secret` above) during the rollover window. The JWKS endpoint
+    // at /.well-known/jwks.json publishes the RS256 public key.
+    // Defaults to HS256 so existing deployments keep working unchanged.
+    algorithm: (process.env.JWT_ALGORITHM === 'RS256' ? 'RS256' : 'HS256') as 'HS256' | 'RS256',
+    privateKey: process.env.JWT_RS256_PRIVATE_KEY ?? '',
+    publicKey: process.env.JWT_RS256_PUBLIC_KEY ?? '',
+    /** Key ID exposed in the JWKS for client-side selection. */
+    keyId: process.env.JWT_RS256_KID ?? 'zeroauth-rs256-1',
   },
 
   saml: {
