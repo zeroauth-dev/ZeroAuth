@@ -157,32 +157,57 @@ function verifyConsoleToken(token: string): { tenantId: string; email: string; j
 }
 
 /**
+ * HttpOnly cookie name used as the EventSource auth fallback.
+ *
+ * EventSource has no API to set custom headers, so the SSE stream at
+ * `/api/console/proof-pairing/sessions/:id/stream` cannot be reached
+ * through the normal Authorization-header path. Phase 0 audit finding
+ * C-3 removed the prior `?access_token=` query-string fallback (tokens
+ * in query strings land in Caddy access logs). The replacement is this
+ * HttpOnly, SameSite=Strict cookie set at login and refreshed at
+ * subsequent authenticated requests.
+ */
+const CONSOLE_JWT_COOKIE = 'zeroauth_console_jwt';
+
+function isProductionEnv(): boolean {
+  return (process.env.NODE_ENV ?? 'development') === 'production';
+}
+
+function setConsoleJwtCookie(res: Response, token: string): void {
+  // 24 h is the configured JWT TTL (see config.jwt.expiresIn); the
+  // cookie outlives the token by no more than 60 s of clock skew.
+  const maxAgeMs = 24 * 60 * 60 * 1000;
+  res.cookie(CONSOLE_JWT_COOKIE, token, {
+    httpOnly: true,
+    secure: isProductionEnv(),
+    sameSite: 'strict',
+    maxAge: maxAgeMs,
+    path: '/api/console',
+  });
+}
+
+function clearConsoleJwtCookie(res: Response): void {
+  res.clearCookie(CONSOLE_JWT_COOKIE, { path: '/api/console' });
+}
+
+/**
  * Middleware: authenticate console session.
  *
- * Reads the JWT from `Authorization: Bearer <token>` for normal requests.
- * Falls back to the `?access_token=<token>` query string for endpoints
- * that browsers can only reach via the native `EventSource` constructor —
- * EventSource has no API to set custom headers, so the SSE stream at
- * `/api/console/proof-pairing/sessions/:id/stream` would otherwise be
- * un-authenticatable. The fallback is opt-in per request (clients only
- * use it when they have to) and never weakens the header path.
+ * Reads the JWT in order: (1) `Authorization: Bearer …` header, then
+ * (2) the HttpOnly `zeroauth_console_jwt` cookie. The cookie path is
+ * `/api/console` so it never reaches the public `/v1/*` surface.
  *
- * Security note: tokens in query strings can land in server access logs.
- * Caddy's default log redacts the `Authorization` header but does NOT
- * redact query strings. To compensate, the stream route lives on a
- * SameSite=Strict + HttpOnly cookie-protected sub-path so a leaked log
- * line containing an expired token has limited blast radius; and the
- * console JWT TTL is bounded (24h, see `JWT_EXPIRES_IN`). The W4 cleanup
- * lands a HttpOnly session cookie that supersedes this query-string path
- * (cookies auto-flow to EventSource).
+ * The `?access_token=` query fallback that previously existed for
+ * EventSource is removed (P0 audit finding C-3). EventSource clients
+ * now rely on the cookie + `withCredentials: true`.
  */
 function requireConsoleAuth(req: Request, res: Response, next: any): void {
   const authHeader = req.headers.authorization;
   let token: string | undefined;
   if (authHeader?.startsWith('Bearer ')) {
     token = authHeader.slice(7);
-  } else if (typeof req.query.access_token === 'string' && req.query.access_token.length > 0) {
-    token = req.query.access_token;
+  } else if (typeof req.cookies?.[CONSOLE_JWT_COOKIE] === 'string') {
+    token = req.cookies[CONSOLE_JWT_COOKIE];
   }
 
   if (!token) {
@@ -331,6 +356,7 @@ router.get('/verify-signup', async (req: Request, res: Response) => {
     const tenant = await createTenantWithHash(payload.email, payload.passwordHash, payload.companyName);
     const defaultKey = await createApiKey(tenant.id, 'Default Live Key', 'live');
     const jwtToken = issueConsoleToken(tenant.id, tenant.email);
+    setConsoleJwtCookie(res, jwtToken);
 
     logger.info('Console: Tenant verified + created', { tenantId: tenant.id });
     void recordAuditEvent(tenant.id, {
@@ -434,6 +460,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
     }
 
     const token = issueConsoleToken(tenant.id, tenant.email);
+    setConsoleJwtCookie(res, token);
 
     res.json({
       token,
