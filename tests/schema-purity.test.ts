@@ -252,6 +252,11 @@ describe('schema-purity (tenant-scoped tables)', () => {
       // TENANT_SCOPED_TABLES above — the /api/console/login bucket
       // exists before any tenant is resolved.
       'rate_limit_buckets',
+      // C-025 / audit finding C-9. Intentionally NOT in
+      // TENANT_SCOPED_TABLES above — sessions are keyed by user_id
+      // not (tenant_id, environment); tenant scope lives in the
+      // session JWT, not in the row.
+      'user_sessions',
     ]);
     const createTableRe = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)/gi;
     const tables = new Set<string>();
