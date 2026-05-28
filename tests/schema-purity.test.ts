@@ -89,6 +89,12 @@ describe('schema-purity (tenant-scoped tables)', () => {
       'last_verified_at',
       'created_at',
       'updated_at',
+      // ADR 0017 face-first identity columns (added by ALTER TABLE in
+      // the bootstrap schema). These are the target end-state columns
+      // for the PII-strip migration: did + commitment will eventually
+      // be the only identifying columns on the table.
+      'did',
+      'commitment',
     ]);
     const body = extractTableBody('tenant_users');
     const cols = extractColumnNames(body);
