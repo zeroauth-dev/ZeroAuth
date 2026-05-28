@@ -103,6 +103,14 @@ export function createApp() {
   // Legacy API routes (backward-compatible, internal use)
   // ═══════════════════════════════════════════════════════════
   app.use('/api/health', healthRoutes);
+
+  // ADR 0021: JWKS endpoint for external RS256-token verifiers.
+  // Mounted at `/.well-known/jwks.json` per RFC 8615 (Well-Known URIs).
+  // The endpoint is unauthenticated by design — JWKS is public.
+  // Returns `{ keys: [] }` when RS256 is not configured.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  app.use('/.well-known', require('./routes/jwks').default);
+
   app.use('/api/auth', authRoutes);
   app.use('/api/auth/saml', samlRoutes);
   app.use('/api/auth/oidc', oidcRoutes);
