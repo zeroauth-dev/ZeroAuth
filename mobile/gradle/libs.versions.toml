@@ -26,6 +26,32 @@ androidx-activity-compose = "1.8.2"
 # ── Compose (Kotlin 1.9.22 → compose-compiler 1.5.10) ─────────────────────
 compose-bom               = "2024.02.02"
 compose-compiler          = "1.5.10"
+# Standalone material3 pin used by :face. The Compose BOM in :app
+# resolves material3 to the BOM-aligned version; :face is a library
+# module that may be consumed without the BOM in place, so it pins an
+# explicit material3 version to keep the API surface predictable.
+androidx-compose-material3 = "1.1.2"
+
+# ── CameraX (used by :face for the preview pipeline) ─────────────────────
+# 1.3.1 is the stable line at the time of the C-143 enrollment-flow
+# commit. The CameraX BOM is intentionally NOT used here; the four
+# artefacts are version-locked together by hand so that bumping CameraX
+# is a single-PR review surface.
+camerax                   = "1.3.1"
+
+# ── ML Kit Face Detection (used by :face for the liveness gate) ─────────
+# On-device detection only. We pin the bundled-model artefact name
+# `face-detection` — the unbundled variant `face-detection-base` would
+# fetch the model lazily over the network at first use, which violates
+# the "biometric data never crosses the network" non-goal in the
+# CLAUDE.md constitution and ADR 0017's blockchain-agnostic posture
+# (the platform must work fully offline at the device boundary).
+mlkit-face-detection      = "16.1.5"
+
+# ── kotlinx-coroutines (used by :face for the detector wrapper) ─────────
+# Pinned to match the AndroidX lifecycle 2.7.0 transitive resolution to
+# avoid Gradle's "conflicting kotlinx-coroutines versions" warning.
+kotlinx-coroutines        = "1.7.3"
 
 # ── Test ──────────────────────────────────────────────────────────────────
 junit                     = "4.13.2"
@@ -47,6 +73,27 @@ androidx-compose-ui-graphics       = { group = "androidx.compose.ui",         na
 androidx-compose-ui-tooling        = { group = "androidx.compose.ui",         name = "ui-tooling" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui",        name = "ui-tooling-preview" }
 androidx-compose-material3         = { group = "androidx.compose.material3",  name = "material3" }
+# Standalone material3 entry for :face (carries an explicit version
+# because :face is a library that may be consumed outside the BOM).
+androidx-compose-material3-pinned  = { group = "androidx.compose.material3",  name = "material3",            version.ref = "androidx-compose-material3" }
+
+# ── CameraX — preview pipeline for :face ────────────────────────────────
+# camera-core   — common surfaces (ImageProxy, CameraSelector).
+# camera-camera2 — Camera2 implementation; required at runtime.
+# camera-lifecycle — bind use cases to a LifecycleOwner.
+# camera-view   — PreviewView for the Compose AndroidView interop.
+androidx-camera-core               = { group = "androidx.camera",      name = "camera-core",       version.ref = "camerax" }
+androidx-camera-camera2            = { group = "androidx.camera",      name = "camera-camera2",    version.ref = "camerax" }
+androidx-camera-lifecycle          = { group = "androidx.camera",      name = "camera-lifecycle",  version.ref = "camerax" }
+androidx-camera-view               = { group = "androidx.camera",      name = "camera-view",       version.ref = "camerax" }
+
+# ── ML Kit Face Detection — liveness gate for :face ────────────────────
+mlkit-face-detection               = { group = "com.google.mlkit",     name = "face-detection",    version.ref = "mlkit-face-detection" }
+
+# ── kotlinx-coroutines — coroutine glue for the ML Kit Task bridge ─────
+kotlinx-coroutines-core            = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core",    version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-android         = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-play-services   = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "kotlinx-coroutines" }
 
 # ── Test ─────────────────────────────────────────────────────────────────
 junit                              = { group = "junit",                       name = "junit",                version.ref = "junit" }
@@ -78,4 +125,11 @@ compose-ui = [
 compose-debug = [
     "androidx-compose-ui-tooling",
     "androidx-compose-ui-test-manifest",
+]
+# CameraX — the four artefacts pinned together by the `camerax` version.
+camerax = [
+    "androidx-camera-core",
+    "androidx-camera-camera2",
+    "androidx-camera-lifecycle",
+    "androidx-camera-view",
 ]

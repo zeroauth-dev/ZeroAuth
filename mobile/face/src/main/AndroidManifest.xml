@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    mobile/face/src/main/AndroidManifest.xml — manifest for the :face
+    library module. Declares the runtime permission + the hardware
+    feature it requires.
+
+    Scope:
+
+      * `android.permission.CAMERA` — required for the CameraX preview
+        + ImageAnalysis pipeline. Requested at runtime by
+        `FaceCaptureScreen.kt` via `rememberLauncherForActivityResult` +
+        `ActivityResultContracts.RequestPermission`. The rationale
+        screen + system-settings deep-link path live in the same file.
+
+      * `android.hardware.camera.front` with `required="true"` — the
+        Pramaan enrollment flow uses the FRONT camera (selfie pose).
+        Devices without a front camera fail the install-time feature
+        gate, surfacing in the Play Store filter for Pramaan. Marking
+        this `required` matches the Scene 1 acceptance criterion that
+        the customer holds the phone selfie-style; rear-camera
+        enrollment is explicitly out of scope.
+
+    What this manifest does NOT do:
+
+      * It does NOT add `android.permission.INTERNET`. The :face module
+        ships zero network code. Adding INTERNET here would let a
+        future drive-by edit ship a network client without tripping the
+        security-reviewer subagent — the absence of the permission is
+        a structural guard.
+
+      * It does NOT declare any service or content provider. The
+        bitmap produced by `FaceCaptureScreen.onCaptured` is consumed
+        by an in-process callback passed in from `:app`. There is no
+        IPC surface and no public exported component in this module.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature
+        android:name="android.hardware.camera.front"
+        android:required="true" />
+
+</manifest>
