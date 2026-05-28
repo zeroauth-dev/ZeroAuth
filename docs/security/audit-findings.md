@@ -9,7 +9,7 @@ Severity scale:
 - **P2** — phase 2-blocking. Must close before pilot exit.
 - **P3** — phase 3-blocking. Must close before SOC 2 Type II evidence period.
 
-LAST_UPDATED: 2026-05-25
+LAST_UPDATED: 2026-05-28
 
 ## Phase 0 P0 findings
 
@@ -20,7 +20,7 @@ LAST_UPDATED: 2026-05-25
 | **C-3** | `?access_token=<jwt>` query fallback in console SSE auth lands JWT in Caddy access logs | **CLOSED** | `ee6aad4` | Replaced with HttpOnly `zeroauth_console_jwt` cookie scoped to `/api/console`. Tests: `tests/console-auth.test.ts::"P0 audit finding C-3"`. Threat model row A-28. |
 | **C-7** | Verifier loads `verification_key.json` from disk without checking it matches the circuit version compiled in code | **CLOSED** | `e98d158` | Boot-time SHA-256 check on `verification_key.json` against `EXPECTED_VKEY_SHA256` env var. Production refuses to boot if missing or mismatched; non-prod warns. ADR 0015 (commit `27ed93c`) + tests `tests/zkp-version.test.ts`. |
 | **C-9** | In-memory session store loses state on process restart; no horizontal scale-out | **OPEN — sprint 2** | — | Postgres-backed session store tracked as C-025 per `docs/plan/bfsi-v1/04-commits.md`. |
-| **C-10** | No rate-limit on `/v1/zkp/verify` or `/api/console/login`; trivially DoS-able | **OPEN — sprint 2** | — | Postgres-backed rate-limit middleware tracked as C-026 per `04-commits.md`. |
+| **C-10** | No rate-limit on `/v1/zkp/verify` or `/api/console/login`; trivially DoS-able | **CLOSED** | `3337d7b` | Postgres-backed sliding-window rate-limit middleware lands in `src/middleware/rate-limit.ts` (C-026). Wired on `POST /v1/auth/zkp/verify` + `POST /v1/auth/zkp/register` per-API-key (30 req / 60 s) and on `POST /api/console/login` per-IP (10 req / 60 s) on top of the existing in-memory `authLimiter`. The `rate_limit_buckets` table shares counters across replicas via atomic `INSERT … ON CONFLICT DO UPDATE … RETURNING count`. Expired rows GC'd by `cleanupRateLimitBuckets()` from a 60 s interval started in `initRateLimitCleanup()`. Tests: `tests/rate-limit.test.ts`. Schema locked by `tests/schema-purity.test.ts`. |
 | **C-11** | JWT signed with HS256 (symmetric); no JWKS surface; key rotation requires every verifier-side service to learn the new secret simultaneously | **OPEN — sprint 2** | — | RS256 migration + JWKS endpoint tracked as C-028. Rollover playbook lands `docs/operations/jwt-key-rotation-playbook.md`. |
 
 ## Phase 0 P1 findings

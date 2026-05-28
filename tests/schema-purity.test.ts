@@ -186,6 +186,45 @@ describe('schema-purity (tenant-scoped tables)', () => {
     });
   }
 
+  // ─── rate_limit_buckets ───────────────────────────────────────────
+  //
+  // C-026 / audit finding C-10: Postgres-backed rate-limit table.
+  // Intentionally not (tenant_id, environment)-scoped — the
+  // /api/console/login bucket exists BEFORE any tenant is resolved.
+  // Hence the column allowlist is checked here but the table is
+  // omitted from TENANT_SCOPED_TABLES above (the forbidden-pattern
+  // loop). The KNOWN_TABLES set below still requires the table to be
+  // declared; only the per-tenant guard is opted out of.
+
+  it('rate_limit_buckets has only the allowed columns', () => {
+    const ALLOWED_RATE_LIMIT_BUCKETS = new Set([
+      'bucket_key',
+      'count',
+      'window_start',
+      'expires_at',
+    ]);
+    const body = extractTableBody('rate_limit_buckets');
+    const cols = extractColumnNames(body);
+    const unexpected = cols.filter(c => !ALLOWED_RATE_LIMIT_BUCKETS.has(c));
+    expect(unexpected).toEqual([]);
+  });
+
+  it('rate_limit_buckets: no column name suggests raw biometric data', () => {
+    // The table is not tenant-scoped (see comment above) so it skips
+    // the TENANT_SCOPED_TABLES loop, but the biometric-name guard
+    // still applies — it's a global ban on raw-data columns.
+    const body = extractTableBody('rate_limit_buckets');
+    const cols = extractColumnNames(body);
+    for (const col of cols) {
+      for (const pattern of FORBIDDEN_PATTERNS) {
+        expect({ col, pattern: pattern.source }).not.toMatchObject({
+          col: expect.stringMatching(pattern),
+          pattern: pattern.source,
+        });
+      }
+    }
+  });
+
   // ─── New-table guard ──────────────────────────────────────────────
 
   it('all CREATE TABLE statements correspond to a known table in this test', () => {
@@ -203,6 +242,10 @@ describe('schema-purity (tenant-scoped tables)', () => {
       'proof_pairing_sessions',
       'audit_events',
       'audit_anchors',
+      // C-026 / audit finding C-10. Intentionally NOT in
+      // TENANT_SCOPED_TABLES above — the /api/console/login bucket
+      // exists before any tenant is resolved.
+      'rate_limit_buckets',
     ]);
     const createTableRe = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)/gi;
     const tables = new Set<string>();

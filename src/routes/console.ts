@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { config } from '../config';
 import { logger } from '../services/logger';
+import { pgRateLimit } from '../middleware/rate-limit';
 import { createTenant, createTenantWithHash, hashPassword, authenticateTenant, getTenantById, getTenantByEmail } from '../services/tenants';
 import { createPendingSignup, consumePendingSignup } from '../services/pending-signups';
 import { createApiKey, listApiKeys, revokeApiKey, countActiveKeys } from '../services/api-keys';
@@ -444,7 +445,16 @@ function renderVerifyResultHtml(input: { ok: boolean; message: string }): string
  * Authenticate developer account.
  * Body: { email, password }
  */
-router.post('/login', authLimiter, async (req: Request, res: Response) => {
+router.post('/login',
+  authLimiter,
+  // C-026: Postgres-backed per-IP rate-limit on top of the existing
+  // in-memory authLimiter. The in-memory limiter only protects a
+  // single process; once the API runs on multiple replicas an
+  // attacker who hashes credential-stuffing attempts across replicas
+  // defeats the in-memory layer. 10 req / 60s matches the
+  // anti-credential-stuffing baseline in docs/security/audit-findings.md.
+  pgRateLimit({ route: 'console:login', windowMs: 60_000, max: 10, keyBy: 'ip' }),
+  async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 

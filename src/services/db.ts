@@ -306,6 +306,26 @@ const SCHEMA = `
     UNIQUE (tenant_id, environment, day_utc)
   );
   CREATE INDEX IF NOT EXISTS idx_audit_anchors_day ON audit_anchors(day_utc DESC);
+
+  -- ─── Rate-limit buckets (C-026 / audit finding C-10) ─────
+  -- Postgres-backed sliding-window rate-limit counters. One row per
+  -- (route, key, window-start) tuple; expired rows GC'd periodically
+  -- by cleanupRateLimitBuckets() (src/middleware/rate-limit.ts).
+  --
+  -- The bucket is bucketed per key (apiKey id, IP, or both) not per
+  -- (tenant_id, environment), because some buckets — notably the
+  -- /api/console/login bucket — exist BEFORE any tenant is resolved.
+  -- That makes this table the only table in the schema that is
+  -- intentionally not (tenant_id, environment)-scoped. The PK is the
+  -- composite bucket_key string so atomic UPSERT works without a
+  -- separate uniqueness index.
+  CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+    bucket_key   TEXT PRIMARY KEY,
+    count        INTEGER NOT NULL DEFAULT 0,
+    window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at   TIMESTAMPTZ NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_rate_limit_expires ON rate_limit_buckets(expires_at);
 `;
 
 export async function initDb(): Promise<void> {

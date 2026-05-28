@@ -5,6 +5,7 @@ import { initBlockchain } from './services/blockchain';
 import { initPoseidon } from './services/identity';
 import { initZKP } from './services/zkp';
 import { initDb, closeDb } from './services/db';
+import { initRateLimitCleanup, stopRateLimitCleanup } from './middleware/rate-limit';
 
 async function main() {
   logger.info('ZeroAuth: Initializing subsystems...');
@@ -45,6 +46,12 @@ async function main() {
     });
   }
 
+  // C-026: kick off the periodic GC of expired rate-limit buckets so
+  // `rate_limit_buckets` doesn't grow unbounded. setInterval is
+  // unref'd so it doesn't keep the process alive past graceful
+  // shutdown.
+  initRateLimitCleanup();
+
   const app = createApp();
 
   const server = app.listen(config.port, () => {
@@ -60,6 +67,7 @@ async function main() {
   // Graceful shutdown
   async function shutdown(signal: string) {
     logger.info(`${signal} received. Shutting down gracefully...`);
+    stopRateLimitCleanup();
     await closeDb();
     server.close(() => {
       logger.info('Server closed');
