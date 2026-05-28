@@ -233,7 +233,7 @@ The customer (CRO, by convention — they are the bank's *risk* officer and the 
 
 > "The face image is hashed on-device. The fingerprint template is hashed on-device. **Neither leaves the phone.** The hashes are combined with a fuzzy extractor — circuit version v1.2, deployed last week, multi-party trusted setup — to produce a 256-bit secret. That secret is wrapped by a key in Android StrongBox, the phone's hardware security module. The Poseidon commitment of `(secret, salt)` is computed on-device. The DID is derived: `did:zeroauth:` + the first 40 hex of `keccak256(commitment)`."
 
-The exact math is in [`adr/0015-circuit-version-lock.md`](../../adr/0015-circuit-version-lock.md) and [`docs/cryptography/trusted-setup-ceremony.md`](../cryptography/trusted-setup-ceremony.md) — the operator references but does not read.
+The exact math is in [`adr/0015-circuit-version-pinning.md`](https://github.com/zeroauth-dev/ZeroAuth/blob/main/adr/0015-circuit-version-pinning.md) and [`docs/cryptography/trusted-setup-ceremony.md`](../cryptography/trusted-setup-ceremony.md) — the operator references but does not read.
 
 ### 4.4 Step 4 — DID registration (60 s)
 
@@ -513,7 +513,7 @@ Pain points referenced: P1 (DPDP §8), P10 (data localisation).
 
 > "The audit chain is a Merkle-style construction. Every row references the SHA-256 of the previous row. Every night at 02:00 IST, a cron job hashes the terminal row and writes it to the `AuditAnchor` contract on Base. Yesterday's anchor is on-chain — Basescan, contract `0x...` — and was placed by a deployer key we hold in cold storage."
 
-The hash-chain construction is in [`src/services/audit.ts`](../../src/services/audit.ts); the anchor cron is in [`scripts/anchor-audit-chain.ts`](../../scripts/anchor-audit-chain.ts); the ADRs are [`adr/0013-audit-hash-chain.md`](../../adr/0013-audit-hash-chain.md), [`adr/0014-on-chain-anchor-cadence.md`](../../adr/0014-on-chain-anchor-cadence.md).
+The hash-chain construction is in [`src/services/audit.ts`](../../src/services/audit.ts); the anchor cron is in [`src/services/anchor-job.ts`](../../src/services/anchor-job.ts); the ADRs are [`adr/0013-audit-log-hash-chain.md`](https://github.com/zeroauth-dev/ZeroAuth/blob/main/adr/0013-audit-log-hash-chain.md), [`adr/0014-on-chain-anchor-cadence.md`](https://github.com/zeroauth-dev/ZeroAuth/blob/main/adr/0014-on-chain-anchor-cadence.md).
 
 ### 8.2 Step 2 — The tampering attempt (45 s)
 
