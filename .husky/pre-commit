@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Pre-commit hook — ADR 0020.
+# Runs the shared gate library so the same logic also fires in CI.
+# To skip in an emergency: ZEROAUTH_PRECOMMIT_SKIP=1 git commit ...
+# (The CI mirror catches anything skipped locally.)
+
+exec bash scripts/pre-commit-checks.sh
