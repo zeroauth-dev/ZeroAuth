@@ -705,39 +705,15 @@ describe('POST /submit Play Integrity enforcement', () => {
   });
 });
 
-describe('POST /submit demo bypass — did:zeroauth:demo:*', () => {
-  // The W3 debug APK uses FakeMobileProver, which emits canned signals
-  // that can't survive real verification. The submit handler honours a
-  // pairing_demo_mode tenant policy so the flow can still complete for
-  // visible demos. These tests pin the wire shape route-side; the
-  // service-layer bypass is exercised separately by the cryptographer's
-  // sign-off run on a staging tenant.
+describe('POST /submit — did:zeroauth:demo:* is rejected (P0 audit finding C-1 closure)', () => {
+  // ADR-0013 + docs/security/audit-findings.md C-1: the previous
+  // pairing_demo_mode tenant policy let any DID matching
+  // `did:zeroauth:demo:*` skip cryptographic verification entirely.
+  // That entire branch is removed. A demo DID is now indistinguishable
+  // from any other unknown DID at the route layer and gets the same
+  // uniform `pairing_did_unknown` response.
 
-  it('200 when the service returns a demo bypass result', async () => {
-    submitProofMock.mockResolvedValueOnce({
-      session: {
-        id: uuid(),
-        state: 'consumed',
-        expiresAt: '2026-12-01T00:00:00.000Z',
-        boundAt: '2026-05-25T10:00:00.000Z',
-        userId: 'demo:abc123def456',
-        did: 'did:zeroauth:demo:7a3c9f5b8e1d2a4c6f0b9e3d5a7c1f8b',
-      },
-      verification: { id: uuid() },
-      tokens: { accessToken: 'demo-t', refreshToken: 'demo-r', tokenType: 'Bearer', expiresIn: 3600 },
-    });
-    const body = defaultSubmitBody();
-    (body as { did: string }).did = 'did:zeroauth:demo:7a3c9f5b8e1d2a4c6f0b9e3d5a7c1f8b';
-    const res = await request(app)
-      .post(`/v1/proof-pairing/sessions/${uuid()}/submit`)
-      .set('Cookie', 'zeroauth_pair_bind=ok')
-      .send(body);
-    expect(res.status).toBe(200);
-    expect(res.body.session.userId).toMatch(/^demo:/);
-    expect(res.body.tokens.accessToken).toBe('demo-t');
-  });
-
-  it('400 pairing_did_unknown when service refuses (tenant opted out of demo)', async () => {
+  it('rejects did:zeroauth:demo:* even when the request is otherwise well-formed', async () => {
     submitProofMock.mockRejectedValueOnce(new PairingDidUnknown());
     const body = defaultSubmitBody();
     (body as { did: string }).did = 'did:zeroauth:demo:7a3c9f5b8e1d2a4c6f0b9e3d5a7c1f8b';
@@ -747,5 +723,22 @@ describe('POST /submit demo bypass — did:zeroauth:demo:*', () => {
       .send(body);
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('pairing_did_unknown');
+  });
+
+  it('source code carries no DEMO_DID_PREFIX shortcut in proof-pairing.ts', () => {
+    // Grep guard: a future contributor reintroducing the demo bypass
+    // by copy-pasting the prior block fails this test. Treats the
+    // service source as documentation of intent.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '../src/services/proof-pairing.ts'),
+      'utf8',
+    );
+    expect(src).not.toMatch(/DEMO_DID_PREFIX/);
+    expect(src).not.toMatch(/did:zeroauth:demo:/);
+    expect(src).not.toMatch(/pairing_demo_mode/);
+    expect(src).not.toMatch(/demoBypassAllowed/);
   });
 });

@@ -606,100 +606,15 @@ export async function submitProof(
       throw new PairingSessionBindMismatch();
     }
 
-    // ─── W3 DEMO BYPASS ────────────────────────────────────────────
-    //
-    // The W3 debug APK ships with FakeMobileProver which emits canned
-    // signals (commitment='1…', didHashSession='2…', identityBinding='3…')
-    // and a CANNED_PROOF with pi_a=['1','2','1'] — none of it survives
-    // real cryptographic verification. To let the visible demo flow
-    // complete without forcing every tenant to wire the real prover +
-    // enroll a user, accept submits whose `did` matches the demo
-    // pattern when the tenant's policy allows it.
-    //
-    // Default behaviour: `pairing_demo_mode` is undefined → treat as
-    // true so freshly-created tenants can run the demo without any
-    // configuration. Tenants going to pilot must explicitly set
-    // `security_policy.pairing_demo_mode = false`.
-    //
-    // The fast path skips check 4 (user lookup), check 5 (commitment
-    // CT-compare), check 6+7 (nonce binding), and check 8 (verifier).
-    // Single-use claim (check 9) + awaited audit (check 10) still run.
-    // The audit row carries `action='pairing.demo_bypass'` so demo
-    // sessions are trivially greppable.
-    const DEMO_DID_PREFIX = 'did:zeroauth:demo:';
-    const demoBypassAllowed = policy.pairing_demo_mode !== false; // undefined → true
-    const isDemoDid = typeof did === 'string' && did.startsWith(DEMO_DID_PREFIX);
-    if (demoBypassAllowed && isDemoDid) {
-      // Single-use claim. consumed_user_id is NULL because there is no
-      // real tenant_users row for a demo session.
-      const pool = getPool();
-      const claim = await pool.query<ProofPairingSession>(
-        `UPDATE proof_pairing_sessions
-           SET state = 'consumed',
-               consumed_user_id = NULL,
-               consumed_at = NOW()
-         WHERE id = $1 AND state = 'issued'
-         RETURNING *`,
-        [sessionId],
-      );
-      if (claim.rows.length === 0) {
-        await recordAuditEvent(tenantId, {
-          environment,
-          actorType: 'console',
-          action: 'pairing.race_lost',
-          entityType: 'pairing_session',
-          entityId: sessionId,
-          status: 'failure',
-          summary: 'Demo bypass lost the single-use UPDATE race',
-        }).catch(() => undefined);
-        throw new PairingSessionAlreadyBound();
-      }
-      const consumedRow = claim.rows[0];
-
-      // Synthetic user id for the JWT `sub`. Deterministic per-DID so
-      // repeated demos produce stable audit / dashboard rows.
-      const demoUserId = `demo:${crypto.createHash('sha256').update(did).digest('hex').slice(0, 24)}`;
-      const sessionUuid = uuidv4();
-      const tokens = issueTokens({
-        sub: demoUserId,
-        sessionId: sessionUuid,
-        provider: 'zkp',
-        verified: false,           // honest: this was a demo bypass, NOT a real verify
-        did,
-      });
-
-      await recordAuditEvent(tenantId, {
-        environment,
-        actorType: 'console',
-        action: 'pairing.demo_bypass',
-        entityType: 'pairing_session',
-        entityId: sessionId,
-        status: 'success',
-        summary: 'Demo pairing bypass — canned signals, no Groth16 verify',
-        metadata: {
-          did_sha256: crypto.createHash('sha256').update(did).digest('hex'),
-          presented_commitment: typeof publicSignals?.[0] === 'string' ? publicSignals[0] : null,
-          presented_platform: clientMeta?.platform ?? null,
-          synthetic_user_id: demoUserId,
-          correlationId,
-        },
-      });
-
-      await padToFloor(start);
-
-      return {
-        session: {
-          ...rowToPublicView(consumedRow),
-          userId: demoUserId,
-          did,
-        },
-        verification: { id: sessionUuid },
-        tokens,
-      };
-    }
-    // ─── END DEMO BYPASS ───────────────────────────────────────────
-
     // ─── Check 4: user lookup by (tenant, did) ─────────────────────
+    //
+    // Phase 0 audit finding C-1 closure: the prior shortcut that
+    // skipped checks 4..8 for a special DID prefix is removed.
+    // Every DID, including ones with a recognisable demo prefix, goes
+    // through this same lookup and gets a uniform `pairing_did_unknown`
+    // if not enrolled. See docs/security/audit-findings.md row C-1
+    // and the "P0 audit finding C-1 closure" describe block in
+    // tests/proof-pairing.test.ts.
     const user = await findUserByDid(tenantId, environment, did);
     if (!user) {
       throw new PairingDidUnknown();
