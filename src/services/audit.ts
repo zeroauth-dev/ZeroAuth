@@ -34,6 +34,11 @@
 import crypto from 'crypto';
 import type { PoolClient } from 'pg';
 import { getPool } from './db';
+import {
+  emitVerificationEvent,
+  isVerificationAction,
+  type VerificationEventPayload,
+} from './verification-events';
 
 /**
  * The literal previous_hash for the first row of a tenant's chain.
@@ -179,6 +184,50 @@ export async function appendAuditEvent(
     );
 
     await client.query('COMMIT');
+
+    // ─── Verification-events fan-out ─────────────────────────────
+    //
+    // For verification-class actions (verification.recorded, the W3
+    // verify_success/failure variants, the legacy auth.verify_*),
+    // emit a live event on the per-tenant in-process emitter. The
+    // dashboard's `/dashboard/tenant/verifications` view subscribes
+    // through the `/api/console/verifications/stream` SSE route.
+    //
+    // The emit MUST happen AFTER the commit so a subscriber never
+    // sees an event that did not also land in audit_events. The
+    // emit is fire-and-forget — a bad listener does not propagate
+    // back to the audit caller (see verification-events.ts).
+    //
+    // Multi-instance scale-out (a second API pod) requires a Redis
+    // pub/sub backing to fan events out across processes; that's
+    // tracked as the v2 roadmap item in verification-events.ts.
+    if (isVerificationAction(payload.action)) {
+      const meta = payload.metadata ?? {};
+      const verificationPayload: VerificationEventPayload = {
+        tenant_id: payload.tenant_id,
+        audit_id: result.rows[0].id,
+        environment: payload.environment === 'live' || payload.environment === 'test'
+          ? payload.environment
+          : null,
+        action: payload.action,
+        status: payload.status === 'failure' ? 'failure' : 'success',
+        created_at: new Date().toISOString(),
+        did: typeof meta.did === 'string' ? meta.did : null,
+        latency_ms: typeof meta.latency_ms === 'number'
+          ? meta.latency_ms
+          : typeof meta.latencyMs === 'number'
+            ? meta.latencyMs
+            : null,
+        proof_hash: typeof meta.proof_hash === 'string'
+          ? meta.proof_hash
+          : typeof meta.proofHash === 'string'
+            ? meta.proofHash
+            : null,
+        reason: typeof meta.reason === 'string' ? meta.reason : null,
+      };
+      emitVerificationEvent(verificationPayload);
+    }
+
     return { id: result.rows[0].id, previousHash, eventHash };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
