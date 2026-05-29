@@ -48,6 +48,7 @@ import dev.zeroauth.android.ui.theme.ZeroAuthTheme
 fun SplashScreen(
     onEnrollNeeded: () -> Unit,
     onAlreadyEnrolled: () -> Unit,
+    onCreateAccount: () -> Unit = {},
 ) {
     // TODO(prover-glue): replace with a real read off KeystoreManager.
     // Today this is always false so the demo always shows the Enroll
@@ -97,25 +98,52 @@ fun SplashScreen(
                 )
             }
 
-            Button(
-                onClick = {
-                    if (navigated) return@Button
-                    navigated = true
-                    if (isEnrolled.value) onAlreadyEnrolled() else onEnrollNeeded()
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor   = MaterialTheme.colorScheme.onPrimary,
-                ),
-                contentPadding = PaddingValues(horizontal = 24.dp),
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text  = stringResource(R.string.splash_cta),
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                Button(
+                    onClick = {
+                        if (navigated) return@Button
+                        navigated = true
+                        if (isEnrolled.value) onAlreadyEnrolled() else onEnrollNeeded()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor   = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 24.dp),
+                ) {
+                    Text(
+                        text  = stringResource(R.string.splash_cta),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                // ADR 0023 three-QR end-user signup. The "Create a new
+                // account" CTA jumps into the registration ceremony,
+                // which is independent of the existing QR-sign-in flow
+                // above (that one's for users who already have an
+                // account and want to authenticate on a desktop).
+                Button(
+                    onClick = {
+                        if (navigated) return@Button
+                        navigated = true
+                        onCreateAccount()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(),
+                    contentPadding = PaddingValues(horizontal = 24.dp),
+                ) {
+                    Text(
+                        text  = "Create a new account (3-QR signup)",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
             }
         }
     }

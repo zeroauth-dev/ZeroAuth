@@ -124,7 +124,20 @@ object ApiFactory {
         explicitNulls = false
     }
 
-    fun create(baseUrl: String = DEFAULT_BASE_URL): ZeroAuthApi {
+    fun create(baseUrl: String = DEFAULT_BASE_URL): ZeroAuthApi =
+        retrofit(baseUrl).create(ZeroAuthApi::class.java)
+
+    /**
+     * ADR 0023 three-QR signup ceremony — the phone-side endpoints
+     * the registration scan flow hits. Same OkHttp + Retrofit stack
+     * as [create]; pulled out into a separate factory so callers that
+     * only need registration can avoid the ZeroAuthApi initialisation
+     * cost on first use.
+     */
+    fun createRegistrationApi(baseUrl: String = DEFAULT_BASE_URL): RegistrationApi =
+        retrofit(baseUrl).create(RegistrationApi::class.java)
+
+    private fun retrofit(baseUrl: String): Retrofit {
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) {
                 HttpLoggingInterceptor.Level.BODY
@@ -144,7 +157,6 @@ object ApiFactory {
             .client(client)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
-            .create(ZeroAuthApi::class.java)
     }
 
     /**

@@ -10,6 +10,7 @@ import androidx.navigation.navArgument
 import dev.zeroauth.android.ui.DoneScreen
 import dev.zeroauth.android.ui.EnrollScreen
 import dev.zeroauth.android.ui.SplashScreen
+import dev.zeroauth.android.ui.reg.RegistrationScreen
 import dev.zeroauth.android.ui.scan.ScanScreen
 
 /**
@@ -28,6 +29,8 @@ sealed class Screen(val route: String) {
     data object Splash : Screen("splash")
     data object Enroll : Screen("enroll")
     data object Scan   : Screen("scan")
+    /** ADR 0023 three-QR end-user signup ceremony. */
+    data object Registration : Screen("registration")
 
     data object Done : Screen("done?payload={payload}") {
         const val ARG_PAYLOAD = "payload"
@@ -54,6 +57,19 @@ fun ZeroAuthNavHost() {
                 onAlreadyEnrolled = {
                     navController.navigate(Screen.Scan.route) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
+                    }
+                },
+                onCreateAccount = {
+                    navController.navigate(Screen.Registration.route)
+                },
+            )
+        }
+
+        composable(Screen.Registration.route) {
+            RegistrationScreen(
+                onDone = {
+                    navController.navigate(Screen.Splash.route) {
+                        popUpTo(0) { inclusive = true }
                     }
                 },
             )

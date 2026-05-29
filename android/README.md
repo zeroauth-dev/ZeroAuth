@@ -11,12 +11,27 @@ real and demoable. The snarkjs prover, the Retrofit `/v1/proof-pairing`
 client, the Keystore-bound credential, the Biometric prompt — those
 all land in the follow-on prover-glue sprint task.
 
+**ADR 0023 three-QR end-user signup ceremony** lives alongside the W3
+QR-sign-in flow. The Splash screen has a second CTA ("Create a new
+account (3-QR signup)") that routes to `RegistrationScreen` —
+paste-deeplink only for V1 (the camera scan path reuses the existing
+ScanScreen's ML Kit pipeline and gets wired in Phase 1 Sprint 4
+alongside the real FaceEmbedder pipeline from `mobile/biometric/`).
+The phone-side endpoints (`POST /v1/registrations/{pair-device,
+submit-commitment, complete}`) are bound via `net/RegistrationApi.kt`;
+the deeplink parser is `util/RegQrPayload.kt`; the orchestrator is
+`ui/reg/RegistrationViewModel.kt`. See
+[ADR 0023](../adr/0023-three-qr-signup-ceremony.md) for the wire
+protocol + state machine.
+
 See:
 
 - [ADR-0009 — QR proof-pairing protocol](../adr/0009-qr-proof-pairing-protocol.md)
 - [ADR-0010 — Android WebView snarkjs bundling](../adr/0010-android-webview-snarkjs-bundling.md)
+- [ADR 0023 — Three-QR end-user signup ceremony](../adr/0023-three-qr-signup-ceremony.md)
 - [`docs/api_contract.md`](../docs/api_contract.md) — the four
-  `/v1/proof-pairing/*` endpoints.
+  `/v1/proof-pairing/*` endpoints + the six `/v1/registrations/*`
+  endpoints.
 
 ## Prerequisites
 
