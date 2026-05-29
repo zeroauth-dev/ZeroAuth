@@ -1,3 +1,5 @@
+@file:OptIn(androidx.camera.core.ExperimentalGetImage::class)
+
 package dev.zeroauth.android.ui.reg
 
 import android.Manifest
