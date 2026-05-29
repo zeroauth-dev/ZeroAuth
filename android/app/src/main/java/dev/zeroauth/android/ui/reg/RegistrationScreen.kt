@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,11 +55,24 @@ fun RegistrationScreen(
     val context = LocalContext.current
     val vm: RegistrationViewModel = viewModel(
         factory = viewModelFactory {
-            initializer { RegistrationViewModel(context.applicationContext) }
+            initializer {
+                val appCtx = context.applicationContext
+                val secret = PerInstallStableSecret(appCtx)
+                RegistrationViewModel(
+                    context = appCtx,
+                    secretSource = secret,
+                    // Real Groth16 prover wired via IsolatedMobileProver
+                    // (ADR 0010 sandboxed :prover process). Replaces the
+                    // StubProofGenerator default; the demo-grade stub
+                    // can still be passed in tests.
+                    proofGenerator = RealRegistrationProver(appCtx, secret),
+                )
+            }
         },
     )
     val state by vm.state.collectAsState()
     var pasted by rememberSaveable { mutableStateOf("") }
+    var scannerOpen by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -78,24 +92,43 @@ fun RegistrationScreen(
 
         StepBadge(state = state)
 
-        OutlinedTextField(
-            value = pasted,
-            onValueChange = { pasted = it },
-            label = { Text("Scanned QR (paste deeplink)") },
-            placeholder = { Text("zeroauth://reg?step=…&session=…&code=ZA-XXXX-XXXX") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = false,
-        )
+        if (scannerOpen) {
+            RegistrationQrCamera(
+                onResult = { scanned ->
+                    scannerOpen = false
+                    vm.onQrText(scanned)
+                    pasted = ""
+                },
+                onCancel = { scannerOpen = false },
+            )
+        } else {
+            OutlinedTextField(
+                value = pasted,
+                onValueChange = { pasted = it },
+                label = { Text("Scanned QR (paste deeplink)") },
+                placeholder = { Text("zeroauth://reg?step=…&session=…&code=ZA-XXXX-XXXX") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
+            )
 
-        Button(
-            onClick = {
-                vm.onQrText(pasted.trim())
-                pasted = ""
-            },
-            enabled = pasted.isNotBlank() && !state.isInFlight(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(text = "Submit step")
+            Button(
+                onClick = {
+                    vm.onQrText(pasted.trim())
+                    pasted = ""
+                },
+                enabled = pasted.isNotBlank() && !state.isInFlight(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(text = "Submit step")
+            }
+
+            OutlinedButton(
+                onClick = { scannerOpen = true },
+                enabled = !state.isInFlight(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Scan with camera")
+            }
         }
 
         Spacer(Modifier.height(8.dp))
