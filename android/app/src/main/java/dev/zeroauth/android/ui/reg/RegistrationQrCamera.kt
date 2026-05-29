@@ -206,15 +206,17 @@ private fun CameraScanLayer(onResult: (String) -> Unit) {
 
 /**
  * Class form (not a free function) so the `@ExperimentalGetImage`
- * annotation is resolved at the use site by the Android lint pass.
- * Mirrors `QrPayloadAnalyzer` in `ui/scan/ScanScreen.kt` — same
- * pattern, scoped to the registration deeplink shape.
+ * annotation lands directly on the `analyze` method that uses
+ * `proxy.image`. Mirrors `QrPayloadAnalyzer` in
+ * `ui/scan/ScanScreen.kt`: the annotation goes on the override, not
+ * the class, so the constructor call site doesn't itself need to
+ * opt in to the experimental API.
  */
-@ExperimentalGetImage
 private class RegistrationQrAnalyzer(
     private val scanner: BarcodeScanner,
     private val onText: (String) -> Unit,
 ) : ImageAnalysis.Analyzer {
+    @ExperimentalGetImage
     override fun analyze(proxy: ImageProxy) {
         val media = proxy.image
         if (media == null) {
