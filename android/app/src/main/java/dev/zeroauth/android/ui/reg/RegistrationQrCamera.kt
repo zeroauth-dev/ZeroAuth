@@ -6,6 +6,7 @@ import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -132,6 +133,7 @@ fun RegistrationQrCamera(
     }
 }
 
+@OptIn(ExperimentalGetImage::class)
 @Composable
 private fun CameraScanLayer(onResult: (String) -> Unit) {
     val context = LocalContext.current
@@ -203,7 +205,7 @@ private fun CameraScanLayer(onResult: (String) -> Unit) {
     )
 }
 
-@androidx.camera.core.ExperimentalGetImage
+@ExperimentalGetImage
 private fun analyseFrame(
     proxy: ImageProxy,
     scanner: BarcodeScanner,
