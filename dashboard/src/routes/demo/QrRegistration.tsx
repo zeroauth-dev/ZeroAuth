@@ -144,6 +144,67 @@ export default function QrRegistration() {
     }
   }, [environment, name, email]);
 
+  // ─── Live polling ───────────────────────────────────────────────
+  //
+  // A real phone scanning QR1 hits POST /v1/registrations/pair-device
+  // directly — the dashboard never sees the device-side request, so we
+  // poll the session row to learn when the phone has advanced. The
+  // simulator path (right column) bypasses this and dispatches the
+  // next state directly. Polling cadence: 2 s in awaiting_* states,
+  // off everywhere else.
+  //
+  // The poll only advances state when the server reports a *forward*
+  // transition (awaiting_commitment / awaiting_verification /
+  // completed). If the server says we're still in the same state, the
+  // effect is a no-op — no UI churn, no re-render storm. We do not
+  // poll when the state is already terminal (completed / error) or
+  // when we're not in a session at all (idle / creating).
+  const sessionId = phase.kind !== 'idle' && phase.kind !== 'creating' && phase.kind !== 'error'
+    ? ('session' in phase ? phase.session.id : null)
+    : null;
+  useEffect(() => {
+    if (!sessionId) return;
+    const isWaitingForPhone = phase.kind === 'awaiting_device'
+      || phase.kind === 'awaiting_commitment'
+      || phase.kind === 'awaiting_verification';
+    if (!isWaitingForPhone) return;
+    let cancelled = false;
+    const id = window.setInterval(async () => {
+      try {
+        const { session } = await api.pollRegistration(sessionId, { environment });
+        if (cancelled) return;
+        // Forward-only transitions: only dispatch if the server has
+        // moved past where we currently are.
+        if (phase.kind === 'awaiting_device' && session.state === 'awaiting_commitment') {
+          // The phone paired but the dashboard didn't see the
+          // server-issued enroll_code (it only goes back to the phone).
+          // We don't have enrollCode/deeplink/expiresAt on the
+          // dashboard side — surface a notice so the operator knows
+          // the phone is in the middle of step 2.
+          pushToast('info', 'Phone paired ✓ — waiting for biometric commitment.');
+        } else if (phase.kind === 'awaiting_commitment' && session.state === 'awaiting_verification') {
+          pushToast('info', 'Commitment received ✓ — waiting for verification proof.');
+        } else if (session.state === 'completed') {
+          dispatch({
+            type: 'completed',
+            session: session as RegistrationSession,
+            tenantUserId: session.tenant_user_id ?? '',
+          });
+        } else if (session.state === 'abandoned') {
+          dispatch({ type: 'failed', message: 'Session was abandoned (expired or cancelled).' });
+        }
+      } catch {
+        // Poll-side errors are silent — the user will see the next
+        // action's error if there's a real network issue, and a
+        // transient 5xx on poll shouldn't break the flow.
+      }
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [sessionId, phase.kind, environment]);
+
   return (
     <div className="space-y-6">
       <header>
