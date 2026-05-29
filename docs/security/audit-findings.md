@@ -9,7 +9,30 @@ Severity scale:
 - **P2** — phase 2-blocking. Must close before pilot exit.
 - **P3** — phase 3-blocking. Must close before SOC 2 Type II evidence period.
 
-LAST_UPDATED: 2026-05-28
+LAST_UPDATED: 2026-05-29
+
+## Phase 1 follow-ons landed since the last snapshot
+
+The Phase 1 work since LAST_UPDATED above isn't an *audit finding* per se — these ADRs add capabilities that didn't exist when the original 21 findings were enumerated. Tracked here because the same hash-chain + tenant-isolation + biometric-payload guards continue to apply.
+
+| ADR | Title | Status | Closing commits | Notes |
+|---|---|---|---|---|
+| **ADR 0022** | Production device-enrollment flow | **LANDED** | `8d313a0`, `c4681a9` | Two-step handshake (admin mints pending slot + code → device claims with fingerprint). Server-side: `src/services/device-enrollment.ts`, extensions to `src/services/platform.ts`, `POST /v1/devices/enroll` in `src/routes/v1/devices.ts`. Dashboard: redesigned `dashboard/src/routes/Devices.tsx` with type-aware modal + enrollment-code screen + Re-issue/Revoke actions. Tests: `tests/device-enrollment.test.ts` (26 tests). |
+| **ADR 0023** | Three-QR end-user signup ceremony | **LANDED** | `8ad10bd`, `8e39425` | The signup-side counterpart of ADR 0017. Backend: `src/services/registration.ts`, `src/routes/v1/registrations.ts` with six routes (3 tenant-side, 3 phone-side bearing single-use codes). Dashboard demo: `dashboard/src/routes/demo/QrRegistration.tsx` with QR codes + simulator panel + live polling. Android: `android/app/src/main/java/dev/zeroauth/android/ui/reg/*` (paste-deeplink only for V1; camera scan deferred to Phase 1 Sprint 4). Tests: `tests/registration-flow.test.ts` (19 tests), `android/app/src/test/.../RegQrPayloadTest.kt` (11 tests). |
+| **ADR 0024** | qrcode.react dep for dashboard QR rendering | **LANDED** | `8c2f028` | ISC, zero runtime deps, peer-dep React ^16-19. `npm audit --omit=dev` clean. Lazy-loaded in `dashboard/src/App.tsx` so the QrRegistration chunk stays out of the main bundle. |
+
+## Pilot-ready vs production-ready gap (Phase 1 Sprint 4+)
+
+What still blocks a real BFSI tenant onboarding, separated from the 21 original findings:
+
+| Gap | Status | Blocking what |
+|---|---|---|
+| **Real biometric capture wired to the registration flow** | Source vendored at `mobile/biometric/` (FaceEmbedder + Quantizer + Poseidon + Keccak), not yet plugged into `RegistrationViewModel.BiometricSecretSource`. The default `PerInstallStableSecret` returns a SharedPreferences-persisted 32-byte secret so steps 2 and 3 derive the same commitment for the demo. | Real biometric verification. Currently any phone with the app behaves as if it were the same user across runs. |
+| **Real Groth16 proof for `/v1/registrations/complete`** | `WebViewMobileProver` is operational for the W3 proof-pairing flow but the witness shape it expects differs from what the registration verify step needs (the current circuit has 3 public signals; the registration challenge_nonce isn't bound circuit-side). `RegistrationViewModel.ProofGenerator` is injectable so swapping in a real prover is a one-screen change once the witness math is finalised. | Step 3 surfaces `verify_failed` because the demo posts a stub proof. The route plumbing is end-to-end correct; only the proof bytes are stubbed. |
+| **Camera QR scanning in `RegistrationScreen`** | Paste-deeplink only for V1. The existing `ui/scan/ScanScreen.kt` has a working ML Kit + CameraX pipeline that needs extracting into a shared composable. | Field-usable phone flow. Operator can paste the deeplink during a demo, end users can't realistically do that. |
+| **Circuit v1.3 with challenge_nonce public input** | Designed in ADR 0023 §"V1 limitation" + §"Phase 1 Sprint 4 follow-on". V1 binds the challenge to the request, not to the proof. | Replay-defence depth: V1 prevents cross-session replay via single-use verify_code + 15-min TTL + rate-limit; V2 closes the proof-replay surface entirely. |
+| **Branch protection on main (audit finding C-16)** | Pipeline exists; protected-branch settings still a manual ops ticket. | Blast-radius reduction for accidental force-pushes. |
+| **PII strip on tenant_users (audit finding C-5)** | Schema-purity test pins current state; new tenant_users rows from registration ceremony already populate did + commitment alongside the legacy PII columns. | DPDP §2(t) minimisation target; tenant SDK can choose to pass an empty profile starting now. |
 
 ## Phase 0 P0 findings
 
