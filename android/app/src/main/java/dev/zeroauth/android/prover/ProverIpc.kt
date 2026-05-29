@@ -1,5 +1,6 @@
 package dev.zeroauth.android.prover
 
+import android.annotation.SuppressLint
 import android.os.Parcel
 import android.os.Parcelable
 
@@ -121,6 +122,15 @@ class ProverRequest(
         // because String is immutable in the JVM.
     }
 
+    // Lint's `ParcelCreator` check prefers the
+    // `@JvmField val CREATOR = object : Parcelable.Creator<T>` form so
+    // the CREATOR is exported as a Java static field. The
+    // `companion object CREATOR` shorthand below works at runtime
+    // (Parcel marshalling traverses companion metadata) but lint
+    // flags it. Refactoring would ripple into the IPC fixtures; for
+    // V1 we suppress and the Phase 1 Sprint 4 cleanup task swaps to
+    // @JvmField alongside the prover-witness refactor.
+    @SuppressLint("ParcelCreator")
     companion object CREATOR : Parcelable.Creator<ProverRequest> {
         override fun createFromParcel(parcel: Parcel): ProverRequest =
             ProverRequest(
@@ -234,6 +244,7 @@ sealed class ProverResponse : Parcelable {
         fun toException(): ProverException = ProverException(code, errorMessage)
     }
 
+    @SuppressLint("ParcelCreator")
     companion object CREATOR : Parcelable.Creator<ProverResponse> {
 
         private const val KIND_PROGRESS = 1
