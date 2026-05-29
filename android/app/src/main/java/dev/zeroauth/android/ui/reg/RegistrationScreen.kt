@@ -26,6 +26,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 
 /**
  * Minimal screen that drives the three-QR registration ceremony
@@ -51,7 +53,7 @@ fun RegistrationScreen(
 ) {
     val context = LocalContext.current
     val vm: RegistrationViewModel = viewModel(
-        factory = androidx.lifecycle.viewmodel.viewModelFactory {
+        factory = viewModelFactory {
             initializer { RegistrationViewModel(context.applicationContext) }
         },
     )
