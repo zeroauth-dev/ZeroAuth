@@ -1,5 +1,3 @@
-@file:OptIn(androidx.camera.core.ExperimentalGetImage::class)
-
 package dev.zeroauth.android.ui.reg
 
 import android.Manifest
@@ -135,7 +133,6 @@ fun RegistrationQrCamera(
     }
 }
 
-@OptIn(ExperimentalGetImage::class)
 @Composable
 private fun CameraScanLayer(onResult: (String) -> Unit) {
     val context = LocalContext.current
@@ -185,15 +182,15 @@ private fun CameraScanLayer(onResult: (String) -> Unit) {
                     .setResolutionSelector(resolutionSelector)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
-                analysis.setAnalyzer(executor) { proxy ->
-                    if (resultLatched.value) { proxy.close(); return@setAnalyzer }
-                    analyseFrame(proxy, scanner) { text ->
+                analysis.setAnalyzer(
+                    executor,
+                    RegistrationQrAnalyzer(scanner) { text ->
                         if (!resultLatched.value) {
                             resultLatched.value = true
                             previewView.post { onResult(text) }
                         }
-                    }
-                }
+                    },
+                )
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(
                     lifecycleOwner,
@@ -207,25 +204,32 @@ private fun CameraScanLayer(onResult: (String) -> Unit) {
     )
 }
 
+/**
+ * Class form (not a free function) so the `@ExperimentalGetImage`
+ * annotation is resolved at the use site by the Android lint pass.
+ * Mirrors `QrPayloadAnalyzer` in `ui/scan/ScanScreen.kt` — same
+ * pattern, scoped to the registration deeplink shape.
+ */
 @ExperimentalGetImage
-private fun analyseFrame(
-    proxy: ImageProxy,
-    scanner: BarcodeScanner,
-    onText: (String) -> Unit,
-) {
-    val media = proxy.image
-    if (media == null) {
-        proxy.close()
-        return
-    }
-    val image = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
-    scanner.process(image)
-        .addOnSuccessListener { barcodes ->
-            // Pick the first QR with a non-empty raw value that looks
-            // plausibly like a ZeroAuth registration deeplink. We don't
-            // parse it here; the caller is responsible for routing.
-            val text = barcodes.firstOrNull()?.rawValue
-            if (!text.isNullOrBlank()) onText(text)
+private class RegistrationQrAnalyzer(
+    private val scanner: BarcodeScanner,
+    private val onText: (String) -> Unit,
+) : ImageAnalysis.Analyzer {
+    override fun analyze(proxy: ImageProxy) {
+        val media = proxy.image
+        if (media == null) {
+            proxy.close()
+            return
         }
-        .addOnCompleteListener { proxy.close() }
+        val image = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
+        scanner.process(image)
+            .addOnSuccessListener { barcodes ->
+                // Pick the first QR with a non-empty raw value. The
+                // caller routes by RegQrPayload.parse — we don't filter
+                // by shape here.
+                val text = barcodes.firstOrNull()?.rawValue
+                if (!text.isNullOrBlank()) onText(text)
+            }
+            .addOnCompleteListener { proxy.close() }
+    }
 }
