@@ -144,8 +144,16 @@ object RegQrPayload {
      */
     private val CODE_SHAPE = Regex("^ZA-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$")
 
-    /** 128-bit hex nonce. */
-    private val CHALLENGE_SHAPE = Regex("^[0-9a-fA-F]{32}$")
+    /**
+     * 31-byte (62 hex char) nonce. 31 bytes (NOT 32) so the value
+     * always fits below the BN128 scalar field modulus (~2^254) when
+     * the prover ingests it as a witness signal — see the matching
+     * `CHALLENGE_NONCE_HEX_LEN = 62` server constant in
+     * `src/services/registration.ts` and the prover's
+     * `sessionNonceHex must be 62 hex chars` guard in
+     * IsolatedMobileProver / WebViewMobileProver.
+     */
+    private val CHALLENGE_SHAPE = Regex("^[0-9a-fA-F]{62}$")
 }
 
 data class RegChallenge(

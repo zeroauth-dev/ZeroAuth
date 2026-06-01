@@ -79,7 +79,14 @@ class RealRegistrationProver(
      * prover actually consumes is `didHash` (the field-element form).
      */
     private fun buildCredential(secret: ByteArray, commitmentHex: String): UnlockedCredential {
-        val secretField = BigInteger(1, secret)
+        // A SecureRandom-generated 32-byte secret can encode a value
+        // greater than the BN128 scalar field modulus (2^254 ish). The
+        // circuit and snarkjs both reject any witness signal outside
+        // [0, FIELD). Reduce mod FIELD here so the prover-side witness
+        // matches what DeriveDidAndCommitment.from used to compute the
+        // commitment in step 2 — both call sites apply the SAME mod so
+        // Poseidon(secret, 0) stays self-consistent across steps.
+        val secretField = BigInteger(1, secret).mod(BN128_FIELD)
         val saltField = BigInteger.ZERO
         val commitmentField = BigInteger(commitmentHex.removePrefix("0x"), 16)
         // Single-arg Poseidon of the commitment — binds the DID to the
@@ -96,6 +103,21 @@ class RealRegistrationProver(
             didHashStr = didHashField.toString(10),
             didStr = did,
             secretBuffer = secret.copyOf(),
+        )
+    }
+
+    private companion object {
+        /**
+         * BN254 / BN128 scalar field modulus — same constant as
+         * [dev.zeroauth.android.sec.PoseidonConstants.FIELD] and the
+         * value snarkjs uses inside the WebView prover. Duplicated
+         * here (rather than imported via the `internal` accessor) so
+         * the witness-construction call site is self-contained and a
+         * future refactor that moves Poseidon doesn't silently break
+         * the mod-reduction.
+         */
+        private val BN128_FIELD: BigInteger = BigInteger(
+            "21888242871839275222246405745257275088548364400416034343698204186575808495617",
         )
     }
 }

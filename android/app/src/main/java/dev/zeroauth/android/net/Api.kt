@@ -162,6 +162,15 @@ object ApiFactory {
     /**
      * Public for unit tests so they can verify the production default
      * without grepping the source.
+     *
+     * In a debug build we override to the Android emulator's special
+     * host-loopback address (10.0.2.2) so the bundled APK can drive
+     * a developer's local backend without rebuild gymnastics. Release
+     * builds always hit the production endpoint.
      */
-    const val DEFAULT_BASE_URL: String = "https://api.zeroauth.dev/"
+    val DEFAULT_BASE_URL: String = if (BuildConfig.DEBUG) {
+        "http://10.0.2.2:3030/"
+    } else {
+        "https://api.zeroauth.dev/"
+    }
 }

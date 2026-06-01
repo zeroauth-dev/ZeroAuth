@@ -83,10 +83,20 @@ import {
 export const REGISTRATION_SESSION_TTL_MS = 30 * 60 * 1000;
 
 /**
- * Length of the challenge nonce baked into QR3. 32 hex chars = 128 bits.
- * Plenty for a one-shot single-use side-channel.
+ * Length of the challenge nonce baked into QR3. 62 hex chars = 31 bytes.
+ *
+ * 31 bytes (NOT 32) because the mobile prover treats the nonce as a BN254
+ * field element. 31 bytes = 248 bits is the largest power-of-eight size
+ * that ALWAYS fits below the BN128 scalar field modulus (~2^254), so the
+ * witness can ingest the hex directly with no mod-prime reduction
+ * needed. The W3 proof-pairing flow at /v1/proof-pairing/sessions/:id
+ * uses the same 31-byte convention; this aligns the registration
+ * ceremony's QR3 with that contract.
+ *
+ * 31 bytes is also enormously over-margined for a one-shot single-use
+ * side-channel — 2^248 collisions are not happening.
  */
-const CHALLENGE_NONCE_HEX_LEN = 32;
+const CHALLENGE_NONCE_HEX_LEN = 62;
 
 function generateChallengeNonce(): string {
   // eslint-disable-next-line @typescript-eslint/no-require-imports

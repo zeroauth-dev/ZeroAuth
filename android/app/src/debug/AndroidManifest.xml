@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:replace="android:networkSecurityConfig">
+
+        <!--
+          Debug-only override of ProverService process isolation.
+
+          The production manifest (src/main/AndroidManifest.xml) sets
+          `android:isolatedProcess="true"` so a renderer compromise
+          inside the snarkjs WebView cannot reach the app's data dir,
+          Keystore, or SharedPreferences (ADR-0010 §"WebView is
+          process-isolated and CSP-locked").
+
+          On the Android Studio AVD images used for local development
+          the Chrome WebView crashes at load time inside an isolated
+          process with:
+              "Attempt to invoke interface method
+              'boolean android.view.IWindowManager.hasNavigationBar(int)'
+              on a null object reference"
+          because the isolated process has no WindowManager binding
+          and Chrome WebView dereferences it during navigation-bar
+          setup. This makes the three-QR ceremony's step 3 (Groth16
+          proof) un-runnable on emulator.
+
+          Release builds keep the isolated-process posture verbatim.
+          Debug builds drop `isolatedProcess="true"` so the WebView
+          can boot in a NON-isolated separate process (`:prover`
+          still gives us a separate OS process; just not UID
+          isolation). The threat model under debug is "developer
+          machine", which already trusts the user's own UID; the
+          stronger isolation in release covers the production threat
+          model unchanged.
+        -->
+        <service
+            android:name=".prover.ProverService"
+            android:exported="false"
+            android:process=":prover"
+            android:isolatedProcess="false"
+            tools:replace="android:isolatedProcess" />
+
+    </application>
+</manifest>

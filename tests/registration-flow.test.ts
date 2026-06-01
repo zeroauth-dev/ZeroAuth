@@ -177,7 +177,10 @@ describe('submitCommitmentForRegistration (step 2)', () => {
     });
 
     expect(result.session.state).toBe('awaiting_verification');
-    expect(result.challengeNonce).toMatch(/^[0-9a-f]{32}$/);
+    // 62 hex chars = 31 bytes — chosen so the nonce always fits below
+    // the BN128 scalar field modulus, matching the mobile prover's
+    // `sessionNonceHex must be 62 hex chars` witness-input contract.
+    expect(result.challengeNonce).toMatch(/^[0-9a-f]{62}$/);
     expect(result.nextDeeplink).toContain('step=verify');
     expect(result.nextDeeplink).toContain(`challenge=${result.challengeNonce}`);
   });

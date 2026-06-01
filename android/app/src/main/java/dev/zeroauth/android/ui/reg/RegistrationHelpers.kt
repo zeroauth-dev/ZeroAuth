@@ -83,12 +83,30 @@ class PerInstallStableSecret(context: Context) : BiometricSecretSource {
  */
 object DeriveDidAndCommitment {
 
+    /**
+     * BN254 / BN128 scalar field modulus. Same value as
+     * [dev.zeroauth.android.sec.PoseidonConstants.FIELD] and what
+     * snarkjs uses inside the WebView prover; duplicated here so the
+     * mod-reduction below is obviously self-contained at the call site.
+     * MUST match the constant in
+     * [RealRegistrationProver]'s private companion — they are paired
+     * (step 2 commitment, step 3 witness).
+     */
+    private val BN128_FIELD: BigInteger = BigInteger(
+        "21888242871839275222246405745257275088548364400416034343698204186575808495617",
+    )
+
     fun from(secret: ByteArray): Pair<String, String> {
         require(secret.size == 32) { "Secret must be 32 bytes; got ${secret.size}" }
         val zeroSalt = ByteArray(32)
         // Poseidon.hash2 takes BigInteger inputs (BN128 field elements).
-        // Convert each 32-byte buffer to a non-negative BigInteger.
-        val s = BigInteger(1, secret)
+        // Convert each 32-byte buffer to a non-negative BigInteger and
+        // reduce mod the BN128 scalar field modulus — a 32-byte buffer
+        // from SecureRandom can encode a value >= FIELD, which the
+        // circuit + snarkjs both reject. The reduction MUST match the
+        // one in RealRegistrationProver.buildCredential so step 2
+        // (commit) and step 3 (verify) agree on the same field element.
+        val s = BigInteger(1, secret).mod(BN128_FIELD)
         val t = BigInteger(1, zeroSalt)
         val commitmentBi = Poseidon.hash2(s, t)
         val commitmentHex = commitmentBi.toString(16).padStart(64, '0')

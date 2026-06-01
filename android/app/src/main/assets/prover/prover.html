@@ -15,7 +15,33 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; img-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none';" />
+  <!--
+    connect-src 'self':
+    snarkjs.groth16.fullProve internally calls `fetch(wasmPath)` and
+    `fetch(zkeyPath)` to stream the BN128 circuit + proving key into
+    WebAssembly. Both files live under the same synthetic origin
+    (https://appassets.androidplatform.net/assets/prover/) served by
+    WebViewAssetLoader, which only resolves paths to bundled APK
+    assets — there is no real network egress. `'none'` here would
+    block the wasm/zkey fetches and the prover never runs. Original
+    ADR-0010 intent ("no network egress") still holds because the
+    synthetic origin can never reach the public internet; the CSP
+    correctly forbids cross-origin connect.
+  -->
+  <!--
+    worker-src 'self' blob::
+    snarkjs.groth16.fullProve spawns a Web Worker from a Blob URL to
+    run the proof-witness generation off the main thread. The Blob is
+    constructed in-page from snarkjs.min.js bytes, so `'self'` would
+    suffice in principle, but Chromium requires `blob:` to be listed
+    explicitly when the URL scheme is `blob:`. No third-party code is
+    executed — the worker source is the same bundled snarkjs.
+
+    script-src has `'self'` (bundled scripts) + `'wasm-unsafe-eval'`
+    (snarkjs compiles wasm at runtime). The narrow blob:
+    allowance only widens worker-src.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; img-src 'none'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none';" />
   <title>ZeroAuth prover</title>
   <style>
     /* style-src 'self' 'unsafe-inline' allows this <style>; no external CSS. */

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only network security config: permits cleartext HTTP to the
+  Android emulator's special host-loopback address (10.0.2.2) so the
+  debug APK can drive a developer's local backend on http://10.0.2.2:3030/.
+  Release builds carry no override and therefore inherit Android 9+ default
+  (all cleartext disabled).
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
