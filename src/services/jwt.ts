@@ -15,11 +15,28 @@ import { AuthToken, JWTPayload } from '../types';
  *    finding's headline pain point.
  *
  *  - **RS256** (the migration target).
- *    Asymmetric. Signer holds `JWT_RS256_PRIVATE_KEY`; verifiers hold
- *    only `JWT_RS256_PUBLIC_KEY` (and can be entirely external,
- *    consuming `/.well-known/jwks.json`). Key rotation is an
- *    add-new-public-key + flip-private-key operation, not a fleet-wide
- *    redeploy.
+ *    Asymmetric. Signer holds `JWT_PRIVATE_KEY` (or the legacy
+ *    `JWT_RS256_PRIVATE_KEY` alias); verifiers hold only
+ *    `JWT_PUBLIC_KEY` (and can be entirely external, consuming
+ *    `/.well-known/jwks.json` or `/api/jwks.json`). Key rotation is
+ *    an add-new-public-key + flip-private-key operation, not a
+ *    fleet-wide redeploy.
+ *
+ * ### Env-var legacy compatibility
+ *
+ * ADR 0021 renamed the RS256 keypair env vars from
+ * `JWT_RS256_PRIVATE_KEY` / `JWT_RS256_PUBLIC_KEY` / `JWT_RS256_KID`
+ * to the un-prefixed canonical names `JWT_PRIVATE_KEY` /
+ * `JWT_PUBLIC_KEY` / `JWT_KID`. Both pairs are accepted indefinitely
+ * — `src/config/index.ts` reads canonical first, falls back to legacy.
+ * Setting EITHER pair (without `JWT_ALGORITHM=RS256`) is enough to
+ * flip the service into RS256 mode, so an operator who only renames
+ * `JWT_RS256_PRIVATE_KEY` → `JWT_PRIVATE_KEY` in their env file (and
+ * forgets to set `JWT_ALGORITHM`) still gets RS256, and an older env
+ * file that never renamed at all still publishes a JWKS at
+ * `/api/jwks.json`. This is exercised by the
+ * "legacy JWT_RS256_* env aliases still publish a JWKS" test in
+ * `tests/jwks-and-rs256.test.ts`.
  *
  * During the rollover window the verifier accepts BOTH HS256 (with
  * the legacy secret) AND RS256 (with the public key) so previously-
@@ -53,8 +70,9 @@ function getSigningContext(): { key: string; algorithm: 'HS256' | 'RS256'; keyid
   if (config.jwt.algorithm === 'RS256') {
     if (!config.jwt.privateKey) {
       throw new Error(
-        'JWT_ALGORITHM=RS256 but JWT_RS256_PRIVATE_KEY is unset. ' +
-          'Generate with `npm run jwt:rotate` or unset JWT_ALGORITHM to use HS256.',
+        'JWT_ALGORITHM=RS256 but JWT_PRIVATE_KEY is unset. ' +
+          'Generate with `npm run jwt:rotate`, set JWT_PRIVATE_KEY + ' +
+          'JWT_PUBLIC_KEY, or unset JWT_ALGORITHM to use HS256.',
       );
     }
     return {
@@ -139,12 +157,21 @@ export function decodeToken(token: string): JWTPayload | null {
 
 // ─── JWKS support (ADR 0021) ────────────────────────────────────────
 //
-// Exposes the RS256 public key in JSON Web Key Set format at
-// `/.well-known/jwks.json`. External verifiers (bank's IdP, an
-// out-of-process verifier service) fetch this once and cache the
-// public key for as long as they want — the `kid` claim in the JWT
-// header lets them pick the right key during a rotation window
-// (multiple keys can be published simultaneously).
+// Exposes the RS256 public key in JSON Web Key Set format. There are
+// two surfaces:
+//   - `/.well-known/jwks.json` (RFC 8615 well-known URI). Always
+//     returns 200 with either the live JWKS or `{ keys: [] }` when
+//     RS256 is not configured — this lets external systems hard-code
+//     the URL across a future rollover.
+//   - `/api/jwks.json`. Returns 200 + JWKS under RS256, or 404 under
+//     HS256. The 404 makes the "is this deployment publishing keys?"
+//     check a single HTTP call for operator tooling.
+//
+// External verifiers (bank's IdP, an out-of-process verifier service)
+// fetch this once and cache the public key for as long as they want —
+// the `kid` claim in the JWT header lets them pick the right key
+// during a rotation window (multiple keys can be published
+// simultaneously).
 
 import crypto from 'crypto';
 
@@ -157,10 +184,19 @@ interface Jwk {
   e: string;
 }
 
+/** Standard JWKS document shape (RFC 7517 §5). */
+export interface Jwks {
+  keys: Jwk[];
+}
+
 /**
  * Returns the RS256 public key as a JWK, or null if RS256 isn't
  * configured. The JWKS endpoint at `/.well-known/jwks.json` wraps
  * this in `{ keys: [...] }`.
+ *
+ * Kept for backward compatibility with the existing `/.well-known`
+ * handler. New code should prefer `exportPublicJwks()` which returns
+ * the full JWKS object.
  */
 export function getRs256Jwk(): Jwk | null {
   if (!config.jwt.publicKey) return null;
@@ -180,4 +216,31 @@ export function getRs256Jwk(): Jwk | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Returns the current signing key as a JWKS document, or `null` if
+ * the deployment is running HS256 (symmetric secrets MUST NOT be
+ * published in a JWKS — there is no public side).
+ *
+ * Shape conforms to RFC 7517 §5:
+ *   {
+ *     "keys": [
+ *       { "kty": "RSA", "use": "sig", "alg": "RS256",
+ *         "kid": "<config.jwt.keyId>", "n": "<base64url>",
+ *         "e": "<base64url>" }
+ *     ]
+ *   }
+ *
+ * The function returns `null` (not an empty `{ keys: [] }`) when the
+ * algorithm is HS256 so callers can distinguish "RS256 misconfigured"
+ * (one key missing) from "deliberately HS256" (no keys at all). The
+ * `/api/jwks.json` route uses this distinction to choose between 200
+ * and 404.
+ */
+export function exportPublicJwks(): Jwks | null {
+  if (config.jwt.algorithm !== 'RS256') return null;
+  const jwk = getRs256Jwk();
+  if (!jwk) return null;
+  return { keys: [jwk] };
 }

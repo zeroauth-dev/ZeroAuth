@@ -70,11 +70,44 @@ export const config = {
     // `secret` above) during the rollover window. The JWKS endpoint
     // at /.well-known/jwks.json publishes the RS256 public key.
     // Defaults to HS256 so existing deployments keep working unchanged.
-    algorithm: (process.env.JWT_ALGORITHM === 'RS256' ? 'RS256' : 'HS256') as 'HS256' | 'RS256',
-    privateKey: process.env.JWT_RS256_PRIVATE_KEY ?? '',
-    publicKey: process.env.JWT_RS256_PUBLIC_KEY ?? '',
+    // The algorithm is RS256 when any of these hold:
+    //   - JWT_ALGORITHM=RS256 is set explicitly, OR
+    //   - the convenience aliases JWT_PRIVATE_KEY + JWT_PUBLIC_KEY are
+    //     both set (no need to also set JWT_ALGORITHM=RS256). This is
+    //     the surface ADR 0021's operator runbook recommends because
+    //     setting one key without the other is almost always a bug,
+    //     and the algorithm choice falls out of "do I have a keypair?"
+    //   - the legacy aliases JWT_RS256_PRIVATE_KEY + JWT_RS256_PUBLIC_KEY
+    //     are both set. Older production env files (and the
+    //     /.well-known/jwks.json test surface) predate ADR 0021's rename
+    //     to the un-prefixed names; honouring them here means an
+    //     operator can rename incrementally without flipping any flags.
+    //     The new names still win when both pairs are set (see
+    //     `privateKey` / `publicKey` resolution below).
+    // Falls back to HS256 otherwise so existing deployments keep working.
+    algorithm: (
+      process.env.JWT_ALGORITHM === 'RS256' ||
+      ((process.env.JWT_PRIVATE_KEY ?? '').length > 0 &&
+        (process.env.JWT_PUBLIC_KEY ?? '').length > 0) ||
+      ((process.env.JWT_RS256_PRIVATE_KEY ?? '').length > 0 &&
+        (process.env.JWT_RS256_PUBLIC_KEY ?? '').length > 0)
+        ? 'RS256'
+        : 'HS256'
+    ) as 'HS256' | 'RS256',
+    // JWT_PRIVATE_KEY / JWT_PUBLIC_KEY are the new, recommended env
+    // vars (per ADR 0021). The legacy JWT_RS256_PRIVATE_KEY /
+    // JWT_RS256_PUBLIC_KEY names remain accepted as fallbacks so the
+    // existing /.well-known/jwks.json tests + production env files
+    // continue to work. The new names win when both are set.
+    privateKey:
+      process.env.JWT_PRIVATE_KEY ?? process.env.JWT_RS256_PRIVATE_KEY ?? '',
+    publicKey:
+      process.env.JWT_PUBLIC_KEY ?? process.env.JWT_RS256_PUBLIC_KEY ?? '',
     /** Key ID exposed in the JWKS for client-side selection. */
-    keyId: process.env.JWT_RS256_KID ?? 'zeroauth-rs256-1',
+    keyId:
+      process.env.JWT_KID ??
+      process.env.JWT_RS256_KID ??
+      'zeroauth-rs256-1',
   },
 
   saml: {

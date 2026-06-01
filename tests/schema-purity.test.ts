@@ -265,6 +265,23 @@ describe('schema-purity (tenant-scoped tables)', () => {
       // src/services/registration.ts strips suspicious keys at
       // ingest time as a defence-in-depth backstop.
       'registration_sessions',
+      // Stripe billing scaffold. Intentionally NOT in
+      // TENANT_SCOPED_TABLES — keyed by tenant_id as the PK rather
+      // than scoped on (tenant_id, environment). Columns are
+      // billing-only (stripe_customer_id, stripe_subscription_id,
+      // plan, status, current_period_end) and never touch any
+      // biometric-derived value; the biometric-name guard would
+      // pass trivially, but the table is not user-scoped enough
+      // for the (tenant_id, environment) iteration.
+      'tenant_billing',
+      // Wave-4 console outbound webhook registry. Tenant-scoped on
+      // (tenant_id, environment) but intentionally NOT in
+      // TENANT_SCOPED_TABLES above — the table holds webhook
+      // delivery config (url, secret, event_filter) and never any
+      // biometric-derived value, so the biometric-name guard is
+      // not load-bearing here. The biometric-name guard would pass
+      // trivially.
+      'tenant_webhooks',
     ]);
     const createTableRe = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)/gi;
     const tables = new Set<string>();

@@ -437,6 +437,46 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
 
+  -- ─── Tenant billing (Stripe integration scaffold) ──────────
+  -- One row per tenant once they opt into a paid plan. Created
+  -- lazily on the first POST /api/console/billing/subscribe; rows
+  -- never exist for tenants who stay on the free tier.
+  --
+  -- stripe_customer_id and stripe_subscription_id are NULL during
+  -- the brief window between row creation and the first successful
+  -- Stripe API call. The console route writes the row first, then
+  -- updates with the ids returned by the Stripe SDK — atomic UPDATE
+  -- on tenant_id so a retried request is idempotent.
+  --
+  -- current_period_end is mirrored from Stripe on each webhook
+  -- delivery (the webhook handler is a follow-on; for now this
+  -- column is populated only at subscribe time). The dashboard's
+  -- "next invoice on" line reads this column directly so a quick
+  -- billing summary doesn't require a round-trip to Stripe.
+  --
+  -- status mirrors Stripe's subscription.status enum verbatim
+  -- (active, trialing, past_due, canceled, incomplete, etc.) — we
+  -- don't translate, so the audit trail matches Stripe's dashboard
+  -- 1:1 when an auditor cross-references.
+  CREATE TABLE IF NOT EXISTS tenant_billing (
+    tenant_id              UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+    stripe_customer_id     TEXT UNIQUE,
+    stripe_subscription_id TEXT UNIQUE,
+    plan                   VARCHAR(50) NOT NULL DEFAULT 'free'
+      CHECK (plan IN ('free', 'starter', 'growth', 'enterprise')),
+    status                 VARCHAR(32) NOT NULL DEFAULT 'inactive',
+    current_period_end     TIMESTAMPTZ,
+    metadata               JSONB NOT NULL DEFAULT '{}',
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_tenant_billing_customer
+    ON tenant_billing(stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_tenant_billing_subscription
+    ON tenant_billing(stripe_subscription_id) WHERE stripe_subscription_id IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_tenant_billing_status
+    ON tenant_billing(status, current_period_end);
+
   -- ─── Rate-limit buckets (C-026 / audit finding C-10) ─────
   -- Postgres-backed sliding-window rate-limit counters. One row per
   -- (route, key, window-start) tuple; expired rows GC'd periodically
@@ -456,6 +496,57 @@ const SCHEMA = `
     expires_at   TIMESTAMPTZ NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_rate_limit_expires ON rate_limit_buckets(expires_at);
+
+  -- ─── Tenant Webhooks ─────────────────────────────────────
+  -- Outbound delivery destinations registered by a tenant. The
+  -- platform POSTs JSON events (verification.recorded,
+  -- attendance.checked_in, device.enrolled, etc.) to the url, signed
+  -- with HMAC-SHA256 of the canonical body using the secret. The
+  -- receiving service verifies the signature against its copy of
+  -- the secret to authenticate the call.
+  --
+  -- Secret handling:
+  --   - secret is generated server-side (32 random bytes, base64url
+  --     encoded with a whsec_ prefix). It is shown to the operator
+  --     EXACTLY ONCE at creation time and stored in the row so the
+  --     delivery worker can sign outbound payloads. The v1 mitigation
+  --     for rotation is "DELETE + recreate."
+  --   - The column is plaintext-at-rest (not hashed) because the
+  --     server itself must hold the signing material. Encryption at
+  --     rest at the disk layer is the only confidentiality boundary
+  --     today; column-level KMS encryption is a follow-on.
+  --
+  -- event_filter is a TEXT[] of action wildcards: the * sentinel
+  -- allows all events; "verification.*" allows every verification-class
+  -- action; "device.enrolled" allows exactly that one action. The
+  -- delivery worker matches the audit row's action against the filter
+  -- list before scheduling a POST. An empty array is rejected at the
+  -- API layer — * is the explicit "everything" sentinel.
+  --
+  -- enabled is the operator-facing kill switch. The delivery worker
+  -- skips disabled rows without removing them so the operator can
+  -- pause + resume without losing the secret + filter.
+  CREATE TABLE IF NOT EXISTS tenant_webhooks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL DEFAULT 'live'
+      CHECK (environment IN ('live', 'test')),
+    url TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    event_filter TEXT[] NOT NULL DEFAULT ARRAY['*'],
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    description VARCHAR(255),
+    last_delivery_at TIMESTAMPTZ,
+    last_delivery_status VARCHAR(20)
+      CHECK (last_delivery_status IS NULL OR last_delivery_status IN ('success', 'failure')),
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_tenant_webhooks_tenant
+    ON tenant_webhooks(tenant_id, environment, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_tenant_webhooks_enabled
+    ON tenant_webhooks(tenant_id, environment, enabled) WHERE enabled = TRUE;
 `;
 
 export async function initDb(): Promise<void> {

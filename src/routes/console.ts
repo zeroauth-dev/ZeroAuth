@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { config } from '../config';
 import { logger } from '../services/logger';
 import { pgRateLimit } from '../middleware/rate-limit';
@@ -121,7 +121,13 @@ const consoleWriteLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => {
     const ctx = (req as { console?: { tenantId?: string } }).console;
-    return ctx?.tenantId ?? req.ip ?? 'anonymous';
+    // express-rate-limit v8 refuses to start if a custom keyGenerator
+    // returns req.ip without routing it through ipKeyGenerator — the
+    // helper collapses IPv6 addresses to their /56 subnet so a single
+    // attacker rotating through the lower 72 bits of a v6 block cannot
+    // pierce the per-IP cap. tenantId-keyed requests bypass the helper
+    // entirely; the IP fallback is the only branch that needs it.
+    return ctx?.tenantId ?? (req.ip ? ipKeyGenerator(req.ip) : 'anonymous');
   },
   message: {
     error: 'tenant_write_rate_limited',
