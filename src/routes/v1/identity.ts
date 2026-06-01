@@ -18,6 +18,30 @@ import type { UserSession, ZKPVerificationRequest } from '../../types';
 const router = Router();
 
 /**
+ * Parse a commitment string into a BigInt, accepting either HEX
+ * (with or without 0x prefix, the form the mobile prover sends to
+ * /register) or DECIMAL (the form snarkjs emits in publicSignals[0]).
+ * Returns null on a non-parseable input — callers should treat that
+ * as a mismatch. Mirrors the helper in src/services/registration.ts.
+ */
+function parseCommitmentBigInt(raw: unknown): bigint | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  try {
+    if (trimmed.startsWith('0x') || trimmed.startsWith('0X')) {
+      return BigInt(trimmed);
+    }
+    if (/[a-f]/i.test(trimmed)) {
+      return BigInt('0x' + trimmed);
+    }
+    return BigInt(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * POST /v1/identity/register
  *
  * Face-first identity registration (ADR 0017).
@@ -190,9 +214,22 @@ router.post('/verify',
 
       // Step 2: assert commitment match. publicSignals[0] is the
       // commitment per the circuit's wire layout.
-      const presentedCommitment = String(publicSignals[0] ?? '').toLowerCase();
-      const storedCommitment = (user.commitment ?? '').toLowerCase();
-      if (storedCommitment.length === 0 || presentedCommitment !== storedCommitment) {
+      //
+      // The mobile prover submits the commitment to /register as HEX
+      // (64-char Poseidon BigInt rendered with toString(16)), but
+      // snarkjs emits publicSignals[0] as the same BigInt in DECIMAL.
+      // A naive lowercase-string compare never matches. Coerce both
+      // sides to BigInt and compare numerically. parseCommitmentBigInt
+      // is defined inline so identity.ts stays self-contained — the
+      // registration ceremony has its own copy in
+      // src/services/registration.ts.
+      const presentedCommitmentBI = parseCommitmentBigInt(publicSignals[0]);
+      const storedCommitmentBI = parseCommitmentBigInt(user.commitment ?? '');
+      if (
+        presentedCommitmentBI === null ||
+        storedCommitmentBI === null ||
+        presentedCommitmentBI !== storedCommitmentBI
+      ) {
         await recordAuditEvent(tenant.id, {
           environment,
           actorType: 'api_key',

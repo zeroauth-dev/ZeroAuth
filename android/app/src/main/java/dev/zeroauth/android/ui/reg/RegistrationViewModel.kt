@@ -161,15 +161,25 @@ class RegistrationViewModel(
             runCatching {
                 val secret = secretSource.secret()
                 val (_, commitment) = DeriveDidAndCommitment.from(secret)
-                val proof = proofGenerator.generate(secret, commitment, nonce)
-                val publicSignals = listOf(commitment)
+                // The prover returns BOTH the Groth16 envelope AND the
+                // publicSignals snarkjs emitted. We forward the
+                // snarkjs publicSignals verbatim — they are decimal
+                // BigInt strings, which is the canonical wire format
+                // and what the server's BigInt-based commitment
+                // compare in registration.ts::completeRegistration
+                // expects. Previously we synthesised `listOf(commitment)`
+                // (a one-element HEX list), which (a) didn't match
+                // the circuit's 3-element [commitment, didHash,
+                // identityBinding] declaration and (b) failed the
+                // hex-vs-decimal commitment compare on the server.
+                val proofResult = proofGenerator.generate(secret, commitment, nonce)
                 withContext(io) {
                     api.complete(
                         CompleteRequest(
                             verifyCode = challenge.code,
                             challengeNonce = nonce,
-                            proof = proof.toJson(),
-                            publicSignals = publicSignals,
+                            proof = proofResult.proof.toJson(),
+                            publicSignals = proofResult.publicSignals,
                         ),
                     )
                 }
@@ -200,7 +210,27 @@ class RegistrationViewModel(
         suspend fun secret(): ByteArray
     }
 
+    /**
+     * Bundle returned by [ProofGenerator] — the snarkjs Groth16 envelope
+     * plus the publicSignals array snarkjs emitted. These MUST be
+     * forwarded together to /v1/registrations/complete; the server's
+     * commitment-equality check reads publicSignals[0], and the
+     * Groth16 verifier needs all three signals in declaration order
+     * ([commitment, didHash, identityBinding]).
+     *
+     * The publicSignals strings are decimal BN128 field elements
+     * (snarkjs's canonical output), NOT hex. The server's commitment
+     * comparator parses them as BigInt and compares against the
+     * stored (hex) session.commitment numerically, so the
+     * representation mismatch between submit-commitment (hex) and
+     * complete (decimal) is reconciled on the server side.
+     */
+    data class ProofResult(
+        val proof: Groth16Proof,
+        val publicSignals: List<String>,
+    )
+
     interface ProofGenerator {
-        suspend fun generate(secret: ByteArray, commitmentHex: String, challengeNonceHex: String): Groth16Proof
+        suspend fun generate(secret: ByteArray, commitmentHex: String, challengeNonceHex: String): ProofResult
     }
 }

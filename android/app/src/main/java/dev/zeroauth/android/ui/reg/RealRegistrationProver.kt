@@ -1,12 +1,12 @@
 package dev.zeroauth.android.ui.reg
 
 import android.content.Context
-import dev.zeroauth.android.prover.Groth16Proof
 import dev.zeroauth.android.prover.GenerateInput
 import dev.zeroauth.android.prover.IsolatedMobileProver
 import dev.zeroauth.android.sec.Poseidon
 import dev.zeroauth.android.sec.UnlockedCredential
 import dev.zeroauth.android.ui.reg.RegistrationViewModel.ProofGenerator
+import dev.zeroauth.android.ui.reg.RegistrationViewModel.ProofResult
 import java.math.BigInteger
 
 /**
@@ -55,7 +55,7 @@ class RealRegistrationProver(
         secret: ByteArray,
         commitmentHex: String,
         challengeNonceHex: String,
-    ): Groth16Proof {
+    ): ProofResult {
         require(secret.size == 32) { "Secret must be 32 bytes; got ${secret.size}" }
 
         val credential = buildCredential(secret, commitmentHex)
@@ -64,7 +64,14 @@ class RealRegistrationProver(
             val output = prover.generate(
                 GenerateInput(unlocked = credential, sessionNonceHex = challengeNonceHex),
             )
-            return output.proof
+            // Return BOTH the proof envelope AND the publicSignals
+            // snarkjs emitted. The server's commitment-equality check
+            // reads publicSignals[0]; the Groth16 verifier consumes all
+            // three signals. Previously we discarded publicSignals and
+            // the ViewModel synthesised a one-element HEX list, which
+            // never matched the snarkjs-emitted decimal commitment on
+            // the server.
+            return ProofResult(proof = output.proof, publicSignals = output.publicSignals)
         } finally {
             credential.close()
             prover.release()

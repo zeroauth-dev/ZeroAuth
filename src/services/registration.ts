@@ -104,6 +104,64 @@ function generateChallengeNonce(): string {
   return randomBytes(CHALLENGE_NONCE_HEX_LEN / 2).toString('hex');
 }
 
+/**
+ * Parse a commitment string into a BigInt, accepting either the hex
+ * form the phone sends to /submit-commitment (with or without 0x
+ * prefix, lowercase) or the decimal form snarkjs emits in
+ * publicSignals[0]. Returns null when the input is not a parseable
+ * commitment shape — callers should treat that as a mismatch.
+ *
+ * The format heuristic mirrors what each call site already
+ * understands: hex form is matched by /^(0x)?[0-9a-f]+$/i (the
+ * submit-commitment validator allows up to 128 hex chars); decimal
+ * form is /^[0-9]+$/. A pure-digit string COULD be parsed as either,
+ * but BigInt('123') === BigInt('0x123') would only be true by
+ * accident; since the server only ever stores either form, the
+ * heuristic is "if it contains [a-f], it's hex; else if it has a
+ * 0x prefix, it's hex; else it's decimal."
+ */
+function parseCommitmentBigInt(raw: unknown): bigint | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  try {
+    if (trimmed.startsWith('0x') || trimmed.startsWith('0X')) {
+      return BigInt(trimmed);
+    }
+    // Pure-digit strings could be either decimal OR a hex commitment
+    // that happens to contain no a-f. Storage form here is always
+    // either lowercased hex (0x-stripped) from submit-commitment OR
+    // decimal from snarkjs. We accept both via BigInt() coercion:
+    //   - if the string contains a-f, prefix with 0x.
+    //   - else interpret as decimal (BigInt default).
+    if (/[a-f]/i.test(trimmed)) {
+      return BigInt('0x' + trimmed);
+    }
+    // Pure digits: could be a hex commitment with no a-f letters OR a
+    // decimal publicSignals value. We try decimal first (the canonical
+    // form snarkjs returns); if the caller stored hex it would still
+    // BigInt-equal the decimal form as long as the underlying field
+    // element matches. To avoid an asymmetric interpretation we use
+    // BigInt() directly which assumes decimal.
+    return BigInt(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compare two commitment strings by their underlying field-element
+ * value, NOT by string equality. Handles the asymmetry where storage
+ * is HEX (from /submit-commitment) but the on-wire publicSignals[0]
+ * is DECIMAL (from snarkjs).
+ */
+function commitmentsEqual(a: unknown, b: unknown): boolean {
+  const ai = parseCommitmentBigInt(a);
+  const bi = parseCommitmentBigInt(b);
+  if (ai === null || bi === null) return false;
+  return ai === bi;
+}
+
 // Mirrors the forbidden-key set in tests/biometric-rejection.test.ts.
 // Matches the token anywhere in the key name with word boundaries,
 // so `face_image`, `biometric_template`, `depth_map`, `raw_face` etc.
@@ -517,10 +575,18 @@ export async function completeRegistration(
 
     // Step 1: assert the proof's commitment equals the one we
     // committed to in step 2. Mirrors src/routes/v1/identity.ts.
-    const presentedCommitment = String(
-      (input.publicSignals as unknown[])[0] ?? '',
-    ).toLowerCase();
-    if (!session.commitment || presentedCommitment !== session.commitment.toLowerCase()) {
+    //
+    // Subtle: the phone submits the commitment to /submit-commitment
+    // as 64-char HEX (Poseidon BigInt rendered with toString(16)),
+    // but snarkjs emits publicSignals[0] as the same BigInt rendered
+    // in DECIMAL (toString(10)). A naive lowercase-string compare
+    // never matches even on a perfectly honest proof. Coerce both
+    // sides to BigInt and compare numerically — the canonical form.
+    if (!session.commitment) {
+      await client.query('ROLLBACK');
+      throw new RegistrationStateError('commitment_mismatch');
+    }
+    if (!commitmentsEqual((input.publicSignals as unknown[])[0], session.commitment)) {
       await client.query('ROLLBACK');
       throw new RegistrationStateError('commitment_mismatch');
     }

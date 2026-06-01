@@ -5,6 +5,7 @@ import dev.zeroauth.android.prover.Groth16Proof
 import dev.zeroauth.android.sec.Poseidon
 import dev.zeroauth.android.ui.reg.RegistrationViewModel.BiometricSecretSource
 import dev.zeroauth.android.ui.reg.RegistrationViewModel.ProofGenerator
+import dev.zeroauth.android.ui.reg.RegistrationViewModel.ProofResult
 import java.math.BigInteger
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -140,9 +141,18 @@ object StubProofGenerator : ProofGenerator {
         secret: ByteArray,
         commitmentHex: String,
         challengeNonceHex: String,
-    ): Groth16Proof = Groth16Proof(
-        pi_a = listOf("1", "2", "1"),
-        pi_b = listOf(listOf("3", "4"), listOf("5", "6"), listOf("1", "0")),
-        pi_c = listOf("7", "8", "1"),
+    ): ProofResult = ProofResult(
+        proof = Groth16Proof(
+            pi_a = listOf("1", "2", "1"),
+            pi_b = listOf(listOf("3", "4"), listOf("5", "6"), listOf("1", "0")),
+            pi_c = listOf("7", "8", "1"),
+        ),
+        // Three-element decimal placeholder list — matches the circuit's
+        // declared public-signal count (commitment, didHash,
+        // identityBinding) so the server's array-length guards pass. The
+        // Groth16 verifier WILL still reject these as cryptographically
+        // invalid; the demo treats that as expected and surfaces a
+        // "wire up the real prover" message.
+        publicSignals = listOf("0", "0", "0"),
     )
 }
