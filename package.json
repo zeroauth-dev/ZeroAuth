@@ -26,9 +26,11 @@
     "docker:test": "docker compose --profile test up --build",
     "docker:prod": "docker compose --profile prod up -d --build",
     "docker:down": "docker compose --profile dev --profile prod down",
-    "build:all": "npm run build && cd dashboard && npm run build && cd .. && npm run docs:site:build",
+    "build:demo-portal": "cd demo-portal && npm install --no-audit --silent && npm run build",
+    "build:all": "npm run build && cd dashboard && npm run build && cd .. && npm run build:demo-portal && npm run docs:site:build",
     "wallet:rotate": "tsx scripts/transfer-ownership.ts",
     "jwt:rotate": "tsx scripts/jwt-rotate.ts",
+    "seed:demo-portal": "tsx scripts/seed-demo-portal.ts",
     "setup": "npm install && cd dashboard && npm install && cd ../website && npm install && cd .. && npm run build:all",
     "prepare": "husky"
   },

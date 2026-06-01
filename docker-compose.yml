@@ -88,6 +88,12 @@ services:
       - VERIFIER_TIMEOUT_MS=2000
     volumes:
       - ./src:/app/src
+      # scripts/ is mounted so an operator can run scripts (e.g. the
+      # demo-portal seed) by hand inside the live dev container:
+      #   docker exec zeroauth-dev npx tsx scripts/seed-demo-portal.ts
+      # The same seed runs automatically on dev-mode boot via
+      # src/services/demo-portal-seed.ts::seedDemoPortalIfDev.
+      - ./scripts:/app/scripts
       - ./public:/app/public
       - ./circuits/build:/app/circuits/build
       - ./contracts:/app/contracts

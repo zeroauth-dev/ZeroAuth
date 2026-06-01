@@ -11,6 +11,12 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src/ ./src/
+# scripts/ is copied so an operator can run the demo-portal seed by
+# hand inside the dev container — e.g.:
+#   docker exec zeroauth-dev npx tsx scripts/seed-demo-portal.ts
+# The same seed runs automatically on dev-mode boot via
+# src/services/demo-portal-seed.ts::seedDemoPortalIfDev.
+COPY scripts/ ./scripts/
 COPY public/ ./public/
 COPY circuits/ ./circuits/
 COPY contracts/ ./contracts/

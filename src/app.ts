@@ -18,6 +18,7 @@ import zkpRoutes from './routes/zkp';
 import adminRoutes from './routes/admin';
 import adminLogsRoutes from './routes/admin-logs';
 import leadsRoutes from './routes/leads';
+import demoPortalRoutes from './routes/demo-portal';
 
 // Side-effect import: wires an in-memory ring buffer into Winston so
 // the /api/admin/logs/stream SSE route has something to replay + tail.
@@ -162,6 +163,12 @@ export function createApp() {
   app.use('/api/admin/logs', adminLogsRoutes);
   app.use('/api/leads', leadsRoutes);
 
+  // Demo-portal bridge — wires the static SPA at /demo-portal/* to the
+  // production /v1/proof-pairing/* service via a cookie-authed shim.
+  // Mounted after /api/leads so the host-aware gate below still catches
+  // anything that didn't match an /api/* prefix.
+  app.use('/api/demo-portal', demoPortalRoutes);
+
   // Host-aware gate. Anything on api.zeroauth.dev that didn't match an
   // API route stops here (JSON 404) instead of being served the
   // landing-page index.html by the static handlers below.
@@ -172,6 +179,12 @@ export function createApp() {
   app.use('/dashboard', express.static(dashboardPath));
   app.get('/dashboard*', (_req, res) => {
     res.sendFile(path.join(dashboardPath, 'index.html'));
+  });
+
+  // Serve demo-portal (static, mirrors /dashboard mount pattern)
+  app.use('/demo-portal', express.static(path.join(__dirname, '../demo-portal/dist'), { fallthrough: true }));
+  app.get('/demo-portal/*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../demo-portal/dist/index.html'));
   });
 
   // Serve Docusaurus documentation

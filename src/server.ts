@@ -6,6 +6,7 @@ import { initPoseidon } from './services/identity';
 import { initZKP } from './services/zkp';
 import { initDb, closeDb } from './services/db';
 import { initRateLimitCleanup, stopRateLimitCleanup } from './middleware/rate-limit';
+import { seedDemoPortalIfDev } from './services/demo-portal-seed';
 
 async function main() {
   logger.info('ZeroAuth: Initializing subsystems...');
@@ -45,6 +46,13 @@ async function main() {
       error: (err as Error).message,
     });
   }
+
+  // Dev-only: seed the demo-portal tenant + deterministic API key so a
+  // fresh `docker compose up` (or `npm run dev` against an empty DB)
+  // boots with the NeoBank Demo Portal flow already wired. The function
+  // is a no-op in production and on any subsequent boot (idempotent via
+  // ON CONFLICT DO NOTHING). See scripts/seed-demo-portal.ts.
+  await seedDemoPortalIfDev();
 
   // C-026: kick off the periodic GC of expired rate-limit buckets so
   // `rate_limit_buckets` doesn't grow unbounded. setInterval is
