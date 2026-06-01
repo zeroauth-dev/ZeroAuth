@@ -7,12 +7,14 @@ import tailwindcss from '@tailwindcss/vite';
 // separate SPA so the demo can be opened standalone on a laptop during
 // pitches without dragging in the console/admin chrome.
 //
-// `base: '/demo/'` matches how Express mounts the dashboard at /dashboard/;
-// when we wire this into the platform we'll proxy /demo/* through the same
-// static-file handler. Adjust if the deploy target changes.
+// `base: '/demo-portal/'` matches the Express static-serve mount in
+// src/app.ts (`app.use('/demo-portal', express.static(...))`) so the
+// built index.html's asset URLs (/demo-portal/assets/*.js etc.) resolve
+// against the same prefix the SPA itself is served from. Mirrors the
+// dashboard/ setup at /dashboard/. Adjust if the Express mount changes.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: '/demo/',
+  base: '/demo-portal/',
   build: {
     outDir: 'dist',
     sourcemap: true,
