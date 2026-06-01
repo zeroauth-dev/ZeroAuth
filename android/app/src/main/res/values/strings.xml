@@ -6,7 +6,8 @@
 
     <!-- Splash -->
     <string name="splash_tagline">Authentication where a breach exposes nothing.</string>
-    <string name="splash_cta">Get started</string>
+    <string name="splash_cta">Sign in (scan QR)</string>
+    <string name="splash_create_account_link">Create a new account (3-QR signup)</string>
 
     <!-- Enroll -->
     <string name="enroll_title">Enroll your biometric</string>

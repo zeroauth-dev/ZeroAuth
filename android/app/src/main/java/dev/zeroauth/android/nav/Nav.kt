@@ -49,16 +49,19 @@ fun ZeroAuthNavHost() {
     ) {
         composable(Screen.Splash.route) {
             SplashScreen(
-                onEnrollNeeded = {
-                    navController.navigate(Screen.Enroll.route) {
-                        popUpTo(Screen.Splash.route) { inclusive = true }
-                    }
-                },
-                onAlreadyEnrolled = {
+                // Primary "Sign in (scan QR)" CTA — funnels straight
+                // into the proof-pairing ScanScreen. We pop the splash
+                // off the back-stack so the system-back from Scan exits
+                // the app rather than landing the user back on the
+                // launcher screen they already left.
+                onSignIn = {
                     navController.navigate(Screen.Scan.route) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
                 },
+                // Secondary link — registration ceremony (ADR 0023).
+                // We don't pop the splash here so the user can hit back
+                // and try sign-in again without re-launching the app.
                 onCreateAccount = {
                     navController.navigate(Screen.Registration.route)
                 },

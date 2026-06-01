@@ -15,8 +15,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,35 +33,45 @@ import dev.zeroauth.android.ui.theme.ZeroAuthTheme
 /**
  * Splash + first-launch router.
  *
- * Today this just shows the wordmark, the tagline, and a single CTA. On
- * tap we route to Enroll (first launch) or Scan (returning user). The
- * "is the user already enrolled?" check is stubbed — the real check
- * lives in KeystoreManager.hasCredential() which lands in the
- * prover-glue sprint task.
+ * Shows the wordmark, the tagline, and two CTAs:
  *
- * The current behaviour is "always treat as first launch" so the
- * demo always exercises the Enroll → Scan flow end-to-end. Once the
- * Keystore wiring exists, replace the placeholder with a derived state
- * read off the manager.
+ *  1. **Sign in (scan QR)** — primary, full-width white button. Routes
+ *     straight into the W3 [dev.zeroauth.android.ui.scan.ScanScreen] so
+ *     the user can pair their phone with a desktop session. Sign-in is
+ *     the day-to-day action and dominates the surface accordingly.
+ *
+ *  2. **Create a new account (3-QR signup)** — secondary text link sized
+ *     down a tier below. Registration is one-time (ADR 0023 three-QR
+ *     end-user signup ceremony), so it's intentionally demoted to a link
+ *     rather than a button of equal weight.
+ *
+ * The legacy "Get started → Enroll" flow is retained as an optional
+ * callback so historical entry points (e.g. internal QA harnesses, the
+ * deep-link path) can still trigger it. Production navigation no longer
+ * routes through Enroll from the splash — the user lands on Scan
+ * directly, and Enroll/biometric setup happens inside the registration
+ * ceremony.
  */
 @Composable
 fun SplashScreen(
-    onEnrollNeeded: () -> Unit,
-    onAlreadyEnrolled: () -> Unit,
+    onSignIn: () -> Unit,
     onCreateAccount: () -> Unit = {},
+    onEnrollNeeded: () -> Unit = {},
+    onAlreadyEnrolled: () -> Unit = {},
 ) {
-    // TODO(prover-glue): replace with a real read off KeystoreManager.
-    // Today this is always false so the demo always shows the Enroll
-    // flow. The "true" path is wired so the Splash routing logic is
-    // already correct.
-    val isEnrolled = remember { mutableStateOf(false) }
+    // `navigated` guards against a double-tap racing two navigation
+    // dispatches before Nav Compose has had a chance to pop the splash
+    // destination. Without this, a hurried user on a slow device can
+    // produce a duplicated back-stack entry.
     var navigated by remember { mutableStateOf(false) }
 
-    LaunchedEffect(isEnrolled.value) {
-        // No auto-skip today; the user always taps the CTA. Left as a
-        // hook so the prover-glue sprint task can decide whether the
-        // splash auto-routes after a 600 ms beat or stays interactive.
-    }
+    // Suppress unused-parameter warnings for the legacy callbacks that
+    // are retained for backwards compatibility with QA / deep-link
+    // entry points. They are intentionally not wired to UI today.
+    @Suppress("UNUSED_EXPRESSION")
+    onEnrollNeeded
+    @Suppress("UNUSED_EXPRESSION")
+    onAlreadyEnrolled
 
     Box(
         modifier = Modifier
@@ -100,13 +110,17 @@ fun SplashScreen(
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Primary: Sign in. The big white button. This is the
+                // hot path — every cross-device login funnels through
+                // here. Routes to the W3 ScanScreen for proof-pairing.
                 Button(
                     onClick = {
                         if (navigated) return@Button
                         navigated = true
-                        if (isEnrolled.value) onAlreadyEnrolled() else onEnrollNeeded()
+                        onSignIn()
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -122,26 +136,22 @@ fun SplashScreen(
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
-                // ADR 0023 three-QR end-user signup. The "Create a new
-                // account" CTA jumps into the registration ceremony,
-                // which is independent of the existing QR-sign-in flow
-                // above (that one's for users who already have an
-                // account and want to authenticate on a desktop).
-                Button(
+                // Secondary: Create a new account (3-QR signup, ADR
+                // 0023). Demoted to a text link because registration
+                // is a once-per-user ceremony — sign-in is what users
+                // do every day.
+                TextButton(
                     onClick = {
-                        if (navigated) return@Button
+                        if (navigated) return@TextButton
                         navigated = true
                         onCreateAccount()
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(),
-                    contentPadding = PaddingValues(horizontal = 24.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text  = "Create a new account (3-QR signup)",
-                        style = MaterialTheme.typography.labelLarge,
+                        text  = stringResource(R.string.splash_create_account_link),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -153,6 +163,6 @@ fun SplashScreen(
 @Composable
 private fun SplashScreenPreview() {
     ZeroAuthTheme {
-        SplashScreen(onEnrollNeeded = {}, onAlreadyEnrolled = {})
+        SplashScreen(onSignIn = {}, onCreateAccount = {})
     }
 }
