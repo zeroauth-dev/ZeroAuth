@@ -10,6 +10,7 @@ import androidx.navigation.navArgument
 import dev.zeroauth.android.ui.DoneScreen
 import dev.zeroauth.android.ui.EnrollScreen
 import dev.zeroauth.android.ui.SplashScreen
+import dev.zeroauth.android.ui.identity.IdentityDetailsScreen
 import dev.zeroauth.android.ui.reg.RegistrationScreen
 import dev.zeroauth.android.ui.scan.ScanScreen
 
@@ -31,6 +32,16 @@ sealed class Screen(val route: String) {
     data object Scan   : Screen("scan")
     /** ADR 0023 three-QR end-user signup ceremony. */
     data object Registration : Screen("registration")
+
+    /**
+     * Read-only identity diagnostic surface. Reachable from the splash
+     * "View my identity" affordance once a registration has run on
+     * the device, and from the post-registration Completed state. The
+     * screen takes no arguments — it re-derives (did, commitment)
+     * from the persisted [dev.zeroauth.android.ui.reg.PerInstallStableSecret]
+     * so a deep-link entry without state still renders correctly.
+     */
+    data object Identity : Screen("identity")
 
     data object Done : Screen("done?payload={payload}") {
         const val ARG_PAYLOAD = "payload"
@@ -65,6 +76,14 @@ fun ZeroAuthNavHost() {
                 onCreateAccount = {
                     navController.navigate(Screen.Registration.route)
                 },
+                // Tertiary affordance — diagnostic identity view. The
+                // splash hides this if no registration has run on the
+                // device yet (see SplashScreen.hasIdentity gating). We
+                // do NOT pop the splash so back from Identity lands
+                // here, not on a blank back-stack.
+                onViewIdentity = {
+                    navController.navigate(Screen.Identity.route)
+                },
             )
         }
 
@@ -73,6 +92,33 @@ fun ZeroAuthNavHost() {
                 onDone = {
                     navController.navigate(Screen.Splash.route) {
                         popUpTo(0) { inclusive = true }
+                    }
+                },
+                onViewIdentity = {
+                    navController.navigate(Screen.Identity.route) {
+                        // Pop the registration ceremony off the back-stack
+                        // so back-from-Identity lands on Splash, not on
+                        // the just-completed registration form. Identity
+                        // is a leaf in the post-registration flow.
+                        popUpTo(Screen.Registration.route) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        composable(Screen.Identity.route) {
+            IdentityDetailsScreen(
+                onBack = {
+                    // Prefer popping the back-stack — if Identity was
+                    // reached from Splash via the "View my identity"
+                    // affordance, popBackStack lands the user back on
+                    // Splash without rebuilding it. If popBackStack
+                    // returns false (deep-link / direct entry), fall
+                    // back to navigate(Splash) clearing the stack.
+                    if (!navController.popBackStack()) {
+                        navController.navigate(Screen.Splash.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
                     }
                 },
             )

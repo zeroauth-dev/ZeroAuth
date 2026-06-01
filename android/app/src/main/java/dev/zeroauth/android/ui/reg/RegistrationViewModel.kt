@@ -37,14 +37,26 @@ import kotlinx.serialization.json.buildJsonObject
  *   4. transition to "ready for the next QR" (or terminal)
  *
  * Biometric capture for steps 2 and 3 is intentionally injectable via
- * [BiometricSecretSource] — the production wiring will plug in the
- * FaceEmbedder pipeline from `mobile/biometric/`. The default
- * implementation in the companion object returns a per-install
- * deterministic 32-byte secret so the demo can drive the flow on a
- * device without a working face-capture sensor; the secret is
- * persisted in [DeviceFingerprint]'s SharedPreferences so a second run
- * from the same install produces the same commitment and the verify
- * step's `publicSignals[0]` check passes.
+ * [BiometricSecretSource] — the constructor default is
+ * [RealBiometricSecretSource] which branches at runtime on
+ * `BuildConfig.DEMO_USE_STABLE_SECRET`:
+ *
+ *   * `true` (default in debug builds) — delegates to
+ *     [PerInstallStableSecret] so the AVD demo flow works without a
+ *     live face camera. The SharedPreferences-persisted SecureRandom
+ *     blob guarantees step 2 and step 3 derive the same commitment so
+ *     the server's `publicSignals[0]` check passes.
+ *   * `false` (default in release builds) — runs the canonical
+ *     CameraX + ML Kit + MobileFaceNet pipeline documented in
+ *     adr/0018-mobile-face-embedding-pipeline.md. The quantiser's
+ *     same-face-same-bytes contract upholds the publicSignals[0]
+ *     invariant for two captures of the same user on the same device.
+ *
+ * The dispatch is internal to [RealBiometricSecretSource] — the
+ * ViewModel sees a single `BiometricSecretSource` either way. The
+ * registration screen surfaces the active mode via
+ * [BiometricSecretMode] so operators + investors can see which
+ * pipeline is running on this build.
  *
  * The proof generation hook (step 3) is similarly injectable via
  * [ProofGenerator]. The default returns a structurally-valid but
@@ -60,7 +72,7 @@ import kotlinx.serialization.json.buildJsonObject
 class RegistrationViewModel(
     private val context: Context,
     private val api: RegistrationApi = ApiFactory.createRegistrationApi(),
-    private val secretSource: BiometricSecretSource = PerInstallStableSecret(context),
+    private val secretSource: BiometricSecretSource = RealBiometricSecretSource(context.applicationContext),
     private val proofGenerator: ProofGenerator = StubProofGenerator,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {

@@ -1,5 +1,6 @@
 package dev.zeroauth.android.ui
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -58,6 +61,7 @@ fun SplashScreen(
     onCreateAccount: () -> Unit = {},
     onEnrollNeeded: () -> Unit = {},
     onAlreadyEnrolled: () -> Unit = {},
+    onViewIdentity: () -> Unit = {},
 ) {
     // `navigated` guards against a double-tap racing two navigation
     // dispatches before Nav Compose has had a chance to pop the splash
@@ -72,6 +76,17 @@ fun SplashScreen(
     onEnrollNeeded
     @Suppress("UNUSED_EXPRESSION")
     onAlreadyEnrolled
+
+    // Show the "View my identity" affordance only if a registration
+    // ceremony has already persisted a secret to SharedPreferences —
+    // otherwise the screen would render a freshly-minted commitment
+    // for a SecureRandom blob that the server doesn't know about, and
+    // an investor scanning the on-screen DID against the dashboard
+    // would see a "user not found" 404. The presence check is a
+    // synchronous SharedPreferences lookup (no Poseidon work) so it's
+    // safe to run on the composition thread.
+    val context = LocalContext.current
+    val hasIdentity = remember(context) { hasRegisteredIdentity(context) }
 
     Box(
         modifier = Modifier
@@ -154,15 +169,68 @@ fun SplashScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+
+                // Diagnostic affordance — only rendered when a
+                // registration has already run on this install (and
+                // therefore the secret-derived (did, commitment) pair
+                // will round-trip cleanly to the server). An outlined
+                // button keeps it visually subordinate to the two
+                // primary actions above but more discoverable than a
+                // text link, which matters for the investor walk
+                // through — they'll be looking for "show me the
+                // identity" without being told the exact label.
+                if (hasIdentity) {
+                    OutlinedButton(
+                        onClick = {
+                            if (navigated) return@OutlinedButton
+                            navigated = true
+                            onViewIdentity()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        contentPadding = PaddingValues(horizontal = 24.dp),
+                    ) {
+                        Text(
+                            text  = "View my identity",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
             }
         }
     }
+}
+
+/**
+ * Synchronous probe for "has the user run the registration ceremony at
+ * least once on this device". Reads the same SharedPreferences key
+ * that [dev.zeroauth.android.ui.reg.PerInstallStableSecret] writes to
+ * (kept in sync via a hard-coded string literal because the prefs
+ * names are private to the secret class — extracting them into a
+ * shared constant pulls the identity-UI module into the prefs
+ * encapsulation, which we don't want; the cost is this one-line
+ * duplication that a unit test in PerInstallStableSecretTest can
+ * trivially guard).
+ *
+ * Returns true iff the prefs file holds a 64-hex-char `secret_hex`
+ * entry — anything shorter or missing is treated as "no identity yet"
+ * so a partially-completed registration doesn't unlock the diagnostic
+ * surface.
+ */
+private fun hasRegisteredIdentity(context: Context): Boolean {
+    val prefs = context.applicationContext.getSharedPreferences(
+        "zeroauth_reg_secret",
+        Context.MODE_PRIVATE,
+    )
+    val secretHex = prefs.getString("secret_hex", null) ?: return false
+    return secretHex.length == 64
 }
 
 @Preview(name = "Splash")
 @Composable
 private fun SplashScreenPreview() {
     ZeroAuthTheme {
-        SplashScreen(onSignIn = {}, onCreateAccount = {})
+        SplashScreen(onSignIn = {}, onCreateAccount = {}, onViewIdentity = {})
     }
 }

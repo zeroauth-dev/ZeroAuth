@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -51,13 +53,25 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 @Composable
 fun RegistrationScreen(
     onDone: () -> Unit,
+    onViewIdentity: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    // `RealBiometricSecretSource` is the production wiring; it picks
+    // [PerInstallStableSecret] in debug builds
+    // (BuildConfig.DEMO_USE_STABLE_SECRET=true) and the real
+    // FaceEmbedder pipeline in release builds. The ViewModel sees a
+    // single BiometricSecretSource and never branches on the mode
+    // itself — the dispatch is internal to RealBiometricSecretSource.
+    // We construct it once with `remember` so the same instance is
+    // re-used across recompositions and its `activeMode` can drive
+    // the operator-facing banner below.
+    val secret = remember(context.applicationContext) {
+        RealBiometricSecretSource(context.applicationContext)
+    }
     val vm: RegistrationViewModel = viewModel(
         factory = viewModelFactory {
             initializer {
                 val appCtx = context.applicationContext
-                val secret = PerInstallStableSecret(appCtx)
                 RegistrationViewModel(
                     context = appCtx,
                     secretSource = secret,
@@ -89,6 +103,15 @@ fun RegistrationScreen(
             text = "Scan each QR on the platform's signup page. The biometric stays on this phone; only the Poseidon commitment (step 2) and Groth16 proof (step 3) touch the server.",
             style = MaterialTheme.typography.bodyMedium,
         )
+
+        // Operator-facing banner indicating which biometric-secret
+        // pipeline this build is running. Investors + pilot operators
+        // see at a glance whether the demo is on the per-install stable
+        // secret (emulator-friendly) or the real CameraX + MobileFaceNet
+        // pipeline. The banner is intentionally always visible — hiding
+        // it in release builds would muddy the "what am I looking at"
+        // story during a side-by-side comparison.
+        BiometricSecretModeBanner(mode = secret.activeMode)
 
         StepBadge(state = state)
 
@@ -162,7 +185,27 @@ fun RegistrationScreen(
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                 )
-                Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+                // Primary post-registration CTA: take the user to the
+                // diagnostic identity view so they can see the (did,
+                // commitment) pair their session just produced. This
+                // is the load-bearing demo moment — the investor wants
+                // to see the artefacts immediately after they exist,
+                // not after a Splash round-trip.
+                Button(
+                    onClick = onViewIdentity,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("View my identity")
+                }
+                // Secondary: continue to splash. Outlined so it reads
+                // as "I'm done with this screen" rather than the
+                // primary action.
+                OutlinedButton(
+                    onClick = onDone,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Done")
+                }
             }
 
             is RegistrationViewModel.State.Failed -> {
@@ -177,6 +220,53 @@ fun RegistrationScreen(
                 )
                 Button(onClick = vm::reset, modifier = Modifier.fillMaxWidth()) { Text("Start over") }
             }
+        }
+    }
+}
+
+/**
+ * Banner that names the active [BiometricSecretMode] for the current
+ * build. Surfaced to the operator + investor so they know whether the
+ * `secret()` call is going to run the real face-capture pipeline or
+ * fall back to the per-install stable secret.
+ *
+ * The Card colour reflects intent — the demo mode is rendered in the
+ * surface-variant tone so it reads as a "this is a shortcut" rather
+ * than an error, and the real-face mode in the primary tone so it
+ * reads as the production posture.
+ */
+@Composable
+private fun BiometricSecretModeBanner(mode: BiometricSecretMode) {
+    val tone = when (mode) {
+        BiometricSecretMode.DEMO_STABLE_SECRET ->
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+        BiometricSecretMode.REAL_FACE_CAPTURE ->
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            )
+        BiometricSecretMode.UNKNOWN ->
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+            )
+    }
+    Card(
+        colors = tone,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = mode.display,
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = mode.operatorNote,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

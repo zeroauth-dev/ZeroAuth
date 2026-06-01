@@ -93,6 +93,33 @@ android {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
             isDebuggable = true
+            // ─── DEMO_USE_STABLE_SECRET ───────────────────────────────
+            //
+            // When `true`, the production [RealBiometricSecretSource]
+            // delegates to [PerInstallStableSecret] — a deterministic
+            // 32-byte SharedPreferences-backed blob — instead of running
+            // CameraX + ML Kit + MobileFaceNet on the device. This is
+            // load-bearing for the POC demo because the Android emulator
+            // (AVD) has no live face camera; without the toggle a
+            // demo-from-emulator build can't reach the verify step.
+            //
+            // Default: `true` in debug — operators + investors run the
+            //          demo on the emulator and need the flow to "just
+            //          work". The dashboard surfaces the active mode
+            //          via [BiometricSecretMode] so the demoer can see
+            //          which path the build is on.
+            //
+            // Investors / pilot operators flipping to a real device for
+            // the "real face capture" segment of the pitch can pass
+            // `-PZEROAUTH_DEMO_USE_STABLE_SECRET=false` on the Gradle
+            // command line to override (the Property resolution below
+            // checks the Gradle property first, then falls back to the
+            // default per variant).
+            val demoFlag: Boolean = (project.findProperty("ZEROAUTH_DEMO_USE_STABLE_SECRET") as String?)
+                ?.equals("false", ignoreCase = true)
+                ?.let { !it }  // explicit false → flag = false
+                ?: true        // unset → debug default = true
+            buildConfigField("boolean", "DEMO_USE_STABLE_SECRET", demoFlag.toString())
         }
         release {
             isMinifyEnabled = true
@@ -107,6 +134,22 @@ android {
             // When releaseSigningConfigured is false the release variant
             // assembles unsigned. Distributors must sign + zipalign by
             // hand, or set the four ZEROAUTH_RELEASE_* properties.
+            //
+            // DEMO_USE_STABLE_SECRET defaults to `false` in release —
+            // production builds always run the real CameraX + MobileFaceNet
+            // pipeline. An operator can opt into the demo fallback for
+            // an *internal* release build (e.g. a hardware-less roadshow)
+            // by passing `-PZEROAUTH_DEMO_USE_STABLE_SECRET=true` — the
+            // CLAUDE.md banner that says "never accept raw biometric data
+            // over the wire" is unaffected either way (PerInstallStableSecret
+            // emits a per-install SecureRandom blob; the network surface
+            // remains identical to the real pipeline because both paths
+            // produce a 32-byte secret that derives a Poseidon commitment
+            // on-device).
+            val demoFlag: Boolean = (project.findProperty("ZEROAUTH_DEMO_USE_STABLE_SECRET") as String?)
+                ?.equals("true", ignoreCase = true)
+                ?: false       // unset → release default = false
+            buildConfigField("boolean", "DEMO_USE_STABLE_SECRET", demoFlag.toString())
         }
     }
 
