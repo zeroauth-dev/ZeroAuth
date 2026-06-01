@@ -329,6 +329,156 @@
 | **Test status** | **Required before merge.** `failure paths return within ±25 ms of each other` — hit `/submit` with 100 of each failure mode, assert stddev < 25 ms across mode means. |
 | **Audit signal** | None (mitigation, not detection). |
 
+## Phase 1 Sprint 4 surfaces
+
+> Added Sprint 4 (weeks 9–10). Sprint 4 introduces five new attack surfaces
+> outside the proof-pairing core: **outbound webhooks** to tenant receivers
+> (`user.enrolled`, `verification.completed`, `txn.step_up.completed`,
+> `audit.anchor.published`), **metered billing** (`/v1/billing/*` +
+> `/api/console/billing/*`), **RS256 JWT signing with a public JWKS**
+> (`/.well-known/jwks.json` per C-028), **Redis-backed session store**
+> for multi-instance scale-out (replacing the in-memory `src/services/session-store.ts`),
+> and **live operator logs over SSE** (`/api/console/logs/stream`). Each
+> introduces a fresh class of risk; mitigations below are required gates
+> before the surface ships to a pilot tenant.
+
+### A-29 — Webhook receiver SSRF / internal-network pivot
+
+| | |
+|---|---|
+| **Class** | Information disclosure / EoP (STRIDE: I + E) |
+| **Surface** | `POST /api/console/webhooks` (tenant configures a receiver URL), worker that dispatches `user.enrolled` / `verification.completed` / `txn.step_up.completed` / `audit.anchor.published` events |
+| **Description** | A tenant (or attacker controlling a tenant account) sets the webhook receiver URL to `http://169.254.169.254/latest/meta-data/iam/security-credentials/` (cloud metadata), `http://localhost:5432/`, `http://127.0.0.1:6379/`, `http://10.0.0.1/admin`, or `file:///etc/passwd`. The dispatcher fires HTTP requests to that URL from inside the ZeroAuth VPS, pivoting to the metadata service, Postgres, Redis, or internal admin surfaces. |
+| **Mitigation** | (a) URL validator rejects any scheme other than `https://`. (b) DNS resolution of the host is performed up-front; the resolved IP is checked against the deny-list: `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (link-local + IMDS), `::1/128`, `fc00::/7`, `fe80::/10`. (c) Redirects are followed only when the redirect target passes the same checks (re-resolve + re-check). (d) HTTP client uses a fresh socket per attempt with `lookup` hook that re-verifies the resolved IP against the deny-list at connection time (defeats DNS rebinding). (e) Per-tenant rate limit on dispatch retries (≤ 5/min/receiver). |
+| **Test status** | **Required before merge.** `tests/webhook-ssrf.test.ts` cases: (i) `http://` URL rejected at config time, (ii) `https://169.254.169.254/…` rejected after DNS resolve, (iii) `https://attacker.com` → 302 → `http://127.0.0.1:5432` rejected at redirect-time, (iv) DNS-rebind attack where first lookup returns public IP and second returns 127.0.0.1 — rejected at connection-time lookup hook. |
+| **Audit signal** | `audit_events.action = 'webhook.ssrf_blocked'`, severity high, with `metadata.target_ip_redacted` (only the /24, never the full IP). |
+| **Open ADR** | `0019-webhook-egress-allowlist.md` — decide whether to default-deny outbound webhook hosts to a tenant-curated allow-list (additional safety vs. friction). Trigger to file: before first BFSI pilot SOW signing. |
+
+### A-30 — Webhook signature forgery / replay against tenant receivers
+
+| | |
+|---|---|
+| **Class** | Spoofing / Tampering (STRIDE: S + T) |
+| **Surface** | The HTTP request `POST <receiver_url>` with header `X-ZeroAuth-Signature: t=<unix>,v1=<hex>` and JSON body, observed by any party with TLS-MITM capability or a passively-collected log |
+| **Description** | A network attacker replays a captured `user.enrolled` webhook to the tenant's receiver after the original event has been processed, causing duplicate enrolments on the tenant side. Alternatively, a tenant with a leaked signing secret on one channel reuses the same secret on another, conflating event sources. Or: the receiver does not verify the signature at all (validation is the tenant's job) and accepts forged bodies from any sender. |
+| **Mitigation** | (a) Signing: `v1 = HMAC-SHA256(secret, "<unix>.<raw_body>")` per Stripe-style convention, documented in `docs/api_contract.md` so tenant integrations get a copy-paste verifier. (b) `t` timestamp is rejected by the tenant's verifier if `|now - t| > 300 s` (5-min window, documented in the SDK helper). (c) Each event carries an `id` UUID; the tenant's receiver must persist seen IDs for ≥ 24h (documented; cannot be enforced server-side). (d) ZeroAuth holds the secret in `webhook_endpoints.secret_hash` (SHA-256), with the raw secret only shown once at create time + on rotate. (e) Per-endpoint rotate endpoint `POST /api/console/webhooks/:id/rotate-secret` — old secret accepted for a 24h grace window. (f) Outbound dispatcher uses one fresh HMAC per delivery; never reuses a payload across endpoints. |
+| **Test status** | **Required before merge.** `tests/webhook-signing.test.ts`: (i) sign + verify round-trip, (ii) timestamp drift > 300 s rejected, (iii) modified body fails signature, (iv) old secret rejected after grace window. |
+| **Audit signal** | `audit_events.action = 'webhook.delivered'` with `metadata.signature_version='v1'`, `webhook.delivery_failed` on non-2xx, `webhook.secret_rotated` on rotate. |
+| **SDK obligation** | The published `@zeroauth/node-sdk`, `@zeroauth/python-sdk`, and the documentation snippet for "verify webhook" must all default-on the timestamp check; samples that omit the check are a footgun and are not shipped. |
+
+### A-31 — Webhook receiver as oracle for tenant-internal state
+
+| | |
+|---|---|
+| **Class** | Information disclosure (STRIDE: I) — DPDP §8 purpose-limitation risk |
+| **Surface** | The webhook payload body delivered to the tenant's URL |
+| **Description** | The dispatcher includes fields helpful for the tenant (timestamp, `user.external_id`, `verification.id`, `txn.amount_minor`, `txn.payee_masked`). If a tenant misconfigures their endpoint or shares the URL with a third party, the payload leaks PII (external_id is often an employee number or phone-number-derived value; txn amount + masked payee reveal customer behaviour). |
+| **Mitigation** | (a) Per-event-type field allow-list in `src/services/webhooks/payloads.ts`; never spread the full row into the body. (b) `did` is never in the payload; replaced with `did_sha256` for correlation. (c) `txn.amount_minor` is included only when the tenant's `webhook_endpoints.include_amounts = true` (opt-in, default false). (d) Document the payload schema in `docs/api_contract.md` so tenants can decide what to consume. (e) Sensitive payloads (`audit.anchor.published`) include only the anchor hash + block number, never the underlying audit row contents. |
+| **Test status** | **Required before merge.** `tests/webhook-payload-purity.test.ts`: assert each event-type payload contains only the documented fields, fails on extra keys. Reuses the schema-purity pattern. |
+| **Audit signal** | None directly; mapped to DPDP §8 in `docs/compliance/dpdp-mapping.md`. |
+
+### A-32 — Billing API tampering for free-tier abuse / over-quota access
+
+| | |
+|---|---|
+| **Class** | EoP / Tampering (STRIDE: E + T) |
+| **Surface** | `GET /v1/billing/usage`, `POST /api/console/billing/plan`, `POST /api/console/billing/portal-session`, the Stripe webhook receiver at `POST /api/billing/stripe-webhook` |
+| **Description** | (1) An attacker with one tenant's console JWT submits `POST /api/console/billing/plan {tenantId: 'other-tenant', plan: 'enterprise'}`, upgrading another tenant. (2) The Stripe webhook is forged (no signature check) and the dispatcher writes `tenants.plan = 'enterprise'` for any tenant the attacker names. (3) `GET /v1/billing/usage` from tenant A returns tenant B's counters because the query forgets a tenant filter. (4) A tenant on the free tier exceeds quota by racing thousands of `/v1/zkp/verify` requests before the metered counter increments — the increment is not transactional with the verify. |
+| **Mitigation** | (a) `tenantId` for every billing endpoint comes from `getTenantContext(req)` or `req.console.tenantId`, never from body / query (same rule as A-10, A-12). (b) Stripe webhook handler verifies `Stripe-Signature` per the official SDK; rejects on mismatch. (c) Quota enforcement is atomic: `UPDATE tenants SET monthly_usage_count = monthly_usage_count + 1 WHERE id = $1 AND monthly_usage_count < plan_limit RETURNING monthly_usage_count` — when zero rows returned, the verify itself returns 402 before invoking the verifier. (d) Plan changes write `audit_events.action = 'billing.plan_changed'` with the actor (Stripe webhook event ID, or console JWT subject). |
+| **Test status** | **Required before merge.** `tests/billing-cross-tenant.test.ts` (tenant A cannot change tenant B's plan); `tests/billing-stripe-signature.test.ts` (forged webhook → 400); `tests/billing-quota-race.test.ts` (1000 concurrent verifies under a 100-verify quota → exactly 100 succeed + 900 return 402). |
+| **Audit signal** | `audit_events.action ∈ {'billing.plan_changed', 'billing.quota_exceeded', 'billing.stripe_event_received', 'billing.stripe_signature_failed'}`. |
+
+### A-33 — Stripe webhook replay / event reordering
+
+| | |
+|---|---|
+| **Class** | Tampering (STRIDE: T) |
+| **Surface** | `POST /api/billing/stripe-webhook` |
+| **Description** | Stripe retries webhook deliveries with the same event ID. If the handler is not idempotent, a retried `invoice.paid` event credits the tenant twice. Alternatively, an out-of-order `customer.subscription.deleted` arriving after a `customer.subscription.updated` rewrites the tenant's plan back to a cancelled state. |
+| **Mitigation** | (a) Persist every processed `stripe_event_id` in a `stripe_events_seen` table with a unique constraint; an `INSERT … ON CONFLICT DO NOTHING` short-circuits replays. (b) Compare the event's `created` timestamp against the tenant's last-processed event timestamp; reject events older than the last processed one with a 200 + log line (Stripe must see 200 to stop retrying). (c) All plan-state writes carry the Stripe event ID in `audit_events.metadata.stripe_event_id` for forensic replay. |
+| **Test status** | **Required before merge.** `tests/billing-stripe-idempotency.test.ts`: send the same event twice → state changes once; send out-of-order events → final state matches latest `created` timestamp. |
+| **Audit signal** | `audit_events.action = 'billing.stripe_event_replayed'` when the dedup constraint fires. |
+
+### A-34 — RS256 private-key compromise on the API host
+
+| | |
+|---|---|
+| **Class** | EoP / Spoofing (STRIDE: E + S) |
+| **Surface** | `JWT_SIGNING_KEY_PRIVATE` (RS256 PEM) on the VPS filesystem at `/opt/zeroauth/keys/jwt-current.pem`; the corresponding public key is published at `https://api.zeroauth.dev/.well-known/jwks.json` |
+| **Description** | An attacker with read access to the VPS filesystem (compromised dependency with native code, container escape, ssh-key reuse, backup-tarball leak) extracts the private RSA key. They can now mint console JWTs and `/v1/identity/*` session JWTs for any tenant for the lifetime of the key. Rotating the key requires a JWKS update + a tolerance window during which both keys must verify, otherwise live sessions break. |
+| **Mitigation** | (a) Key file mode `0400` owned by `zeroauth-deploy`; not in any git history, not in any backup that leaves the VPS host. (b) JWKS endpoint serves **two** keys during rotation: `kid=current` + `kid=next`. New tokens are signed under `current`; verifiers accept either. After a 24h overlap, `next` becomes `current` and the old key is wiped from disk. The boot-time loader fails closed if `JWT_SIGNING_KEY_PRIVATE` is missing or unparseable. (c) Rotation script `scripts/rotate-jwt-keys.sh` documented in `docs/operations/jwt-rotation.md`; the script is the only path that touches the key files (auditable). (d) JWKS `kid` is stable across the rotation; clients (`jose`, `jsonwebtoken --jwksUri`) cache by `kid` and pick up the new key on the next fetch with no code change. (e) Emergency revocation: a separate `jwt_revoked_keys` table lists kids that must never verify — boot-time guard rejects any token signed under a revoked kid even if the public key is still in the JWKS. (f) Tokens carry `iss = "https://api.zeroauth.dev"` + `aud ∈ {'zeroauth-console','zeroauth-v1'}`; both checked on every verify. |
+| **Test status** | **Required before merge.** `tests/jwt-rs256.test.ts`: (i) token signed under `current` verifies, (ii) token signed under `next` verifies (rotation overlap), (iii) token signed under a kid not in JWKS rejected, (iv) token signed under a revoked kid rejected, (v) JWKS endpoint returns only public-key material — no `d`, `p`, `q`, `dp`, `dq`, `qi`. |
+| **Audit signal** | `audit_events.action ∈ {'jwt.key_rotated', 'jwt.key_revoked', 'jwt.verify_failed_unknown_kid'}`. |
+| **Residual risk** | A successful one-shot extraction is undetectable from the network — there is no per-token attestation that proves the signer is the real VPS. Compensating control is the kid-revocation list + a 24h rotation window during incident response. Long-term: hardware-backed signing (KMS / HSM) — tracked in `adr/0020-jwt-signing-kms-evaluation.md`. |
+
+### A-35 — JWKS endpoint poisoning / DoS
+
+| | |
+|---|---|
+| **Class** | DoS / Spoofing (STRIDE: D + S) |
+| **Surface** | `GET https://api.zeroauth.dev/.well-known/jwks.json` |
+| **Description** | (1) A cache-poisoning attack on a CDN or DNS layer serves a forged JWKS, letting the attacker mint tokens that downstream services (other ZeroAuth instances, partner SDKs that cache the JWKS) accept. (2) An attacker hammers the endpoint to force JWKS rebuilds and force the API to spend CPU on PEM parsing per request. |
+| **Mitigation** | (a) JWKS endpoint is served from a static in-memory snapshot built at boot from `/opt/zeroauth/keys/*.pem`; no per-request PEM parsing. (b) HTTP `Cache-Control: public, max-age=300` + `ETag` for client-side caching. (c) The JWKS response is signed by an offline-rotated long-lived root key — published as `signed_jwks` alongside the JWKS itself; client SDKs verify the signature against the pinned root public key before trusting the JWKS. (Defers cache-poisoning concerns to the offline root, which is rotated under a four-eyes process documented in the rotation runbook.) (d) HSTS preload (already set) + CT-log monitoring for `*.zeroauth.dev` certs catches MITM at the TLS layer. (e) Per-IP rate limit on the JWKS endpoint (≥ 60/min/IP, generous for legitimate caches). |
+| **Test status** | **Required before merge.** `tests/jwks-endpoint.test.ts`: (i) JWKS body is byte-identical to a snapshot fixture (regression guard for accidental key leakage), (ii) `Cache-Control` header set, (iii) `ETag` set + 304 returned on `If-None-Match`. The signed-JWKS pattern lands in a follow-up PR before public SDK release. |
+| **Audit signal** | None at the JWKS layer. Downstream `jwt.verify_failed_unknown_kid` (A-34) covers the consumed-bad-key signal. |
+
+### A-36 — Algorithm-confusion attack (RS256 → HS256) during migration
+
+| | |
+|---|---|
+| **Class** | Spoofing (STRIDE: S) |
+| **Surface** | All `jwt.verify` paths in `src/services/jwt.ts` during the HS256→RS256 cutover |
+| **Description** | The classic `alg=none` and `alg=HS256` confusion against an RS256 verifier: an attacker submits a token with `alg: 'HS256'` and signs it with the **public** RSA key (which they fetched from JWKS), and a permissive `verify(token, key)` call where `key` is the RSA public key string would accept it because `jsonwebtoken` treats the key as an HMAC secret when `alg=HS256`. |
+| **Mitigation** | (a) Every `jwt.verify` call passes `{ algorithms: ['RS256'] }` explicitly; never an empty / wildcard list. (b) `jwt.sign` is wrapped in `signRs256(payload)` helper that hardcodes `{ algorithm: 'RS256' }` — no callsite picks the algorithm. (c) ESLint rule (`no-restricted-syntax`) forbids direct `jsonwebtoken.verify(` and `jsonwebtoken.sign(` calls outside `src/services/jwt.ts`. (d) Boot-time self-test: sign a fixture payload, tamper its `alg` to `HS256` + `none`, assert verify fails — fails closed if not. |
+| **Test status** | **Required before merge.** `tests/jwt-alg-confusion.test.ts`: (i) `alg=HS256` signed with RSA public key → reject, (ii) `alg=none` → reject, (iii) `alg=RS512` (different RSA variant) → reject. |
+| **Audit signal** | `audit_events.action = 'jwt.alg_confusion_attempt'`, severity high (rare in legitimate traffic; high-signal). |
+
+### A-37 — Redis session-store hijack via network exposure
+
+| | |
+|---|---|
+| **Class** | EoP / Information disclosure (STRIDE: E + I) |
+| **Surface** | The Redis instance backing `src/services/session-store.ts` after the multi-instance migration |
+| **Description** | (1) Redis on `127.0.0.1:6379` with no auth on a multi-tenant VPS — any process on the host can `KEYS session:*` and dump every active session. (2) Redis exposed to the public internet during a misconfigured firewall change. (3) Redis without TLS over the internal Docker network — a compromised sidecar container reads sessions off the wire. |
+| **Mitigation** | (a) Redis listens only on the internal Docker network (`zeroauth_internal`), no public port mapping in `docker-compose.yml`. (b) `requirepass` set from `REDIS_PASSWORD` env (32-byte random; rotated alongside the app's deploy secrets). (c) TLS-encrypted client (`rediss://`) when the broker isn't co-located. (d) Session values are AEAD-encrypted at the application layer with a key in `SESSION_ENCRYPTION_KEY` — Redis sees ciphertext only, so a `KEYS *` dump returns opaque blobs. (e) Per-session keys are namespaced `session:{tenant_id}:{session_id}` and the session-store API rejects cross-tenant key access at the SDK layer (defense in depth in case of a code path that takes session_id from input). (f) Redis `CONFIG GET *` + `CLIENT LIST` accessible only via `redis-cli` over a local Unix socket on the host, never over TCP. |
+| **Test status** | **Required before merge.** `tests/session-store-redis.test.ts`: (i) write + read round-trip, (ii) value at the Redis level is ciphertext (mock Redis, assert stored bytes don't contain the plaintext user ID), (iii) cross-tenant key access throws. Infra: `scripts/check-redis-binding.sh` asserts Redis is not reachable from the public Docker bridge. |
+| **Audit signal** | `audit_events.action = 'session.store_read_failure'` on decryption failure (signal of tampered-with Redis state). |
+| **Open ADR** | `0022-redis-vs-postgres-sessions.md` — captures the decision to use Redis (latency + LRU) vs. Postgres (one less moving piece) and the migration plan from the existing in-memory store. |
+
+### A-38 — Session fixation / race during multi-instance scale-out
+
+| | |
+|---|---|
+| **Class** | Spoofing / EoP (STRIDE: S + E) |
+| **Surface** | Redis-backed session store under concurrent reads/writes from N API instances behind a load balancer |
+| **Description** | (1) Instance A writes `session:S` then crashes before the LB notices; instance B's request finds the session in Redis and proceeds — but A's crash dropped a pending audit write. (2) Race: two concurrent `POST /v1/identity/verify` calls with the same session ID hit instances A and B; both read state `pending`, both flip to `consumed`, two JWTs are minted. (3) After a `POST /api/console/logout`, a request to instance C that hasn't seen the invalidation continues to accept the revoked token. |
+| **Mitigation** | (a) Session-store writes use Redis `SET … NX EX` for create and `WATCH … MULTI … EXEC` for state transitions — single-writer wins, others get `OperationAborted` → retry. (b) Audit writes are committed to Postgres **before** the session-store transition; on a crash mid-write, the next read-side observer sees the audit row + the prior session state and refuses to proceed (fail closed). (c) Logout writes a `jti` to the `revoked_jtis` set with TTL = remaining-token-lifetime; every JWT verify call (every instance) checks `revoked_jtis` (one Redis SISMEMBER per request, sub-ms). (d) Sticky-session affinity at the LB layer is **not** relied on for correctness — every instance must work for every request. (e) Health-check endpoint returns the instance's Redis-connection state; LB removes instances with stale Redis from rotation. |
+| **Test status** | **Required before merge.** `tests/session-store-concurrency.test.ts`: (i) two concurrent state transitions → one succeeds + one retries, (ii) revoked `jti` rejected on any instance, (iii) logout on instance A → fetch on instance B returns 401 within 100 ms. |
+| **Audit signal** | `audit_events.action ∈ {'session.race_lost', 'session.revoked_jti_replay'}`. |
+
+### A-39 — Live-logs SSE leaking other tenants' events
+
+| | |
+|---|---|
+| **Class** | Information disclosure / EoP (STRIDE: I + E) |
+| **Surface** | `GET /api/console/logs/stream` (SSE) — streams real-time `audit_events` + `api_calls` rows for the authenticated tenant |
+| **Description** | (1) The handler filters by `tenant_id` only at the initial query and forgets to filter the subsequent stream — a tenant subscribes to a Postgres `LISTEN` channel that delivers every row. (2) An attacker with one console JWT passes `?tenantId=...` in the URL hoping the handler honours it. (3) An admin debugging an issue connects via the console and the stream includes other tenants' events because admin scope inherits all tenants by default. (4) The SSE long-lived connection survives a tenant-context refresh (e.g., the console JWT is updated mid-stream); the stream keeps emitting under the old tenant scope. |
+| **Mitigation** | (a) `tenantId` for the stream is derived only from `req.console.tenantId`; query/body ignored. (b) The Postgres notification handler (`db.on('notification', …)`) filters payloads by `tenantId` before pushing to the SSE response — never trust the channel to be tenant-scoped. (c) Admin scope cannot use this endpoint; admins use `/api/admin/logs/stream` which is separately authenticated and requires `X-Admin-Scope: cross-tenant` to be explicitly passed (and audit-logged as `admin.cross_tenant_logs_opened`). (d) On any JWT-refresh / scope-change event, the SSE handler closes the connection and forces the client to re-open with the new credential. (e) Output sanitisation: same purity rules as A-31 — never echo `did`, `biometric_template`, raw request bodies, or any field with PII-class metadata. |
+| **Test status** | **Required before merge.** `tests/console-logs-sse.test.ts`: (i) tenant A's stream never receives tenant B's row even when both are published in the same Postgres `NOTIFY`, (ii) `?tenantId=otherTenant` is ignored, (iii) connection closes within 1 s of a `POST /api/console/logout`, (iv) emitted records never contain `did`, `biometric_template`, or the request body. |
+| **Audit signal** | `audit_events.action ∈ {'console.logs_stream_opened', 'console.logs_stream_cross_tenant_attempt'}`. The "opened" row records `tenant_id`, `actor_user_id`, `client_ip_hash` so the audit trail shows who watched what when. |
+| **Open ADR** | `0021-sse-vs-websocket-for-live-streams.md` — SSE is one-way; the dashboard wants typed acks for "log row read". Decide WS upgrade before SDK v1. |
+
+### A-40 — SSE keep-alive abuse / slow-client connection exhaustion
+
+| | |
+|---|---|
+| **Class** | DoS (STRIDE: D) |
+| **Surface** | `GET /api/console/logs/stream`, `GET /v1/proof-pairing/sessions/:id/stream` |
+| **Description** | An attacker opens hundreds of SSE connections and keeps each alive at minimum keep-alive cost (reads bytes very slowly). Each connection consumes a Node.js event-loop slot + a Postgres LISTEN handle + Redis pub/sub slot. The pool exhausts; legitimate console users see "stream unavailable". |
+| **Mitigation** | (a) Per-tenant cap of 5 concurrent SSE connections on `/api/console/logs/stream`; the 6th is rejected with 429 + `Retry-After`. (b) Per-IP cap of 20 concurrent SSE across all SSE endpoints. (c) Idle-timeout: any SSE connection that hasn't acknowledged a heartbeat in 30 s is closed (heartbeat is a `: ping` comment line every 15 s; client-side EventSource handles it transparently). (d) Slow-client write-buffer cap: if the write buffer to the client exceeds 64 KB the connection is closed (Node's `writable.writableLength > 65536`). (e) Connection-count metric exported to Prometheus; alert at 80% of cap per instance. |
+| **Test status** | **Required before merge.** `tests/console-logs-sse-limits.test.ts`: (i) 6th concurrent connection per tenant → 429, (ii) slow client where reads are throttled → connection closed after buffer threshold, (iii) idle-timeout fires after 30 s of no heartbeat ack. |
+| **Audit signal** | `audit_events.action = 'console.logs_stream_capacity_rejected'` for 429s; Prometheus alert for capacity-exhaustion. |
+
 ## Open items (no `A-NN` yet)
 
 - The session store is in-memory; restart wipes session continuity. Not exploitable today (JWTs are stateless), but consumers of `/v1/identity/me` will see false 401s on restart.
@@ -345,5 +495,5 @@
 4. The `test-from-threat-model` skill (to be installed) generates the test scaffolds; each test maps to one `A-NN`.
 
 ---
-LAST_UPDATED: 2026-05-22
+LAST_UPDATED: 2026-06-01
 OWNER: Pulkit Pareek
