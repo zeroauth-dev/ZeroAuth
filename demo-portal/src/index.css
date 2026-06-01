@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+/*
+ * NeoBank — the investor-facing demo surface.
+ *
+ * Visual language: light, generous whitespace, near-black ink, one soft
+ * accent (teal). Borrowed from the dashboard's typographic stack
+ * (Fraunces / Inter Tight) but using the lighter palette so the demo
+ * looks like a real consumer bank rather than developer chrome.
+ *
+ * Tokens are exposed as CSS variables so component code can read them
+ * with `text-[var(--color-text)]` etc. — same pattern as the dashboard.
+ */
+@theme {
+  --color-bg: #fafaf7;
+  --color-bg-raised: #ffffff;
+  --color-border: #e5e5e0;
+  --color-border-subtle: #efefe9;
+  --color-text: #0a0a0a;
+  --color-text-dim: #6b6b66;
+  --color-accent: #0f766e;
+
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-sans: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+html,
+body {
+  font-family: var(--font-sans);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
