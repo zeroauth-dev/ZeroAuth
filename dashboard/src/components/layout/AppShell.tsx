@@ -52,6 +52,18 @@ const NAV = [
   { to: '/verifications', label: 'Verifications', icon: 'shield' },
   { to: '/attendance', label: 'Attendance', icon: 'clock' },
   { to: '/audit', label: 'Audit Log', icon: 'list' },
+  // Outbound HTTPS event delivery (C-094 — backend webhook endpoint).
+  // List/create/delete; the signing secret is shown once on creation.
+  { to: '/webhooks', label: 'Webhooks', icon: 'webhook' },
+  // ADR 0017 — blockchain-agnostic provider configuration. The tenant
+  // operator picks did_provider / verifier_provider /
+  // audit_anchor_provider here; defaults are off-chain across the board.
+  { to: '/security-policy', label: 'Security Policy', icon: 'shield-config' },
+  // Tenant billing — current plan, monthly usage, and the Free / Pro /
+  // Enterprise picker. Hits /api/console/billing/subscribe; hosted
+  // checkout opens via top-level nav so we never touch a payment-
+  // provider SDK from the dashboard.
+  { to: '/billing', label: 'Billing', icon: 'card' },
   // W3 wrapper demo: desktop QR-proof sign-in (ADR-0009). Sits under
   // its own /demo/ namespace so additional wrapper demos can co-locate
   // without polluting the primary console nav.
@@ -73,7 +85,9 @@ function Icon({ name, className }: { name: string; className?: string }) {
     case 'shield': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><path d="M12 3 4 6v6c0 5 3.5 8.5 8 9 4.5-.5 8-4 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg>;
     case 'clock': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>;
     case 'list': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>;
+    case 'webhook': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 1 1 4 14.7"/><path d="m4.93 13.27 4.04-7.07A4 4 0 1 1 14.6 8.86"/><path d="m13.41 8.21 4.05 7.06a4 4 0 1 1-3.45 5.88"/></svg>;
     case 'qr': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M20 14v3M14 17v4h4M20 20v1"/></svg>;
+    case 'card': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/></svg>;
     case 'gear': return <svg viewBox="0 0 24 24" width={16} height={16} {...common}><circle cx="12" cy="12" r="3"/><path d="m19.4 15-1.4-.8.2-1.6-.2-1.6 1.4-.8-2-3.4-1.6.6-1.2-1-.4-1.6h-4l-.4 1.6-1.2 1-1.6-.6-2 3.4 1.4.8.2 1.6-.2 1.6-1.4.8 2 3.4 1.6-.6 1.2 1 .4 1.6h4l.4-1.6 1.2-1 1.6.6z"/></svg>;
     default: return null;
   }

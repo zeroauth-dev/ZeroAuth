@@ -34,6 +34,28 @@ const QrRegistration = lazy(() => import('./routes/demo/QrRegistration'));
 const VerificationsLive = lazy(() => import('./routes/tenant/verifications'));
 const UsersLive = lazy(() => import('./routes/tenant/users'));
 const AuditIntegrityView = lazy(() => import('./routes/tenant/audit-integrity'));
+const WebhooksView = lazy(() => import('./routes/tenant/webhooks'));
+// ADR 0017 security-policy editor — three blockchain-agnostic provider
+// slots. Lazy-loaded; the page is opened rarely (one-off tenant
+// configuration), so paying its bundle cost on every dashboard mount
+// would be wasteful.
+const SecurityPolicyView = lazy(() => import('./routes/tenant/security-policy'));
+// Tenant billing view — current plan, this-period usage bar, and the
+// Free / Pro / Enterprise picker. Lazy-loaded because the page is
+// opened only on plan changes; the polled /overview already surfaces
+// the usage that most operators see day-to-day.
+const BillingView = lazy(() => import('./routes/tenant/billing'));
+
+// Admin live-logs SSE tail (/api/admin/logs/stream). Lazy-loaded so
+// the EventSource cost is only paid when the platform operator opens
+// the page.
+const AdminLiveLogs = lazy(() => import('./routes/admin/live-logs'));
+
+// Public status page — /admin/status. Polls /api/health every 30s
+// and renders subsystem probes (API, DB, Redis, blockchain RPC,
+// tenant API surface). Carries NO auth so external auditors can hit
+// it; lazy-loaded so the unauthenticated bundle doesn't pay its cost.
+const AdminStatus = lazy(() => import('./routes/admin/status'));
 
 function RouteSuspense({ children }: { children: React.ReactNode }) {
   return (
@@ -109,6 +131,15 @@ export function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
               <Route path="/signup-complete" element={<SignupComplete />} />
+              {/* Public status page — no auth, hits /api/health only. */}
+              <Route
+                path="/admin/status"
+                element={
+                  <RouteSuspense>
+                    <AdminStatus />
+                  </RouteSuspense>
+                }
+              />
 
               <Route element={<RequireAuth />}>
                 <Route element={<AppShell />}>
@@ -163,6 +194,38 @@ export function App() {
                     element={
                       <RouteSuspense>
                         <AuditIntegrityView />
+                      </RouteSuspense>
+                    }
+                  />
+                  <Route
+                    path="/webhooks"
+                    element={
+                      <RouteSuspense>
+                        <WebhooksView />
+                      </RouteSuspense>
+                    }
+                  />
+                  <Route
+                    path="/security-policy"
+                    element={
+                      <RouteSuspense>
+                        <SecurityPolicyView />
+                      </RouteSuspense>
+                    }
+                  />
+                  <Route
+                    path="/billing"
+                    element={
+                      <RouteSuspense>
+                        <BillingView />
+                      </RouteSuspense>
+                    }
+                  />
+                  <Route
+                    path="/admin/live-logs"
+                    element={
+                      <RouteSuspense>
+                        <AdminLiveLogs />
                       </RouteSuspense>
                     }
                   />
