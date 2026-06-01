@@ -32,7 +32,6 @@ import v1Routes from './routes/v1';
 import consoleRoutes from './routes/console';
 import consoleSecurityPolicyRoutes from './routes/console-security-policy';
 import consoleWebhooksRoutes from './routes/console-webhooks';
-import consoleBillingRoutes from './routes/console-billing';
 import consoleComplianceRoutes from './routes/console-compliance';
 
 export function createApp() {
@@ -125,14 +124,6 @@ export function createApp() {
   // Paths inside the router are namespaced (`/webhooks`, `/webhooks/:id`)
   // so there is no collision with `consoleRoutes`.
   app.use('/api/console', consoleWebhooksRoutes);
-
-  // Console: Stripe billing (GET /api/console/billing,
-  // POST /api/console/billing/subscribe). Same sibling-router pattern
-  // — disjoint paths from the routers above so mount order is
-  // irrelevant. Gracefully 503s when STRIPE_SECRET_KEY is unset so
-  // the dashboard's Billing tab renders a "not configured" state
-  // rather than throwing.
-  app.use('/api/console', consoleBillingRoutes);
 
   // Console: per-tenant compliance evidence pack
   // (GET /api/console/compliance/evidence-pack). Sibling router under

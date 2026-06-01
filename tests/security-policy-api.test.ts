@@ -86,20 +86,6 @@ jest.mock('../src/services/api-keys', () => ({
   revokeApiKey: jest.fn(),
 }));
 
-// `stripe` is an intentional ADR-pending dep — see src/services/billing.ts.
-// In the test environment it isn't installed, so we stub the whole billing
-// router module to keep the createApp() import chain importable without
-// pulling in the real package.
-jest.mock('../src/services/billing', () => ({
-  StripeNotConfiguredError: class StripeNotConfiguredError extends Error {
-    readonly code = 'stripe_not_configured';
-  },
-  PlanPriceMappingError: class PlanPriceMappingError extends Error {},
-  createCustomer: jest.fn(),
-  createSubscription: jest.fn(),
-  reportUsage: jest.fn(),
-}));
-
 jest.mock('../src/services/usage', () => ({
   getMonthlyUsage: jest.fn().mockResolvedValue({ requests: 0, period: '2026-06' }),
 }));

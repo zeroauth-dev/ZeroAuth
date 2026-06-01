@@ -72,22 +72,6 @@ jest.mock('../src/services/email-templates', () => ({
   verifySignupEmail: () => ({ subject: '', html: '', text: '' }),
 }));
 
-// `stripe` is an intentional ADR-pending dep — see src/services/billing.ts.
-// Stub the whole billing service so the createApp() import chain stays
-// importable without the real package. Same pattern as
-// tests/security-policy-api.test.ts.
-jest.mock('../src/services/billing', () => ({
-  StripeNotConfiguredError: class StripeNotConfiguredError extends Error {
-    readonly code = 'stripe_not_configured';
-  },
-  StripePriceMissingError: class StripePriceMissingError extends Error {},
-  PlanPriceMappingError: class PlanPriceMappingError extends Error {},
-  isBillingConfigured: () => false,
-  createCustomer: jest.fn(),
-  createSubscription: jest.fn(),
-  reportUsage: jest.fn(),
-}));
-
 import { createApp } from '../src/app';
 
 function issueConsoleToken(tenantId: string, email = 'dev@example.com'): string {

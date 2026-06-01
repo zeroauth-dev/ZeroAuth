@@ -1,6 +1,8 @@
 # ADR 0022 — Stripe-backed billing for tenant subscriptions and verify-call metering
 
-- **Status:** Proposed
+> This ADR is withdrawn. The Stripe scaffolding has been removed from the codebase. Revisit when productisation begins.
+
+- **Status:** Withdrawn (2026-06-01 — POC stage; ZeroAuth is not yet selling)
 - **Date:** 2026-06-01
 - **Phase:** Phase 1 sprint 4 (enables the BFSI demo "self-serve plan upgrade" scene; required before public beta opens billing self-service)
 - **Related:** ADR 0013 (audit chain — every plan change writes an audit row), ADR 0017 (blockchain-agnostic posture — plan tiers gate which providers a tenant may select), ADR 0021 (RS256 JWT — console session tokens authorise plan changes), ADR 0016 (zod validation — webhook payloads must be validated before any DB write)

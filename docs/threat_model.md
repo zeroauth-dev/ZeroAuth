@@ -341,6 +341,8 @@
 > and **live operator logs over SSE** (`/api/console/logs/stream`). Each
 > introduces a fresh class of risk; mitigations below are required gates
 > before the surface ships to a pilot tenant.
+>
+> A-33 (Stripe webhook replay) withdrawn — see ADR 0022.
 
 ### A-29 — Webhook receiver SSRF / internal-network pivot
 
@@ -387,17 +389,6 @@
 | **Mitigation** | (a) `tenantId` for every billing endpoint comes from `getTenantContext(req)` or `req.console.tenantId`, never from body / query (same rule as A-10, A-12). (b) Stripe webhook handler verifies `Stripe-Signature` per the official SDK; rejects on mismatch. (c) Quota enforcement is atomic: `UPDATE tenants SET monthly_usage_count = monthly_usage_count + 1 WHERE id = $1 AND monthly_usage_count < plan_limit RETURNING monthly_usage_count` — when zero rows returned, the verify itself returns 402 before invoking the verifier. (d) Plan changes write `audit_events.action = 'billing.plan_changed'` with the actor (Stripe webhook event ID, or console JWT subject). |
 | **Test status** | **Required before merge.** `tests/billing-cross-tenant.test.ts` (tenant A cannot change tenant B's plan); `tests/billing-stripe-signature.test.ts` (forged webhook → 400); `tests/billing-quota-race.test.ts` (1000 concurrent verifies under a 100-verify quota → exactly 100 succeed + 900 return 402). |
 | **Audit signal** | `audit_events.action ∈ {'billing.plan_changed', 'billing.quota_exceeded', 'billing.stripe_event_received', 'billing.stripe_signature_failed'}`. |
-
-### A-33 — Stripe webhook replay / event reordering
-
-| | |
-|---|---|
-| **Class** | Tampering (STRIDE: T) |
-| **Surface** | `POST /api/billing/stripe-webhook` |
-| **Description** | Stripe retries webhook deliveries with the same event ID. If the handler is not idempotent, a retried `invoice.paid` event credits the tenant twice. Alternatively, an out-of-order `customer.subscription.deleted` arriving after a `customer.subscription.updated` rewrites the tenant's plan back to a cancelled state. |
-| **Mitigation** | (a) Persist every processed `stripe_event_id` in a `stripe_events_seen` table with a unique constraint; an `INSERT … ON CONFLICT DO NOTHING` short-circuits replays. (b) Compare the event's `created` timestamp against the tenant's last-processed event timestamp; reject events older than the last processed one with a 200 + log line (Stripe must see 200 to stop retrying). (c) All plan-state writes carry the Stripe event ID in `audit_events.metadata.stripe_event_id` for forensic replay. |
-| **Test status** | **Required before merge.** `tests/billing-stripe-idempotency.test.ts`: send the same event twice → state changes once; send out-of-order events → final state matches latest `created` timestamp. |
-| **Audit signal** | `audit_events.action = 'billing.stripe_event_replayed'` when the dedup constraint fires. |
 
 ### A-34 — RS256 private-key compromise on the API host
 

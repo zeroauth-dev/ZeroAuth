@@ -59,11 +59,6 @@ const NAV = [
   // operator picks did_provider / verifier_provider /
   // audit_anchor_provider here; defaults are off-chain across the board.
   { to: '/security-policy', label: 'Security Policy', icon: 'shield-config' },
-  // Tenant billing — current plan, monthly usage, and the Free / Pro /
-  // Enterprise picker. Hits /api/console/billing/subscribe; hosted
-  // checkout opens via top-level nav so we never touch a payment-
-  // provider SDK from the dashboard.
-  { to: '/billing', label: 'Billing', icon: 'card' },
   // W3 wrapper demo: desktop QR-proof sign-in (ADR-0009). Sits under
   // its own /demo/ namespace so additional wrapper demos can co-locate
   // without polluting the primary console nav.

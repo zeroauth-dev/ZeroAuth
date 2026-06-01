@@ -102,7 +102,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status) WHERE status = 'active';
 
   -- ─── Usage Logs ─────────────────────────────────────────
-  -- Append-only log for every API call, used for metering and billing.
+  -- Append-only log for every API call, used for metering.
   CREATE TABLE IF NOT EXISTS usage_logs (
     id BIGSERIAL PRIMARY KEY,
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -119,7 +119,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_usage_logs_tenant_created ON usage_logs(tenant_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_usage_logs_created ON usage_logs(created_at DESC);
 
-  -- ─── Monthly Usage Aggregates (materialized for billing) ─
+  -- ─── Monthly Usage Aggregates (materialized for metering) ─
   CREATE TABLE IF NOT EXISTS usage_monthly (
     id BIGSERIAL PRIMARY KEY,
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -436,46 +436,6 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
-
-  -- ─── Tenant billing (Stripe integration scaffold) ──────────
-  -- One row per tenant once they opt into a paid plan. Created
-  -- lazily on the first POST /api/console/billing/subscribe; rows
-  -- never exist for tenants who stay on the free tier.
-  --
-  -- stripe_customer_id and stripe_subscription_id are NULL during
-  -- the brief window between row creation and the first successful
-  -- Stripe API call. The console route writes the row first, then
-  -- updates with the ids returned by the Stripe SDK — atomic UPDATE
-  -- on tenant_id so a retried request is idempotent.
-  --
-  -- current_period_end is mirrored from Stripe on each webhook
-  -- delivery (the webhook handler is a follow-on; for now this
-  -- column is populated only at subscribe time). The dashboard's
-  -- "next invoice on" line reads this column directly so a quick
-  -- billing summary doesn't require a round-trip to Stripe.
-  --
-  -- status mirrors Stripe's subscription.status enum verbatim
-  -- (active, trialing, past_due, canceled, incomplete, etc.) — we
-  -- don't translate, so the audit trail matches Stripe's dashboard
-  -- 1:1 when an auditor cross-references.
-  CREATE TABLE IF NOT EXISTS tenant_billing (
-    tenant_id              UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
-    stripe_customer_id     TEXT UNIQUE,
-    stripe_subscription_id TEXT UNIQUE,
-    plan                   VARCHAR(50) NOT NULL DEFAULT 'free'
-      CHECK (plan IN ('free', 'starter', 'growth', 'enterprise')),
-    status                 VARCHAR(32) NOT NULL DEFAULT 'inactive',
-    current_period_end     TIMESTAMPTZ,
-    metadata               JSONB NOT NULL DEFAULT '{}',
-    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
-  CREATE INDEX IF NOT EXISTS idx_tenant_billing_customer
-    ON tenant_billing(stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
-  CREATE INDEX IF NOT EXISTS idx_tenant_billing_subscription
-    ON tenant_billing(stripe_subscription_id) WHERE stripe_subscription_id IS NOT NULL;
-  CREATE INDEX IF NOT EXISTS idx_tenant_billing_status
-    ON tenant_billing(status, current_period_end);
 
   -- ─── Rate-limit buckets (C-026 / audit finding C-10) ─────
   -- Postgres-backed sliding-window rate-limit counters. One row per

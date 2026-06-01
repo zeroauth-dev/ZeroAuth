@@ -40,11 +40,6 @@ const WebhooksView = lazy(() => import('./routes/tenant/webhooks'));
 // configuration), so paying its bundle cost on every dashboard mount
 // would be wasteful.
 const SecurityPolicyView = lazy(() => import('./routes/tenant/security-policy'));
-// Tenant billing view — current plan, this-period usage bar, and the
-// Free / Pro / Enterprise picker. Lazy-loaded because the page is
-// opened only on plan changes; the polled /overview already surfaces
-// the usage that most operators see day-to-day.
-const BillingView = lazy(() => import('./routes/tenant/billing'));
 
 // Admin live-logs SSE tail (/api/admin/logs/stream). Lazy-loaded so
 // the EventSource cost is only paid when the platform operator opens
@@ -210,14 +205,6 @@ export function App() {
                     element={
                       <RouteSuspense>
                         <SecurityPolicyView />
-                      </RouteSuspense>
-                    }
-                  />
-                  <Route
-                    path="/billing"
-                    element={
-                      <RouteSuspense>
-                        <BillingView />
                       </RouteSuspense>
                     }
                   />
