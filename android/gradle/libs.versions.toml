@@ -25,6 +25,11 @@ androidx-biometric        = "1.2.0-alpha05"
 camerax                   = "1.3.4"
 # ML Kit barcode scanning (bundled — no Play Services dependency at install)
 mlkit-barcode             = "17.3.0"
+# ML Kit face detection (bundled — model ships in the APK so the face-
+# capture composable in ui/face/ works offline. Pinned alongside the
+# barcode scanner because both use the same ML Kit common runtime; bumping
+# one without the other risks a transitive constraint conflict.)
+mlkit-face                = "16.1.7"
 # ZXing (for the *generation* side, used in a follow-on iteration; pinned now
 # so the catalog is complete).
 zxing-core                = "3.5.3"
@@ -57,6 +62,29 @@ turbine                   = "1.1.0"
 kotlinx-coroutines-test   = "1.8.1"
 mockito-kotlin            = "5.4.0"
 
+# ── :biometric module deps ────────────────────────────────────────────────
+# TensorFlow Lite — runs MobileFaceNet inference on CPU/NNAPI/GPU. The
+# 2.15.0 wheel is the stable line that ships with AGP 8.5; the support
+# library (FileUtil, NormalizeOp, etc.) is matched to the same minor.
+# Pinned via ADR-0018 (mobile face-embedding pipeline).
+tensorflow-lite           = "2.15.0"
+tensorflow-lite-support   = "0.4.4"
+
+# BouncyCastle — Keccak-256 (EVM-flavour, pre-NIST padding) used for the
+# DID derivation in :biometric. Android's stdlib MessageDigest only
+# provides SHA-3-family Keccak; the on-chain DIDRegistry uses the EVM
+# variant so we need BC here for byte-for-byte parity with the contract.
+bouncycastle-provider     = "1.78.1"
+
+# Guava — `ListenableFuture` surface from CameraX. CameraX 1.3.x marks
+# Guava as `compileOnly`, so :app (which calls `ProcessCameraProvider
+# .getInstance(...)` and reads the returned future) must declare it
+# itself. Pinned to the Android-flavoured wheel because the plain
+# `com.google.guava:guava` JRE jar conflicts with the
+# `com.google.guava:listenablefuture:1.0` placeholder Maven picks via
+# the empty-to-avoid-conflict version override.
+guava                     = "33.3.0-android"
+
 [libraries]
 # Core / lifecycle / activity
 androidx-core-ktx                  = { group = "androidx.core",        name = "core-ktx",                       version.ref = "androidx-core-ktx" }
@@ -73,6 +101,13 @@ androidx-compose-ui-graphics       = { group = "androidx.compose.ui",  name = "u
 androidx-compose-ui-tooling        = { group = "androidx.compose.ui",  name = "ui-tooling" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-material3         = { group = "androidx.compose.material3", name = "material3" }
+# Standalone material3 entry for the :face module. :face is a library
+# module without the Compose BOM applied at its boundary (BOMs are not
+# transitive), so it pins material3 explicitly to keep the API surface
+# predictable when consumed from :app. The version it resolves to comes
+# from the BOM's transitive constraint inside :app — having a separate
+# alias just makes the intent clear at the call-site.
+androidx-compose-material3-pinned  = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-navigation        = { group = "androidx.navigation", name = "navigation-compose",              version.ref = "compose-navigation" }
 
 # Biometric
@@ -87,8 +122,14 @@ androidx-security-crypto           = { group = "androidx.security",    name = "s
 # assets over a synthetic appassets.androidplatform.net origin (ADR-0010).
 androidx-webkit                    = { group = "androidx.webkit",      name = "webkit",                         version.ref = "androidx-webkit" }
 
-# Coroutines — AndroidBiometricGate wraps BiometricPrompt in a suspend fun
+# Coroutines — AndroidBiometricGate wraps BiometricPrompt in a suspend fun.
+# The -core variant is needed by :biometric (pure JVM coroutine scaffolding,
+# no Android Looper dependency); -play-services is the Task<>→ await bridge
+# used by :face for the ML Kit detector. Pinned to the same `kotlinx-
+# coroutines` version so the three artefacts stay in lock-step.
+kotlinx-coroutines-core            = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core",        version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-android         = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android",     version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-play-services   = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "kotlinx-coroutines" }
 
 # CameraX
 androidx-camera-core               = { group = "androidx.camera",      name = "camera-core",                    version.ref = "camerax" }
@@ -99,6 +140,16 @@ androidx-camera-view               = { group = "androidx.camera",      name = "c
 # ML Kit barcode (bundled flavor — model ships in the APK, no Play Services
 # install-time download).
 mlkit-barcode-scanning             = { group = "com.google.mlkit",     name = "barcode-scanning",               version.ref = "mlkit-barcode" }
+
+# ML Kit face detection (bundled flavor — same install-time guarantee
+# as the barcode scanner). Drives the ui/face/FaceCaptureScreen
+# composable. The artefact name is `face-detection`; the Play Services
+# variant would be `play-services-mlkit-face-detection`. We pick the
+# `com.google.mlkit:face-detection` flavour because the W3 wrapper has
+# zero Play Services dependency budget — installs must work on
+# Play-services-less ROMs and on first launch without a network round
+# trip.
+mlkit-face-detection               = { group = "com.google.mlkit",     name = "face-detection",                 version.ref = "mlkit-face" }
 
 # ZXing core — used by the proof-side QR *generation* in a follow-on iteration.
 # Imported here so the catalog is complete and bumps stay in one place.
@@ -133,9 +184,23 @@ robolectric                        = { group = "org.robolectric",      name = "r
 turbine                            = { group = "app.cash.turbine",     name = "turbine",                        version.ref = "turbine" }
 kotlinx-coroutines-test            = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test",       version.ref = "kotlinx-coroutines-test" }
 mockito-kotlin                     = { group = "org.mockito.kotlin",   name = "mockito-kotlin",                 version.ref = "mockito-kotlin" }
+# kotlin-test — used by :biometric's pure-JVM unit tests (assertEquals
+# with array equality semantics). Pinned to the same Kotlin version as
+# the rest of the toolchain.
+kotlin-test                        = { group = "org.jetbrains.kotlin", name = "kotlin-test",                    version.ref = "kotlin" }
+
+# ── :biometric module deps ───────────────────────────────────────────────
+tensorflow-lite                    = { group = "org.tensorflow",       name = "tensorflow-lite",                version.ref = "tensorflow-lite" }
+tensorflow-lite-support            = { group = "org.tensorflow",       name = "tensorflow-lite-support",        version.ref = "tensorflow-lite-support" }
+bouncycastle-provider              = { group = "org.bouncycastle",     name = "bcprov-jdk18on",                 version.ref = "bouncycastle-provider" }
+
+# ── Guava (CameraX ListenableFuture surface, consumed in :app) ──────────
+guava                              = { group = "com.google.guava",     name = "guava",                          version.ref = "guava" }
 
 [plugins]
 android-application                = { id = "com.android.application",        version.ref = "agp" }
+# :biometric and :face are library modules, not applications.
+android-library                    = { id = "com.android.library",            version.ref = "agp" }
 kotlin-android                     = { id = "org.jetbrains.kotlin.android",   version.ref = "kotlin" }
 kotlin-serialization               = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 kotlin-compose                     = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

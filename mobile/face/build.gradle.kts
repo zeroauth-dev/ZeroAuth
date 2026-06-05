@@ -37,6 +37,13 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+    // The :face module is consumed by the W3 app at android/app/, which
+    // is on Kotlin 2.0 + the K2 Compose Gradle plugin. The legacy
+    // `composeOptions { kotlinCompilerExtensionVersion = ... }` block
+    // below is a no-op under K2 — the kotlin-compose plugin owns the
+    // compiler-version mapping. Apply the K2 plugin here so the module
+    // builds under the android/ Gradle root.
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -83,10 +90,11 @@ android {
         buildConfig = false
     }
 
-    composeOptions {
-        // Same compose-compiler pin as :app — Kotlin 1.9.22 path.
-        kotlinCompilerExtensionVersion = libs.versions.compose.compiler.get()
-    }
+    // Under Kotlin 2 + the `kotlin-compose` plugin (applied above) the
+    // compose-compiler version is selected by the plugin from the Kotlin
+    // toolchain pin in libs.versions.toml. The legacy `composeOptions {
+    // kotlinCompilerExtensionVersion = ... }` dance was only needed on
+    // Kotlin 1.x. Leaving it absent is the K2-correct posture.
 
     testOptions {
         unitTests {
@@ -120,7 +128,16 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
 
-    // ── Compose — pinned material3 (no BOM at the library boundary) ────
+    // ── Compose — BOM picks the matching versions ─────────────────────
+    //
+    // Compose artefacts in android/gradle/libs.versions.toml are intentionally
+    // version-less (the W3 :app applies the BOM to align the constellation).
+    // :face is a library module, so it applies the same BOM here so its
+    // compileClasspath resolves the Compose artefacts to the BOM-pinned
+    // version when built standalone (`gradle :face:assembleDebug`). When
+    // consumed transitively from :app the BOM also constrains the
+    // dependency graph there.
+    implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)

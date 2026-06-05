@@ -31,8 +31,12 @@
     <string name="approve_cta">Approve</string>
     <string name="approve_cancel">Cancel</string>
 
-    <!-- Awaiting biometric -->
+    <!-- Awaiting biometric (legacy — login flow no longer drives BiometricPrompt) -->
     <string name="biometric_waiting">Confirm with your fingerprint or face</string>
+
+    <!-- Awaiting face capture (login proof-pairing flow) -->
+    <string name="face_capture_title">Look at the front camera</string>
+    <string name="face_capture_subtitle">ZeroAuth captures your face entirely on this phone to derive the proof witness. The image never leaves the device.</string>
 
     <!-- Proving -->
     <string name="proving_title">Generating zero-knowledge proof…</string>
@@ -58,4 +62,65 @@
     <!-- Error placeholders (filled in as the network layer lands) -->
     <string name="error_camera_init">Camera initialisation failed. Restart the app.</string>
     <string name="error_unknown">Something went wrong. Please try again.</string>
+
+    <!-- ─── Step-by-step guidance copy (registration ceremony) ───
+         Investor-grade UX (per the C-159 redesign): after every step,
+         the user should know EXACTLY what to do next. The copy below
+         is intentionally plain and brand-aware (no jargon, no error
+         codes leaked to users). -->
+
+    <!-- Registration screen header -->
+    <string name="reg_screen_title">Create your account</string>
+    <string name="reg_screen_subtitle">Three quick steps. Your face stays on this phone — only a one-way fingerprint reaches the server.</string>
+
+    <!-- Step 1: scan QR 1 of 3 -->
+    <string name="reg_step1_idle_headline">Step 1 — Pair this phone</string>
+    <string name="reg_step1_idle_body">Open the signup page on your laptop. Scan the QR labelled \"1 of 3\".</string>
+    <string name="reg_step1_pairing">Pairing this phone with your laptop…</string>
+    <string name="reg_step1_done_title">Device paired</string>
+    <string name="reg_step1_done_hint">Now look at the front camera so we can capture your face.</string>
+
+    <!-- Step 2: capture face + submit commitment -->
+    <string name="reg_step2_face_headline">Step 2 — Capture your face</string>
+    <string name="reg_step2_face_body">Hold the phone steady and look at the front camera. Your face is processed entirely on this device.</string>
+    <string name="reg_step2_face_done_title">Identity captured</string>
+    <string name="reg_step2_face_done_hint">Now scan the QR labelled \"2 of 3\" on your laptop.</string>
+    <string name="reg_step2_scan_headline">Step 2 — Submit your identity</string>
+    <string name="reg_step2_scan_body">Scan the QR labelled \"2 of 3\" on your laptop. We will send a one-way commitment — never the face image.</string>
+    <string name="reg_step2_committing">Submitting your identity commitment…</string>
+    <string name="reg_step2_done_title">Identity registered</string>
+    <string name="reg_step2_done_hint">One step to go. Scan the QR labelled \"3 of 3\" on your laptop.</string>
+
+    <!-- Step 3: scan QR 3 of 3 + generate proof -->
+    <string name="reg_step3_scan_headline">Step 3 — Verify with a proof</string>
+    <string name="reg_step3_scan_body">Scan the QR labelled \"3 of 3\" on your laptop. We will prove you are the same person who registered — without revealing anything else.</string>
+    <string name="reg_step3_proving_headline">Generating your zero-knowledge proof…</string>
+    <string name="reg_step3_proving_body">~5 seconds on this device. Please don\'t switch apps while we work.</string>
+    <string name="reg_step3_verifying">Sending the proof to the server…</string>
+
+    <!-- Terminal success -->
+    <string name="reg_done_title">You\'re signed up</string>
+    <string name="reg_done_body">Welcome to ZeroAuth. Your biometric never left this device, and your identity is now anchored on the audit chain.</string>
+    <string name="reg_done_view_identity">View my identity</string>
+    <string name="reg_done_continue">Continue to dashboard</string>
+
+    <!-- Generic retry CTAs -->
+    <string name="action_retry">Retry</string>
+    <string name="action_start_over">Start over</string>
+    <string name="action_use_camera">Scan with camera</string>
+    <string name="action_paste_link">Paste a code instead</string>
+    <string name="action_submit_step">Submit step</string>
+
+    <!-- ─── Login (proof-pairing) step copy ─── -->
+    <string name="login_step_scan">Step 1 — Scan the laptop\'s QR</string>
+    <string name="login_step_face">Step 2 — Capture your face</string>
+    <string name="login_step_proof">Step 3 — Send the proof</string>
+    <string name="login_scan_success_title">Code accepted</string>
+    <string name="login_scan_success_hint">Capturing your face next…</string>
+    <string name="login_face_success_title">Face captured</string>
+    <string name="login_face_success_hint">Generating your zero-knowledge proof…</string>
+    <string name="login_proving_headline">Generating your zero-knowledge proof…</string>
+    <string name="login_proving_body">~5 seconds on this device. Please don\'t switch apps while we work.</string>
+    <string name="login_proof_ready_title">Proof ready</string>
+    <string name="login_proof_ready_hint">Hold this QR up to your laptop\'s webcam to sign in.</string>
 </resources>

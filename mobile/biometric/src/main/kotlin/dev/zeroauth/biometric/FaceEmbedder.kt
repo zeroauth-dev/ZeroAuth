@@ -11,7 +11,12 @@ import org.tensorflow.lite.support.common.FileUtil
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.image.ops.ResizeOp
 import org.tensorflow.lite.support.image.ImageProcessor
-import org.tensorflow.lite.support.image.ops.NormalizeOp
+// NormalizeOp lives under `common.ops`, not `image.ops`. The TFLite-support
+// AAR (0.4.4) groups image-pipeline ops (Resize, Crop) under image.ops and
+// tensor-level numeric ops (Normalize, Cast, Quantize, Dequantize) under
+// common.ops. The previous import path resolved at IDE-time against an
+// older tflite-support build that since moved NormalizeOp.
+import org.tensorflow.lite.support.common.ops.NormalizeOp
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -156,8 +161,25 @@ class TfliteFaceEmbedder(
         /** MobileFaceNet input edge length. Pinned by assets/MODEL.md. */
         const val INPUT_SIZE: Int = 112
 
-        /** MobileFaceNet output embedding dimension. */
-        const val EMBEDDING_DIM: Int = 128
+        /**
+         * MobileFaceNet output embedding dimension.
+         *
+         * Originally 128 per the upstream sirius-ai .pb conversion.
+         * The .tflite shipped at src/main/assets/mobilefacenet.tflite
+         * is the MCarlomagno mirror — a 192-dim variant of the same
+         * MobileFaceNet architecture with the same input contract
+         * ([1,112,112,3] float32 normalised to [-1,1]). The tensor
+         * shape error `768 bytes / 4-bytes-per-float = 192 floats`
+         * surfaced this mismatch on first real-device run.
+         *
+         * Bumping to 192 matches the model. The Quantizer downstream
+         * scales linearly with this constant (192 × 2 = 384 bytes
+         * BE int16); SHA-256 normalises that to 32 bytes regardless.
+         * If a future model bumps embedding size, only this constant
+         * needs to change — the rest of the pipeline is dimension-
+         * agnostic by construction.
+         */
+        const val EMBEDDING_DIM: Int = 192
 
         /** Default asset path. Overridable for A/B testing alternate models. */
         const val DEFAULT_MODEL_PATH: String = "mobilefacenet.tflite"

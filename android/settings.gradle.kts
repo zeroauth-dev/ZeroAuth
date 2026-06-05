@@ -36,3 +36,23 @@ dependencyResolutionManagement {
 rootProject.name = "ZeroAuth"
 
 include(":app")
+
+// ── Phase 1 modules consumed by :app ───────────────────────────────────────
+//
+// The sources live under repo-root mobile/ — that tree was originally
+// scaffolded with its own settings.gradle.kts (Kotlin 1.9.22 + AGP 8.3),
+// but the production W3-spike app under android/ is what actually ships,
+// so we expose the two modules here and let them resolve against this
+// project's catalog (Kotlin 2.0.20 + AGP 8.5.2). The per-module
+// build.gradle.kts files have been patched to use this catalog's
+// aliases.
+//
+// :biometric — on-device face → Poseidon commitment pipeline
+//              (FaceEmbedder + Quantizer + SHA-256 + Poseidon + Keccak256).
+// :face      — CameraX + ML Kit face-capture state machine
+//              (produces the 112×112 cropped face Bitmap consumed by
+//              :biometric and the registration / scan flows in :app).
+include(":biometric")
+include(":face")
+project(":biometric").projectDir = file("../mobile/biometric")
+project(":face").projectDir = file("../mobile/face")

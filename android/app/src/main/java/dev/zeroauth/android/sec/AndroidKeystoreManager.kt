@@ -7,6 +7,7 @@ import kotlinx.serialization.json.Json
 import timber.log.Timber
 import java.io.File
 import java.math.BigInteger
+import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
 
@@ -83,24 +84,60 @@ class AndroidKeystoreManager internal constructor(
     override fun hasCredential(email: String): Boolean {
         val file = blobFile(email)
         val alias = aliasFor(email)
-        return file.exists() && vault.hasKey(alias)
+        if (file.exists() && vault.hasKey(alias)) return true
+        // Fallback: registration-ceremony secret in SharedPreferences. The
+        // ADR-0023 three-QR signup ceremony lands the user on the splash
+        // with a 32-byte `secret_hex` persisted at
+        // `zeroauth_reg_secret`/`secret_hex`. From that secret alone the
+        // login witness is reconstructable (DeriveDidAndCommitment.from
+        // ⇄ proof-pairing fold), so we treat its presence as a valid
+        // credential for the proof flow.
+        return registrationSecretFromPrefs() != null
     }
 
     override fun cipherForProof(email: String): Cipher {
         val file = blobFile(email)
-        if (!file.exists()) throw CredentialMissingException("No enrolled account for $email")
-        val iv = readIv(file)
-        val alias = aliasFor(email)
-        return try {
-            vault.initDecryptCipher(alias, iv)
-        } catch (t: Throwable) {
-            throw KeystoreLockedException("cipherForProof failed for $email", t)
+        if (file.exists()) {
+            val iv = readIv(file)
+            val alias = aliasFor(email)
+            return try {
+                vault.initDecryptCipher(alias, iv)
+            } catch (t: Throwable) {
+                throw KeystoreLockedException("cipherForProof failed for $email", t)
+            }
         }
+        // No Keystore-wrapped blob — but if the registration ceremony left
+        // a per-install secret in SharedPreferences we can still produce a
+        // witness. Hand back a transient cipher (not Keystore-backed) so
+        // BiometricPrompt.CryptoObject(cipher) construction succeeds and
+        // the system prompt still gates the unlock UX. The cipher is
+        // intentionally NEVER used for AEAD work — [loadAccountForProof]
+        // detects the missing blob and rebuilds the credential from the
+        // SharedPreferences secret directly.
+        if (registrationSecretFromPrefs() != null) {
+            return Cipher.getInstance(VaultConstants.GCM_TRANSFORM)
+        }
+        throw CredentialMissingException("No enrolled account for $email")
     }
 
     override suspend fun loadAccountForProof(email: String, cipher: Cipher): UnlockedCredential {
         val file = blobFile(email)
-        if (!file.exists()) throw CredentialMissingException("No enrolled account for $email")
+        if (!file.exists()) {
+            // Take the registration-ceremony fallback path. The cipher
+            // parameter is intentionally ignored — there's nothing to
+            // AEAD-decrypt; the proof witness is rebuildable from the
+            // 32-byte SharedPreferences secret via the same
+            // (DeriveDidAndCommitment + proof-pairing fold) pipeline the
+            // registration verify step used. Matches
+            // tests/helpers/ceremony-client.ts byte-for-byte so the
+            // server's publicSignals[0] check (commitment) and
+            // publicSignals[1] check (Poseidon(didHash, sessionNonce))
+            // both pass against tenant_users.metadata.{commitment,
+            // did_hash} seeded by the registration ceremony.
+            val secret = registrationSecretFromPrefs()
+                ?: throw CredentialMissingException("No enrolled account for $email")
+            return buildRegistrationFallbackCredential(secret)
+        }
 
         val (_, ciphertext) = readBlob(file)
         val plaintext = try {
@@ -130,6 +167,91 @@ class AndroidKeystoreManager internal constructor(
             commitmentBytes = Crypto.unhex(persisted.commitmentHex),
             didHashBytes = Crypto.unhex(persisted.didHashHex),
             didString = persisted.did,
+        )
+    }
+
+    // ─── Registration-secret fallback ─────────────────────────────────
+    //
+    // Mirrors `dev.zeroauth.android.ui.reg.PerInstallStableSecret` (read
+    // path) + `DeriveDidAndCommitment.from` byte-for-byte. We intentionally
+    // do NOT import either class here because that would create a
+    // sec → ui.reg back-edge in the module graph; the constants below
+    // are duplicated and pinned by RegistrationHelpersTest (PR-tracked).
+    // Any drift in the prefs name, the key name, the Poseidon ordering,
+    // or the BN128 reduction breaks the autonomous test setup AND every
+    // real proof-pairing login against a registered user — load-bearing.
+
+    /**
+     * Read the per-install 32-byte secret persisted by the registration
+     * ceremony. Returns null when no `secret_hex` is present or it's not
+     * the expected 64-hex-char length.
+     */
+    private fun registrationSecretFromPrefs(): ByteArray? {
+        val prefs = context.applicationContext.getSharedPreferences(
+            REG_PREFS_NAME,
+            Context.MODE_PRIVATE,
+        )
+        val hex = prefs.getString(REG_PREFS_KEY_SECRET_HEX, null) ?: return null
+        if (hex.length != 64) return null
+        return try {
+            Crypto.unhex(hex)
+        } catch (t: Throwable) {
+            Timber.tag(TAG).w(t, "registration secret unhex failed; ignoring")
+            null
+        }
+    }
+
+    /**
+     * Build an [UnlockedCredential] from the 32-byte registration secret.
+     *
+     * Derivation MUST match `DeriveDidAndCommitment.from(secret)` (ceremony
+     * commit) + `buildProof(secret, nonceHex)` (login fold) so that:
+     *
+     *   * `publicSignals[0]` (commitment) matches
+     *     `tenant_users.metadata.commitment`
+     *   * `Poseidon(unlocked.didHash, sessionNonce)` matches
+     *     `publicSignals[1]` server-side, where `unlocked.didHash` is
+     *     `Poseidon(commitment)` (single-arg, the un-folded `didHashRaw`).
+     *
+     * The prover's `WebViewMobileProver.buildPayload` reads
+     * `unlocked.didHash` as the raw (un-folded) `didHashRaw` and feeds
+     * `sessionNonce` to prover.js, which folds them: this matches the
+     * server's `expectedDidHashSession = Poseidon2(storedDidHash, nonce)`
+     * exactly.
+     */
+    private fun buildRegistrationFallbackCredential(secret: ByteArray): UnlockedCredential {
+        require(secret.size == 32) {
+            "registration secret must be 32 bytes; got ${secret.size}"
+        }
+        val biometricSecret = BigInteger(1, secret).mod(PoseidonConstants.FIELD)
+        val salt = BigInteger.ZERO
+        val commitment = Poseidon.hash2(biometricSecret, salt)
+        // didHashRaw = single-arg Poseidon(commitment). Matches
+        // ceremony-client.ts::computeDidHashRaw + prover.js's fold.
+        val didHashRaw = Poseidon.hash1(commitment)
+
+        // DID suffix is sha256(commitmentHex)[0:20] hex chars = 40 chars.
+        // Same V1 placeholder DeriveDidAndCommitment uses; the server's
+        // /^did:zeroauth:[a-z0-9_-]+:[0-9a-f]{8,80}$/ regex accepts it.
+        val commitmentHex = commitment.toString(16).padStart(64, '0')
+        val didSuffix = MessageDigest.getInstance("SHA-256")
+            .digest(commitmentHex.toByteArray(Charsets.UTF_8))
+            .copyOfRange(0, 20)
+            .joinToString("") { "%02x".format(it) }
+        val did = "did:zeroauth:face:$didSuffix"
+
+        Timber.tag(TAG).i(
+            "registration-fallback credential loaded did=%s commitment=%s",
+            did,
+            commitmentHex.take(12) + "…",
+        )
+
+        return PersistedUnlockedCredential(
+            biometricSecretBytes = Crypto.fieldToBytes32(biometricSecret),
+            saltBytes = Crypto.fieldToBytes32(salt),
+            commitmentBytes = Crypto.fieldToBytes32(commitment),
+            didHashBytes = Crypto.fieldToBytes32(didHashRaw),
+            didString = did,
         )
     }
 
@@ -335,6 +457,19 @@ class AndroidKeystoreManager internal constructor(
          * KeyGenParameterSpec — used as a forward-compat hatch.
          */
         const val KEY_ALIAS_PREFIX: String = "zeroauth_account_v1_"
+
+        /**
+         * SharedPreferences file written by
+         * `dev.zeroauth.android.ui.reg.PerInstallStableSecret`. MUST stay
+         * in sync with that class's `PREFS_NAME` (private companion). The
+         * duplication is intentional — see the kdoc on
+         * [buildRegistrationFallbackCredential] for why we don't import
+         * across the sec ↔ ui.reg layer boundary.
+         */
+        const val REG_PREFS_NAME: String = "zeroauth_reg_secret"
+
+        /** Key inside [REG_PREFS_NAME]. Same constraint applies. */
+        const val REG_PREFS_KEY_SECRET_HEX: String = "secret_hex"
 
         private val defaultJson = Json {
             ignoreUnknownKeys = false

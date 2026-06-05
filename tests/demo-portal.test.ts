@@ -79,6 +79,16 @@ jest.mock('../src/services/proof-pairing', () => {
   };
 });
 
+// The /claim route writes a `pairing.desktop_claimed` audit row via
+// platform.recordAuditEvent (→ audit.appendAuditEvent → DB). Partial-mock
+// platform so recordAuditEvent is a no-op; everything else (used by the
+// v1 router at createApp time) stays real.
+const recordAuditEventMock = jest.fn().mockResolvedValue(undefined);
+jest.mock('../src/services/platform', () => {
+  const actual = jest.requireActual('../src/services/platform');
+  return { ...actual, recordAuditEvent: (...args: unknown[]) => recordAuditEventMock(...args) };
+});
+
 // Console-surface services app.ts pulls at import — no-op stubs so
 // createApp() doesn't reach for live state.
 jest.mock('../src/services/api-keys', () => ({
@@ -170,7 +180,7 @@ describe('POST /api/demo-portal/init-login', () => {
     expect(pairingCreateSessionMock).toHaveBeenCalledTimes(1);
     const callArgs = pairingCreateSessionMock.mock.calls[0];
     expect(callArgs[0]).toBe(DEMO_TENANT_ID);
-    expect(callArgs[1]).toBe('test');
+    expect(callArgs[1]).toBe('live');
     expect(callArgs[2]).toBeNull();
   });
 });
@@ -225,10 +235,10 @@ describe('GET /api/demo-portal/me', () => {
       maskedNumber: expect.stringMatching(/^•••• /),
     });
 
-    // SQL is scoped to (id, demo_portal_tenant_id, 'test').
+    // SQL is scoped to (id, demo_portal_tenant_id, 'live').
     expect(mockQuery).toHaveBeenCalledTimes(1);
     const [, params] = mockQuery.mock.calls[0];
-    expect(params).toEqual([userId, DEMO_TENANT_ID, 'test']);
+    expect(params).toEqual([userId, DEMO_TENANT_ID, 'live']);
   });
 });
 
@@ -316,7 +326,7 @@ describe('GET /api/demo-portal/sessions/:id/events — SSE', () => {
 // ─── (6) Cross-tenant — another tenant's session is invisible ─────────
 //
 // The route locks every DB lookup to (id, demo_portal_tenant_id,
-// 'test'). A session created by ANY other tenant returns zero rows and
+// 'live'). A session created by ANY other tenant returns zero rows and
 // the route surfaces 404 — same body as the "doesn't exist" branch
 // (A-25 enumeration defence).
 
@@ -340,6 +350,187 @@ describe('cross-tenant isolation', () => {
 
     expect(mockQuery).toHaveBeenCalledTimes(1);
     const [, params] = mockQuery.mock.calls[0];
-    expect(params).toEqual([otherTenantSessionId, DEMO_TENANT_ID, 'test']);
+    expect(params).toEqual([otherTenantSessionId, DEMO_TENANT_ID, 'live']);
+  });
+});
+
+// ─── (7) POST /sessions/:id/claim — desktop-bind cookie claim ─────────
+//
+// Phone-push: the phone submits the proof, the desktop claims its own
+// session cookie. The claim is bound to the `demo_portal_claim` cookie
+// minted at init-login (security-review Finding 1) and is single-use
+// (Finding 4); every not-ready branch returns a uniform 409 (Finding 3).
+
+describe('POST /api/demo-portal/sessions/:id/claim', () => {
+  /**
+   * Run init-login for a known session id and return the plaintext
+   * `demo_portal_claim` token the server set on the response — the
+   * desktop-bind capability a real browser would hold.
+   */
+  async function initLoginAndGetClaimToken(sessionId: string): Promise<string> {
+    pairingCreateSessionMock.mockResolvedValueOnce({
+      id: sessionId,
+      nonce: crypto.randomBytes(31).toString('hex'),
+      sessionBindToken: 'unused-by-spa',
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      qrPayload: `za:pair:1:${sessionId}:nonce:zeroauth.dev:abcd`,
+    });
+    const res = await request(app).post('/api/demo-portal/init-login').send({});
+    expect(res.status).toBe(201);
+    const setCookie = res.headers['set-cookie'];
+    const arr = Array.isArray(setCookie) ? setCookie : [String(setCookie)];
+    const claim = arr.find((c) => c.startsWith('demo_portal_claim='));
+    expect(claim).toBeDefined();
+    // Strict + HttpOnly on the claim cookie (Finding 1 / Finding 5).
+    expect(claim).toMatch(/HttpOnly/i);
+    expect(claim).toMatch(/SameSite=Strict/i);
+    expect(claim).toMatch(/Path=\/api\/demo-portal/i);
+    return claim!.slice('demo_portal_claim='.length).split(';')[0];
+  }
+
+  /** A consumed pairing row (as loadPairingRow would return). */
+  function consumedRow(sessionId: string, userId: string) {
+    return {
+      id: sessionId,
+      state: 'consumed',
+      consumed_user_id: userId,
+      consumed_at: new Date('2026-06-04T12:10:00.000Z'),
+      expires_at: new Date(Date.now() + 5 * 60 * 1000),
+      last_error_code: null,
+      tenant_id: DEMO_TENANT_ID,
+    };
+  }
+
+  /** Route mockQuery by table: pairing row, then user row. */
+  function seedConsumed(sessionId: string, userId: string, did: string) {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (/proof_pairing_sessions/.test(sql)) return { rows: [consumedRow(sessionId, userId)] };
+      if (/tenant_users/.test(sql)) {
+        return { rows: [{ id: userId, external_id: 'demo-user-1', full_name: 'Asha Demo', did }] };
+      }
+      return { rows: [] };
+    });
+  }
+
+  it('200 + Set-Cookie session when the row is consumed and the claim cookie is valid', async () => {
+    const sessionId = crypto.randomUUID();
+    const userId = '55555555-5555-5555-5555-555555555555';
+    const did = 'did:zeroauth:face:9f71801e57db9f337204933063586d3b95d27a11';
+    const claimToken = await initLoginAndGetClaimToken(sessionId);
+    seedConsumed(sessionId, userId, did);
+
+    const res = await request(app)
+      .post(`/api/demo-portal/sessions/${sessionId}/claim`)
+      .set('Cookie', `demo_portal_claim=${claimToken}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.userId).toBe(userId);
+    expect(res.body.did).toBe(did);
+    // Mints the SESSION cookie on the desktop's own response.
+    const setCookie = res.headers['set-cookie'];
+    const cookieStr = Array.isArray(setCookie) ? setCookie.join(';') : String(setCookie);
+    expect(cookieStr).toMatch(/demo_portal_session=/);
+    expect(cookieStr).toMatch(/HttpOnly/i);
+    // Audit row was written before the cookie was minted (Finding 2).
+    expect(recordAuditEventMock).toHaveBeenCalledTimes(1);
+    expect(recordAuditEventMock.mock.calls[0][1]).toMatchObject({
+      action: 'pairing.desktop_claimed',
+      entityId: sessionId,
+      status: 'success',
+    });
+  });
+
+  it('409 pairing_not_ready when the claim cookie is missing (Finding 1)', async () => {
+    const sessionId = crypto.randomUUID();
+    const userId = '66666666-6666-6666-6666-666666666666';
+    await initLoginAndGetClaimToken(sessionId); // token exists server-side…
+    seedConsumed(sessionId, userId, 'did:zeroauth:face:abc');
+
+    // …but the caller presents NO claim cookie → uniform not-ready.
+    const res = await request(app)
+      .post(`/api/demo-portal/sessions/${sessionId}/claim`)
+      .send({});
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('pairing_not_ready');
+    expect(recordAuditEventMock).not.toHaveBeenCalled();
+  });
+
+  it('409 pairing_not_ready when the claim cookie is wrong (Finding 1)', async () => {
+    const sessionId = crypto.randomUUID();
+    await initLoginAndGetClaimToken(sessionId);
+    seedConsumed(sessionId, '77777777-7777-7777-7777-777777777777', 'did:zeroauth:face:abc');
+
+    const res = await request(app)
+      .post(`/api/demo-portal/sessions/${sessionId}/claim`)
+      .set('Cookie', 'demo_portal_claim=not-the-real-token')
+      .send({});
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('pairing_not_ready');
+  });
+
+  it('409 pairing_not_ready when the row is not yet consumed (Finding 3 uniformity)', async () => {
+    const sessionId = crypto.randomUUID();
+    const claimToken = await initLoginAndGetClaimToken(sessionId);
+    // Row exists for the tenant but is still `issued`.
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (/proof_pairing_sessions/.test(sql)) {
+        return { rows: [{ ...consumedRow(sessionId, 'x'), state: 'issued', consumed_user_id: null }] };
+      }
+      return { rows: [] };
+    });
+
+    const res = await request(app)
+      .post(`/api/demo-portal/sessions/${sessionId}/claim`)
+      .set('Cookie', `demo_portal_claim=${claimToken}`)
+      .send({});
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('pairing_not_ready');
+  });
+
+  it('409 pairing_not_ready for an unknown / other-tenant session (same as pending)', async () => {
+    const sessionId = crypto.randomUUID();
+    const claimToken = await initLoginAndGetClaimToken(sessionId);
+    mockQuery.mockResolvedValue({ rows: [] }); // tenant-scoped query finds nothing
+
+    const res = await request(app)
+      .post(`/api/demo-portal/sessions/${sessionId}/claim`)
+      .set('Cookie', `demo_portal_claim=${claimToken}`)
+      .send({});
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('pairing_not_ready');
+  });
+
+  it('400 for a malformed session id', async () => {
+    const res = await request(app)
+      .post('/api/demo-portal/sessions/not-a-valid-id/claim')
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_session_id');
+  });
+
+  it('is single-use: the second claim with the same cookie is rejected (Finding 4)', async () => {
+    const sessionId = crypto.randomUUID();
+    const userId = '88888888-8888-8888-8888-888888888888';
+    const claimToken = await initLoginAndGetClaimToken(sessionId);
+    seedConsumed(sessionId, userId, 'did:zeroauth:face:abc');
+
+    const first = await request(app)
+      .post(`/api/demo-portal/sessions/${sessionId}/claim`)
+      .set('Cookie', `demo_portal_claim=${claimToken}`)
+      .send({});
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .post(`/api/demo-portal/sessions/${sessionId}/claim`)
+      .set('Cookie', `demo_portal_claim=${claimToken}`)
+      .send({});
+    expect(second.status).toBe(409);
+    expect(second.body.error).toBe('pairing_not_ready');
   });
 });

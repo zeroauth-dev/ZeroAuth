@@ -1,0 +1,4 @@
+# The MobileFaceNet TFLite model (~5 MB) is intentionally NOT committed.
+# It is fetched/verified out-of-band and bundled by the release pipeline.
+# See MODEL.md in this directory + MODEL_SHA256.txt for the pinned hash.
+*.tflite

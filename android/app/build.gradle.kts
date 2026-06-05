@@ -120,6 +120,15 @@ android {
                 ?.let { !it }  // explicit false → flag = false
                 ?: true        // unset → debug default = true
             buildConfigField("boolean", "DEMO_USE_STABLE_SECRET", demoFlag.toString())
+
+            // API base URL. Overridable via `-PZEROAUTH_BASE_URL=…` so a
+            // debug-signed (auto-signed, installable) build can point at
+            // the LIVE server without the release keystore — e.g.
+            //   assembleDebug -PZEROAUTH_BASE_URL=https://api.zeroauth.dev/
+            // Default = localhost (the adb-reverse tunnel target).
+            val baseUrl: String = (project.findProperty("ZEROAUTH_BASE_URL") as String?)
+                ?: "http://localhost:3030/"
+            buildConfigField("String", "ZEROAUTH_BASE_URL", "\"$baseUrl\"")
         }
         release {
             isMinifyEnabled = true
@@ -150,6 +159,13 @@ android {
                 ?.equals("true", ignoreCase = true)
                 ?: false       // unset → release default = false
             buildConfigField("boolean", "DEMO_USE_STABLE_SECRET", demoFlag.toString())
+
+            // API base URL — defaults to the production host. Overridable
+            // via `-PZEROAUTH_BASE_URL=…` for staging/internal release
+            // builds.
+            val baseUrl: String = (project.findProperty("ZEROAUTH_BASE_URL") as String?)
+                ?: "https://api.zeroauth.dev/"
+            buildConfigField("String", "ZEROAUTH_BASE_URL", "\"$baseUrl\"")
         }
     }
 
@@ -187,6 +203,26 @@ android {
 }
 
 dependencies {
+    // ── Phase 1 modules (sources live under repo-root mobile/) ──────────
+    //
+    // :biometric — on-device Bitmap → Poseidon commitment pipeline
+    //              (FaceEmbedder + Quantizer + SHA-256 + Poseidon +
+    //              Keccak256). Consumed by RegistrationViewModel +
+    //              ScanViewModel to derive the witness inputs for the
+    //              Groth16 prover and the public commitment the API
+    //              registers under the DID.
+    // :face      — CameraX + ML Kit face-capture state machine.
+    //              Produces the 112×112 cropped face Bitmap that flows
+    //              into :biometric. Owned by the FaceCaptureScreen
+    //              composable rendered from the registration + scan
+    //              screens.
+    //
+    // The module sources are checked in under mobile/biometric and
+    // mobile/face; the include + projectDir mapping lives in
+    // android/settings.gradle.kts.
+    implementation(project(":biometric"))
+    implementation(project(":face"))
+
     // Core / lifecycle / activity
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -215,9 +251,28 @@ dependencies {
     // AndroidX WebKit — WebViewAssetLoader for ADR-0010's prover bundle.
     implementation(libs.androidx.webkit)
 
-    // CameraX + ML Kit barcode
+    // CameraX + ML Kit barcode.
+    //
+    // Guava is needed here because `ProcessCameraProvider.getInstance()`
+    // returns a `com.google.common.util.concurrent.ListenableFuture`,
+    // and CameraX 1.3.x ships Guava as a `compileOnly` dep — its
+    // ListenableFuture type must therefore appear on :app's compile
+    // classpath explicitly. Without it Kotlin 2's stricter type
+    // inference rejects every `cameraProviderFuture.addListener {…}`
+    // call-site with "Cannot access class
+    // com.google.common.util.concurrent.ListenableFuture."
     implementation(libs.bundles.camerax)
+    implementation(libs.guava)
     implementation(libs.mlkit.barcode.scanning)
+
+    // ML Kit face detection — drives the face-capture composable at
+    // ui/face/FaceCaptureScreen.kt. Bundled flavour (model ships in
+    // the APK) for the same zero-Play-Services posture the barcode
+    // scanner takes. See ADR-0010 addendum: this module is consumed
+    // entirely on-device — the detected face bounding box never
+    // crosses a process boundary and the cropped Bitmap never leaves
+    // the application process.
+    implementation(libs.mlkit.face.detection)
 
     // ZXing core (used by the proof-side QR generation in a follow-on iteration)
     implementation(libs.zxing.core)

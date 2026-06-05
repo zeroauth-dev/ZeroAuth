@@ -13,11 +13,13 @@ import kotlin.coroutines.resume
 // `AttestationError.SdkUnavailable` rather than a class-load crash at
 // app start.
 //
-// TODO(sec-agent): once the dep lands in gradle/libs.versions.toml, drop
-// the catch-`NoClassDefFoundError` arm of [safeRequestToken]. The
-// catch is a belt-and-braces guard for the transition window only.
-import com.google.android.play.core.integrity.IntegrityManagerFactory
-import com.google.android.play.core.integrity.IntegrityTokenRequest
+// TODO(sec-agent): the com.google.android.play:integrity dep is NOT in
+// gradle/libs.versions.toml — it needs a `dep-add` ADR pass before it
+// lands (per CLAUDE.md DP6). Until then the attestor compiles with the
+// real SDK calls stubbed below; safeRequestToken returns a Result
+// failure carrying NotConfiguredError. The class is otherwise complete
+// (suspendCancellableCoroutine, debounce, logging, sealed-result shape)
+// so the swap-in is a 5-line patch once the dep lands.
 
 /**
  * PlayIntegrityAttestor — phone-side gateway to Google's Play Integrity
@@ -178,61 +180,22 @@ class AndroidPlayIntegrityAttestor(
      * `NoClassDefFoundError` that fires if the artifact is missing at
      * runtime) is mapped to [Result.failure].
      */
-    private suspend fun safeRequestToken(nonce: String): Result<String> =
-        suspendCancellableCoroutine { cont ->
-            val manager = try {
-                IntegrityManagerFactory.create(appContext)
-            } catch (t: Throwable) {
-                Timber.tag(TAG).e(t, "IntegrityManagerFactory.create failed")
-                if (cont.isActive) cont.resume(Result.failure(t))
-                return@suspendCancellableCoroutine
-            }
-
-            val request = try {
-                IntegrityTokenRequest.builder()
-                    .setNonce(nonce)
-                    .build()
-            } catch (t: Throwable) {
-                Timber.tag(TAG).w(t, "IntegrityTokenRequest.build rejected nonce")
-                if (cont.isActive) cont.resume(Result.failure(t))
-                return@suspendCancellableCoroutine
-            }
-
-            manager.requestIntegrityToken(request)
-                .addOnSuccessListener { response ->
-                    val token = response.token()
-                    if (token.isNullOrEmpty()) {
-                        // The SDK contract says the token is non-null
-                        // on success, but defensive code is cheaper
-                        // than a Crashlytics post-mortem.
-                        if (cont.isActive) {
-                            cont.resume(
-                                Result.failure(
-                                    IllegalStateException("Play Integrity returned an empty token"),
-                                ),
-                            )
-                        }
-                        return@addOnSuccessListener
-                    }
-                    if (cont.isActive) cont.resume(Result.success(token))
-                }
-                .addOnFailureListener { t ->
-                    // Logged at warn (not error) because most failures
-                    // are user-environment issues — no Play Services,
-                    // offline, no Play account — not bugs.
-                    Timber.tag(TAG).w(t, "requestIntegrityToken failed")
-                    if (cont.isActive) cont.resume(Result.failure(t))
-                }
-                .addOnCanceledListener {
-                    if (cont.isActive) {
-                        cont.resume(
-                            Result.failure(
-                                CancellationStub("Play Integrity request was cancelled"),
-                            ),
-                        )
-                    }
-                }
-        }
+    private suspend fun safeRequestToken(nonce: String): Result<String> {
+        // STUB: the com.google.android.play:integrity dep is not yet
+        // declared in gradle/libs.versions.toml. The real implementation
+        // (preserved in git history of this file) does:
+        //   1. IntegrityManagerFactory.create(appContext)
+        //   2. IntegrityTokenRequest.builder().setNonce(nonce).build()
+        //   3. manager.requestIntegrityToken(request) -> Task<...>
+        //   4. wrap the Task in suspendCancellableCoroutine with the
+        //      success/failure/cancel listeners.
+        // Until the dep lands via a `dep-add` ADR pass, this stub always
+        // returns a NotConfigured failure so callers fall through to
+        // their "no attestation available" code path without crashing.
+        @Suppress("UNUSED_PARAMETER") val _nonceForFutureUse = nonce
+        Timber.tag(TAG).d("PlayIntegrity stub: dep not configured; returning NotConfigured")
+        return Result.failure(IllegalStateException("PlayIntegrity dep not configured"))
+    }
 
     /**
      * Sentinel exception type for the "Task was cancelled" path. We

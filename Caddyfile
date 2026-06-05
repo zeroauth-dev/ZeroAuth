@@ -52,9 +52,27 @@ zeroauth.dev, www.zeroauth.dev {
 	# POST to relative /api/leads/*; a 301 here was making the browser
 	# downgrade the second hop to GET, which 404'd on the API host
 	# and surfaced as a "Sorry, something went wrong" toast.
-	redir /v1/*  https://api.zeroauth.dev{uri}  308
-	redir /api/* https://api.zeroauth.dev{uri}  308
+	#
+	# EXCEPTION: /api/demo-portal/* is NOT redirected. The public bank
+	# demo SPA lives at zeroauth.dev/bank-demo and calls relative
+	# /api/demo-portal/* — those must stay SAME-ORIGIN with the SPA so
+	# the HttpOnly session/claim cookies (Path=/api/demo-portal) and the
+	# SSE EventSource work. A cross-origin 308 to api.zeroauth.dev would
+	# break both (CORS preflight + EventSource won't follow it). The
+	# excluded requests fall through to the reverse_proxy below — the
+	# apex and api vhosts target the SAME backend (zeroauth-prod:3000),
+	# so this is routing, not a second backend. The phone app hits
+	# api.zeroauth.dev/api/demo-portal/* directly (native HTTP client,
+	# same backend process → shared in-memory bind/claim caches).
+	@apiredir {
+		path /api/*
+		not path /api/demo-portal/*
+	}
+	redir /v1/*     https://api.zeroauth.dev{uri}  308
+	redir @apiredir https://api.zeroauth.dev{uri}  308
 
+	# Bank demo SPA (/bank-demo*) + /api/demo-portal/* land here,
+	# served same-origin by the apex backend.
 	reverse_proxy zeroauth-prod:3000 {
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-Proto https

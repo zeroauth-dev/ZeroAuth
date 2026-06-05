@@ -53,6 +53,17 @@ RUN npm ci --ignore-scripts
 COPY dashboard/ ./
 RUN npm run build
 
+# ── Build Stage — Demo portal (public bank demo) ──
+# The NeoBank demo SPA served at zeroauth.dev/bank-demo. Mirrors the
+# dashboard build above; its Vite `base` is pinned to /bank-demo/ so the
+# built asset URLs resolve under the Express mount in src/app.ts.
+FROM node:20-alpine AS demo-portal-build
+WORKDIR /app/demo-portal
+COPY demo-portal/package.json demo-portal/package-lock.json* ./
+RUN npm ci --ignore-scripts
+COPY demo-portal/ ./
+RUN npm run build
+
 # ── Build Stage — Documentation ───────────────
 FROM node:20-alpine AS docs-build
 WORKDIR /app/website
@@ -162,6 +173,9 @@ COPY public/ ./public/
 
 # Copy dashboard build
 COPY --from=dashboard-build /app/dashboard/dist ./dashboard/dist
+
+# Copy demo-portal build (served at /bank-demo by src/app.ts)
+COPY --from=demo-portal-build /app/demo-portal/dist ./demo-portal/dist
 
 # Copy built documentation site
 COPY --from=docs-build /app/website/build ./website/build

@@ -3,9 +3,12 @@ package dev.zeroauth.android
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.fragment.app.FragmentActivity
 import dev.zeroauth.android.nav.ZeroAuthNavHost
 import dev.zeroauth.android.prover.IsolatedMobileProver
+import dev.zeroauth.android.sec.BiometricGate
+import dev.zeroauth.android.sec.KeystoreManager
 import dev.zeroauth.android.ui.theme.ZeroAuthTheme
 
 /**
@@ -38,24 +41,40 @@ class MainActivity : FragmentActivity() {
      * the [IsolatedMobileProver.release] call in [onDestroy] always
      * has something to release; `bindService` is deferred until the
      * first generate() call inside the Service-binding logic.
-     *
-     * NB: while the live ScanScreen factory still wires
-     * [dev.zeroauth.android.util.FakeMobileProver] for the W3 demo
-     * (see the parallel-agent comment in ScanScreen.kt), this handle
-     * stays around so the production path can be flipped on by
-     * Composition.kt without re-touching MainActivity. The cost of
-     * holding an unbound IsolatedMobileProver is one object reference
-     * — see [IsolatedMobileProver.ensureBound] for the lazy bind.
      */
     private lateinit var prover: IsolatedMobileProver
+
+    /**
+     * Production [KeystoreManager] — fronts the Android Keystore for
+     * per-account encrypted blobs and (as a fallback for the W3 demo +
+     * autonomous-test flow) the registration ceremony's
+     * `zeroauth_reg_secret` SharedPreferences slot. Threaded through
+     * the Compose tree via [LocalKeystoreManager].
+     */
+    private lateinit var keystoreManager: KeystoreManager
+
+    /**
+     * Production [BiometricGate] — wraps `androidx.biometric.BiometricPrompt`
+     * for Class-3 (BIOMETRIC_STRONG) authentication. Receives this
+     * activity at prompt time, so no per-activity wiring is required.
+     * Threaded through the Compose tree via [LocalBiometricGate].
+     */
+    private lateinit var biometricGate: BiometricGate
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         prover = Composition.productionMobileProver(applicationContext)
+        keystoreManager = Composition.productionKeystoreManager(applicationContext)
+        biometricGate = Composition.productionBiometricGate(keystoreManager)
         setContent {
-            ZeroAuthTheme {
-                ZeroAuthNavHost()
+            CompositionLocalProvider(
+                LocalKeystoreManager provides keystoreManager,
+                LocalBiometricGate provides biometricGate,
+            ) {
+                ZeroAuthTheme {
+                    ZeroAuthNavHost()
+                }
             }
         }
     }

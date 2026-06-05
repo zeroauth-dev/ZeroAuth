@@ -41,6 +41,7 @@
  */
 
 import crypto from 'crypto';
+import zlib from 'zlib';
 import { Router, Request, Response } from 'express';
 import { getPool } from '../services/db';
 import { logger } from '../services/logger';
@@ -48,12 +49,23 @@ import { config } from '../config';
 import { getTenantById, getTenantByEmail } from '../services/tenants';
 import {
   createSession as pairingCreateSession,
+  submitProof as pairingSubmitProof,
   PairingSessionNotFound,
+  PairingSessionExpired,
+  PairingSessionAlreadyBound,
+  PairingSessionLocked,
   PairingSessionBindMismatch,
+  PairingNonceMismatch,
+  PairingDidUnknown,
+  PairingProofInvalid,
   TooManyPendingSessions,
+  VerifierUnavailable,
+  PlayIntegrityRequired,
+  PlayIntegrityInsufficient,
 } from '../services/proof-pairing';
 import { DEMO_PORTAL_TENANT_ID } from '../services/demo-portal-seed';
-import { ApiKeyEnvironment } from '../types';
+import { recordAuditEvent } from '../services/platform';
+import { ApiKeyEnvironment, Groth16Proof } from '../types';
 
 const router = Router();
 
@@ -71,10 +83,27 @@ const DEMO_PORTAL_TENANT_EMAIL = 'demo-portal@zeroauth.dev';
 const ANCHOR_BANK_FALLBACK_EMAIL = 'anchor-bank-demo@zeroauth.dev';
 
 /**
- * Environment the demo runs in. Always `test` — the demo MUST NOT
- * write to a tenant's `live` data even by accident.
+ * Environment the demo runs in. Must be `live` because:
+ *   - `DEMO_PORTAL_API_KEY` (src/services/demo-portal-seed.ts) is
+ *     deterministically minted as a `za_live_*` key, so every row the
+ *     three-QR ceremony creates via /v1/registrations lands in the
+ *     `live` partition of `tenant_users` / `devices` /
+ *     `registration_sessions`.
+ *   - The `signup-init` route below ALREADY passes `'live'` explicitly
+ *     to `startRegistration`, so newly minted users are unambiguously
+ *     `live`.
+ *   - The demo-portal tenant is a zeroauth-owned sandbox tenant (not a
+ *     real customer's production data), so `live` here doesn't cross
+ *     any tenant-data boundary — it just keeps the env tag consistent
+ *     with the key it was authenticated under.
+ * Previously this was `'test'`, which caused a mismatch where
+ * `autonomous-test-setup.ts` would register a user in the `live`
+ * partition (via the live API key) but the demo-portal login lookup
+ * (loadDemoUser / loadPairingRow / pairingSubmitProof) would query the
+ * `test` partition and find nothing — forcing a manual SQL INSERT
+ * mirror to reconcile.
  */
-const DEMO_ENVIRONMENT: ApiKeyEnvironment = 'test';
+const DEMO_ENVIRONMENT: ApiKeyEnvironment = 'live';
 
 /**
  * Cookie name + lifetime. 24 h matches the JWT TTL used elsewhere; the
@@ -84,6 +113,31 @@ const DEMO_ENVIRONMENT: ApiKeyEnvironment = 'test';
 const DEMO_COOKIE_NAME = 'demo_portal_session';
 const DEMO_COOKIE_PATH = '/api/demo-portal';
 const DEMO_COOKIE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Desktop-side claim-binding cookie (security-review Finding 1).
+ *
+ * In the phone-push flow the phone submits the proof, so the demo
+ * session cookie would be set on the PHONE's response — the desktop
+ * then calls POST /sessions/:id/claim to mint its own. Without a
+ * binding, /claim would mint a session cookie for anyone who knows the
+ * (consumed) session id, turning the session id into a bearer
+ * capability (the A-13 session-fixation class).
+ *
+ * To restore an A-13-equivalent binding without touching the air-gap or
+ * the crypto: at init-login we mint a 32-byte random token, set it as a
+ * `SameSite=Strict` HttpOnly cookie on the DESKTOP's init-login
+ * response, and stash its SHA-256 keyed by session id. /claim then
+ * requires that exact cookie (constant-time compare against the stored
+ * hash) and is single-use. Only the browser that opened the session
+ * holds the token, so only it can claim the session cookie.
+ *
+ * SameSite=Strict (stricter than the session cookie's Lax) is safe here
+ * because the SPA's init-login + claim fetches are same-origin; the
+ * token is never needed on a cross-site navigation.
+ */
+const DEMO_CLAIM_COOKIE_NAME = 'demo_portal_claim';
+const DEMO_CLAIM_TOKEN_TTL_MS = 6 * 60 * 1000; // session TTL (5m) + slack
 
 /**
  * HMAC over the cookie payload. The key derives from `JWT_SECRET` so
@@ -184,17 +238,40 @@ function buildClearCookieHeader(): string {
 }
 
 function readDemoCookie(req: Request): string | undefined {
+  return readNamedCookie(req, DEMO_COOKIE_NAME);
+}
+
+/** Read an arbitrary cookie by name from the parsed jar or the raw header. */
+function readNamedCookie(req: Request, name: string): string | undefined {
   const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
-  if (cookies && typeof cookies[DEMO_COOKIE_NAME] === 'string') {
-    return cookies[DEMO_COOKIE_NAME];
+  if (cookies && typeof cookies[name] === 'string') {
+    return cookies[name];
   }
   const raw = req.headers.cookie;
   if (!raw) return undefined;
   for (const part of raw.split(';')) {
     const [k, ...rest] = part.trim().split('=');
-    if (k === DEMO_COOKIE_NAME) return rest.join('=');
+    if (k === name) return rest.join('=');
   }
   return undefined;
+}
+
+/**
+ * Build the `SameSite=Strict` HttpOnly desktop-claim cookie. Scoped to
+ * the demo-portal path; lifetime tracks the claim-token TTL so it
+ * disappears with the session.
+ */
+function buildClaimCookieHeader(value: string): string {
+  const secure = (process.env.NODE_ENV ?? 'development') === 'production';
+  const maxAge = Math.floor(DEMO_CLAIM_TOKEN_TTL_MS / 1000);
+  return (
+    `${DEMO_CLAIM_COOKIE_NAME}=${value};`
+    + ` HttpOnly;`
+    + (secure ? ' Secure;' : '')
+    + ` SameSite=Strict;`
+    + ` Path=${DEMO_COOKIE_PATH};`
+    + ` Max-Age=${maxAge}`
+  );
 }
 
 /**
@@ -260,6 +337,334 @@ function buildDeeplink(qrPayload: string): string {
   // The QR payload is opaque to the deeplink layer — the phone parses
   // it server-side once the WebView opens the prover.
   return `zeroauth://pair?p=${encodeURIComponent(qrPayload)}`;
+}
+
+// ─── Bind-token cache for the SPA-driven submit-proof path ─────────────
+//
+// The phone-side of the air-gap normally holds the session_bind cookie
+// (issued on POST /v1/proof-pairing/sessions and required by the
+// submitProof service-layer check). The demo-portal SPA creates the
+// session on the user's behalf but the cookie is scoped to
+// `/v1/proof-pairing/` and never reaches the SPA — by design, so XSS
+// against the SPA can't replay a session bind.
+//
+// For the "I scanned the phone's proof-QR" loop to close inside the SPA
+// we need to call submitProof() server-side from this router, and that
+// call requires the bind token. We stash the plaintext bind token in an
+// in-memory Map keyed by session id with a 5-minute TTL (matches
+// SESSION_TTL_MS in proof-pairing.ts). The token never leaves the
+// server — the SPA only ever sees the session id.
+//
+// Threat-model coverage:
+//   - A-13 (session_bind mismatch) — we present the SAME token the
+//     server minted, so the submitProof check passes by construction.
+//   - A-20 (DoS) — the cache is per-session-id, single-token, TTL'd; an
+//     attacker who can POST init-login can only fill it as fast as the
+//     underlying MAX_PENDING_SESSIONS_PER_TENANT (50) allows.
+//   - A-25 (enumeration) — the cache key is the session id; an attacker
+//     guessing session ids gains nothing because they still need a
+//     valid proof QR for THAT session id.
+const BIND_TOKEN_TTL_MS = 5 * 60 * 1000;
+
+interface CachedBindToken {
+  token: string;
+  expiresAtMs: number;
+}
+
+const sessionBindTokenCache = new Map<string, CachedBindToken>();
+
+/**
+ * Desktop-claim token cache (Finding 1). Keyed by session id; stores the
+ * SHA-256 of the random token we set in the `demo_portal_claim` cookie
+ * at init-login. /claim constant-time-compares the presented cookie's
+ * hash against this and deletes the entry on success (single-use →
+ * Finding 4). The plaintext token never leaves the desktop's cookie jar.
+ */
+interface CachedClaimToken {
+  tokenSha256: string;
+  expiresAtMs: number;
+}
+
+const desktopClaimTokenCache = new Map<string, CachedClaimToken>();
+
+function rememberBindToken(sessionId: string, token: string): void {
+  sessionBindTokenCache.set(sessionId, {
+    token,
+    expiresAtMs: Date.now() + BIND_TOKEN_TTL_MS,
+  });
+}
+
+/**
+ * Mint a fresh desktop-claim token for [sessionId], stash its SHA-256,
+ * and return the plaintext (the caller sets it in the Set-Cookie). The
+ * plaintext is never stored server-side.
+ */
+function mintClaimToken(sessionId: string): string {
+  const token = crypto.randomBytes(32).toString('base64url');
+  const tokenSha256 = crypto.createHash('sha256').update(token).digest('hex');
+  desktopClaimTokenCache.set(sessionId, {
+    tokenSha256,
+    expiresAtMs: Date.now() + DEMO_CLAIM_TOKEN_TTL_MS,
+  });
+  return token;
+}
+
+/**
+ * Constant-time-verify a presented claim-cookie token against the stored
+ * hash for [sessionId]. On a match the entry is consumed (single-use).
+ * Returns false for: no presented token, no stored entry, expired entry,
+ * or hash mismatch — all indistinguishable to the caller (uniform 409).
+ */
+function verifyAndConsumeClaimToken(sessionId: string, presented: string | undefined): boolean {
+  const entry = desktopClaimTokenCache.get(sessionId);
+  if (!entry) return false;
+  if (entry.expiresAtMs <= Date.now()) {
+    desktopClaimTokenCache.delete(sessionId);
+    return false;
+  }
+  if (!presented) return false;
+  const presentedHash = crypto.createHash('sha256').update(presented).digest('hex');
+  const a = Buffer.from(presentedHash);
+  const b = Buffer.from(entry.tokenSha256);
+  if (a.length !== b.length) return false;
+  if (!crypto.timingSafeEqual(a, b)) return false;
+  // Single-use: drop on success so a re-claim (or a stolen cookie
+  // replayed after the desktop already claimed) fails uniformly.
+  desktopClaimTokenCache.delete(sessionId);
+  return true;
+}
+
+function consumeBindToken(sessionId: string): string | null {
+  const entry = sessionBindTokenCache.get(sessionId);
+  if (!entry) return null;
+  if (entry.expiresAtMs <= Date.now()) {
+    sessionBindTokenCache.delete(sessionId);
+    return null;
+  }
+  // Single-use: drop the entry as soon as it's read so a stolen cookie
+  // can't ride the same bind token twice.
+  sessionBindTokenCache.delete(sessionId);
+  return entry.token;
+}
+
+/**
+ * Sweep expired entries every minute. Fire-and-forget setInterval —
+ * never throws, never awaited. Safe on a fresh process; mocked away in
+ * tests by the standard fake-timers harness.
+ */
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of sessionBindTokenCache.entries()) {
+    if (entry.expiresAtMs <= now) sessionBindTokenCache.delete(id);
+  }
+  for (const [id, entry] of desktopClaimTokenCache.entries()) {
+    if (entry.expiresAtMs <= now) desktopClaimTokenCache.delete(id);
+  }
+}, 60_000).unref?.();
+
+// ─── Proof-QR decoder (mirror of android/util/QrPayload.kt) ────────────
+//
+// The phone emits `za:proof:1:<base64url(gzip(cbor(5-field-map)))>` —
+// see android/app/src/main/java/dev/zeroauth/android/util/QrPayload.kt
+// for the canonical encoder. We decode the inverse here so the
+// /submit-proof route can lift the decimal-stringified Groth16 proof
+// out of the QR bytes and forward to the existing submitProof service.
+//
+// CBOR shape we decode:
+//   { "s": sessionId, "p": <proof map>, "ps": <string[3]>, "d": did,
+//     "m": <client meta map (4-5 keys)> }
+// where <proof map> = { "pi_a": string[], "pi_b": string[][], "pi_c": string[],
+//                       "protocol": "groth16", "curve": "bn128" }
+// and <client meta map> = { "av":appVersion, "pl":platform, "md":model,
+//                            "ms":proofMs (uint), "pi":?playIntegrityVerdict }
+//
+// We deliberately do NOT pull a general CBOR library — the dep-add ADR
+// process is heavyweight, and the encoder on the phone is hand-rolled
+// to a fixed shape. Mirror only what we need; reject anything else.
+
+const PROOF_QR_PREFIX = 'za:proof:1:';
+const PROOF_QR_MAX_BYTES = 1_500;
+
+interface DecodedProofEnvelope {
+  sessionId: string;
+  proof: Groth16Proof;
+  publicSignals: [string, string, string];
+  did: string;
+  clientMeta: Record<string, unknown>;
+}
+
+class ProofPayloadError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Minimal CBOR reader for the 5-field map shape emitted by the phone.
+ * Stateful cursor over the input bytes; throws ProofPayloadError on
+ * any structural deviation from the documented shape.
+ */
+class CborReader {
+  private offset = 0;
+
+  constructor(private readonly bytes: Buffer) {}
+
+  /** Read one CBOR data item. */
+  read(): unknown {
+    const initial = this.readByte();
+    const major = initial >> 5;
+    const additional = initial & 0x1f;
+    const length = this.readLength(additional);
+    switch (major) {
+      case 0: // unsigned int
+        return Number(length);
+      case 3: { // text string
+        const len = Number(length);
+        const s = this.bytes.toString('utf8', this.offset, this.offset + len);
+        this.offset += len;
+        return s;
+      }
+      case 4: { // array
+        const arr: unknown[] = [];
+        const len = Number(length);
+        for (let i = 0; i < len; i++) arr.push(this.read());
+        return arr;
+      }
+      case 5: { // map
+        const obj: Record<string, unknown> = {};
+        const len = Number(length);
+        for (let i = 0; i < len; i++) {
+          const key = this.read();
+          if (typeof key !== 'string') {
+            throw new ProofPayloadError('CBOR map key was not a text string');
+          }
+          obj[key] = this.read();
+        }
+        return obj;
+      }
+      default:
+        throw new ProofPayloadError(`Unsupported CBOR major type ${major}`);
+    }
+  }
+
+  private readByte(): number {
+    if (this.offset >= this.bytes.length) {
+      throw new ProofPayloadError('Unexpected end of CBOR input');
+    }
+    return this.bytes[this.offset++];
+  }
+
+  private readLength(additional: number): bigint {
+    if (additional < 24) return BigInt(additional);
+    if (additional === 24) return BigInt(this.readByte());
+    if (additional === 25) {
+      return (BigInt(this.readByte()) << 8n) | BigInt(this.readByte());
+    }
+    if (additional === 26) {
+      let v = 0n;
+      for (let i = 0; i < 4; i++) v = (v << 8n) | BigInt(this.readByte());
+      return v;
+    }
+    if (additional === 27) {
+      let v = 0n;
+      for (let i = 0; i < 8; i++) v = (v << 8n) | BigInt(this.readByte());
+      return v;
+    }
+    throw new ProofPayloadError(`Unsupported CBOR length encoding ${additional}`);
+  }
+}
+
+function decodeProofQr(payload: string): DecodedProofEnvelope {
+  const trimmed = payload.trim();
+  if (!trimmed.startsWith(PROOF_QR_PREFIX)) {
+    throw new ProofPayloadError(`Expected payload starting with "${PROOF_QR_PREFIX}".`);
+  }
+  if (trimmed.length > PROOF_QR_MAX_BYTES) {
+    throw new ProofPayloadError(`Proof QR exceeded ${PROOF_QR_MAX_BYTES} bytes.`);
+  }
+  const b64 = trimmed.slice(PROOF_QR_PREFIX.length);
+  let gzipped: Buffer;
+  try {
+    gzipped = Buffer.from(b64, 'base64url');
+  } catch {
+    throw new ProofPayloadError('Proof QR body was not valid base64url.');
+  }
+  let cbor: Buffer;
+  try {
+    cbor = zlib.gunzipSync(gzipped);
+  } catch {
+    throw new ProofPayloadError('Proof QR body could not be gunzipped.');
+  }
+  let raw: unknown;
+  try {
+    raw = new CborReader(cbor).read();
+  } catch (err) {
+    if (err instanceof ProofPayloadError) throw err;
+    throw new ProofPayloadError('Proof QR body was not valid CBOR.');
+  }
+  if (!raw || typeof raw !== 'object') {
+    throw new ProofPayloadError('Proof QR root was not a CBOR map.');
+  }
+  const root = raw as Record<string, unknown>;
+
+  const sessionId = root['s'];
+  const proofMap = root['p'];
+  const publicSignals = root['ps'];
+  const did = root['d'];
+  const metaMap = root['m'];
+
+  if (typeof sessionId !== 'string' || sessionId.length === 0) {
+    throw new ProofPayloadError('Proof QR field "s" (sessionId) was missing or not a string.');
+  }
+  if (typeof did !== 'string' || did.length === 0) {
+    throw new ProofPayloadError('Proof QR field "d" (did) was missing or not a string.');
+  }
+  if (!Array.isArray(publicSignals) || publicSignals.length !== 3
+      || publicSignals.some((s) => typeof s !== 'string')) {
+    throw new ProofPayloadError('Proof QR field "ps" (publicSignals) must be a 3-string array.');
+  }
+  if (!proofMap || typeof proofMap !== 'object') {
+    throw new ProofPayloadError('Proof QR field "p" (proof) was missing or not a CBOR map.');
+  }
+  const pm = proofMap as Record<string, unknown>;
+  const piA = pm['pi_a'];
+  const piB = pm['pi_b'];
+  const piC = pm['pi_c'];
+  const protocol = pm['protocol'];
+  const curve = pm['curve'];
+  if (!Array.isArray(piA) || piA.length !== 3 || piA.some((s) => typeof s !== 'string')
+      || !Array.isArray(piB) || piB.length !== 3
+      || piB.some((row) => !Array.isArray(row) || row.length !== 2
+          || row.some((s) => typeof s !== 'string'))
+      || !Array.isArray(piC) || piC.length !== 3 || piC.some((s) => typeof s !== 'string')
+      || protocol !== 'groth16' || curve !== 'bn128') {
+    throw new ProofPayloadError('Proof QR field "p" (proof) shape was not a valid Groth16 proof.');
+  }
+  const proof: Groth16Proof = {
+    pi_a: piA as [string, string, string],
+    pi_b: piB as [[string, string], [string, string], [string, string]],
+    pi_c: piC as [string, string, string],
+    protocol: 'groth16',
+    curve: 'bn128',
+  };
+
+  const clientMeta: Record<string, unknown> = { source: 'demo-portal' };
+  if (metaMap && typeof metaMap === 'object') {
+    const mm = metaMap as Record<string, unknown>;
+    if (typeof mm['av'] === 'string') clientMeta.appVersion = mm['av'];
+    if (typeof mm['pl'] === 'string') clientMeta.platform = mm['pl'];
+    if (typeof mm['md'] === 'string') clientMeta.model = mm['md'];
+    if (typeof mm['ms'] === 'number') clientMeta.proofMs = mm['ms'];
+    if (typeof mm['pi'] === 'string') clientMeta.playIntegrityVerdict = mm['pi'];
+  }
+
+  return {
+    sessionId,
+    proof,
+    publicSignals: publicSignals as [string, string, string],
+    did,
+    clientMeta,
+  };
 }
 
 interface DemoUserRow {
@@ -339,6 +744,20 @@ router.post('/init-login', async (req: Request, res: Response) => {
       req.ip ?? null,
       (req.headers['user-agent'] as string | undefined) ?? null,
     );
+
+    // Stash the bind token so /submit-proof (called by the SPA when the
+    // operator scans / pastes the phone's proof-QR into the laptop) can
+    // present it to the underlying submitProof service. The plaintext
+    // never leaves the server: SPA only sees the session id.
+    rememberBindToken(result.id, result.sessionBindToken);
+
+    // Mint the desktop-claim token + set it as a SameSite=Strict cookie
+    // on THIS (desktop) response (Finding 1). The phone-push flow has
+    // the desktop call /claim to mint its session cookie; this binds
+    // that claim to the browser that actually opened the session, so a
+    // shoulder-surfed session id cannot be claimed by a third party.
+    const claimToken = mintClaimToken(result.id);
+    res.setHeader('Set-Cookie', buildClaimCookieHeader(claimToken));
 
     res.status(201).json({
       // Snake-case for the wire contract (per the demo-portal client
@@ -739,6 +1158,405 @@ router.get('/sessions/:id/events', async (req: Request, res: Response) => {
   } finally {
     clearInterval(heartbeat);
     if (!res.writableEnded) res.end();
+  }
+});
+
+/**
+ * POST /api/demo-portal/submit-proof
+ *
+ * Closes the air-gap loop without a webcam. The SPA hands us either:
+ *   - { session_id, qr_payload }       — operator pasted the phone's
+ *     proof-QR string verbatim into a textarea on /signin, OR
+ *   - { session_id, qr_payload }       — laptop's webcam decoded the
+ *     phone's QR via the browser BarcodeDetector API and shipped the
+ *     raw `za:proof:1:...` string.
+ *
+ * Decodes the proof QR server-side, looks up the session_bind token we
+ * stashed at /init-login time, calls the existing submitProof service
+ * (which runs the full crypto chain — Poseidon nonce re-derive,
+ * commitment compare, Groth16 verify, atomic consume), and mints the
+ * demo_portal_session cookie inline before returning. The SSE stream
+ * the SPA opened at /init-login will ALSO see the row flip to
+ * `consumed` and emit `session_bound` — both paths are idempotent.
+ *
+ * Body schema:
+ *   { session_id: string, qr_payload: string }
+ *
+ * Returns 200 with { ok: true, redirect: '/dashboard' } on success
+ * (cookie is set on the response). Returns 400 / 401 / 403 / 404 / 409
+ * / 410 / 423 / 429 / 503 on the documented submitProof failure
+ * classes; the SPA reflects the `error` code into the UI so an investor
+ * sees "proof verification failed" rather than a generic 500.
+ *
+ * Threat-model coverage:
+ *   - A-13 — bind token comes from our own cache, populated atomically
+ *     in init-login. The SPA never holds it; a stolen demo session
+ *     cookie cannot replay submit-proof against a different session id.
+ *   - A-14 — submitProof's atomic UPDATE clause prevents two SPAs from
+ *     racing the same session to `consumed`.
+ *   - A-25 — failure codes are surfaced verbatim from submitProof so
+ *     the enumeration-defence guarantees hold end-to-end.
+ */
+router.post('/submit-proof', async (req: Request, res: Response) => {
+  try {
+    const sessionId = typeof req.body?.session_id === 'string'
+      ? req.body.session_id
+      : typeof req.body?.sessionId === 'string' ? req.body.sessionId : '';
+    const qrPayload = typeof req.body?.qr_payload === 'string'
+      ? req.body.qr_payload
+      : typeof req.body?.qrPayload === 'string' ? req.body.qrPayload : '';
+
+    if (!sessionId || !/^[0-9a-fA-F-]{8,64}$/.test(sessionId)) {
+      res.status(400).json({
+        error: 'invalid_request',
+        message: 'session_id is required and must be a UUID.',
+      });
+      return;
+    }
+    if (!qrPayload) {
+      res.status(400).json({
+        error: 'invalid_request',
+        message: 'qr_payload is required.',
+      });
+      return;
+    }
+
+    let decoded: DecodedProofEnvelope;
+    try {
+      decoded = decodeProofQr(qrPayload);
+    } catch (err) {
+      if (err instanceof ProofPayloadError) {
+        res.status(400).json({ error: 'invalid_request', message: err.message });
+        return;
+      }
+      throw err;
+    }
+
+    // Defence in depth: the QR's embedded session id MUST match the
+    // session the SPA opened. Catches a stale phone-QR scanned into a
+    // freshly minted desktop session.
+    if (decoded.sessionId !== sessionId) {
+      res.status(400).json({
+        error: 'invalid_request',
+        message: 'Proof QR session id does not match the desktop session.',
+      });
+      return;
+    }
+
+    const tenantId = await resolveDemoPortalTenantId();
+    if (!tenantId) {
+      res.status(503).json({
+        error: 'demo_portal_not_provisioned',
+        message: 'The demo portal is not yet provisioned on this deployment.',
+      });
+      return;
+    }
+
+    const bindToken = consumeBindToken(sessionId);
+    if (!bindToken) {
+      // Token expired, never minted, or already consumed. Surface a
+      // distinct error so the SPA can prompt for a restart rather than
+      // looping on the same submit.
+      res.status(410).json({
+        error: 'pairing_session_expired',
+        message: 'This sign-in session has expired or was already used. Try again.',
+      });
+      return;
+    }
+
+    const result = await pairingSubmitProof(
+      sessionId,
+      tenantId,
+      DEMO_ENVIRONMENT,
+      decoded.did,
+      decoded.proof,
+      decoded.publicSignals,
+      decoded.clientMeta,
+      bindToken,
+    );
+
+    // Mint the demo-portal cookie inline so the SPA can navigate to
+    // /dashboard immediately — no SSE round-trip required. This mirrors
+    // the Phase-1 fast path in /sessions/:id/events.
+    const cookieValue = encodeCookie({
+      userId: result.session.userId ?? '',
+      pairingSessionId: sessionId,
+      startedAtMs: Date.now(),
+    });
+    res.setHeader('Set-Cookie', buildSetCookieHeader(cookieValue));
+    res.status(200).json({
+      ok: true,
+      redirect: '/dashboard',
+      session: {
+        userId: result.session.userId,
+        did: result.session.did,
+        boundAt: result.session.boundAt,
+      },
+    });
+  } catch (err) {
+    if (err instanceof PairingSessionNotFound) {
+      res.status(404).json({ error: err.code, message: 'Pairing session not found.' });
+      return;
+    }
+    if (err instanceof PairingSessionExpired) {
+      res.status(410).json({ error: err.code, message: 'Pairing session expired.' });
+      return;
+    }
+    if (err instanceof PairingSessionAlreadyBound) {
+      res.status(409).json({ error: err.code, message: 'Pairing session already bound.' });
+      return;
+    }
+    if (err instanceof PairingSessionLocked) {
+      res.status(423).json({ error: err.code, message: 'Pairing session locked after repeated failures.' });
+      return;
+    }
+    if (err instanceof PairingSessionBindMismatch) {
+      res.status(403).json({ error: err.code, message: 'Session bind mismatch.' });
+      return;
+    }
+    if (err instanceof PairingNonceMismatch) {
+      res.status(400).json({ error: err.code, message: 'Public-signals nonce mismatch.' });
+      return;
+    }
+    if (err instanceof PairingDidUnknown) {
+      res.status(400).json({ error: err.code, message: 'DID does not resolve for this tenant.' });
+      return;
+    }
+    if (err instanceof PairingProofInvalid) {
+      res.status(401).json({ error: err.code, message: 'Proof verification failed.' });
+      return;
+    }
+    if (err instanceof PlayIntegrityRequired) {
+      res.status(400).json({ error: err.code, message: err.message });
+      return;
+    }
+    if (err instanceof PlayIntegrityInsufficient) {
+      res.status(401).json({ error: err.code, message: err.message });
+      return;
+    }
+    if (err instanceof VerifierUnavailable) {
+      res.status(503).json({ error: err.code, message: 'Verifier loopback unavailable.' });
+      return;
+    }
+    logger.error('demo-portal: submit-proof failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'proof_failed', message: 'Proof submission failed.' });
+  }
+});
+
+/**
+ * POST /api/demo-portal/sessions/:id/claim
+ *
+ * Desktop-side cookie claim for the PHONE-PUSH sign-in flow.
+ *
+ * In the phone-push flow (the primary login path now that most desktops
+ * lack a working webcam), the phone POSTs its proof directly to
+ * /submit-proof. That verifies the proof and flips the pairing row to
+ * `consumed` — but the demo cookie set on that response lands on the
+ * PHONE, which doesn't need it. The DESKTOP still needs a cookie to call
+ * /me and render the dashboard.
+ *
+ * The desktop calls this endpoint (on its own browser request, so
+ * Set-Cookie lands in the desktop's cookie jar) AFTER it hears the
+ * `session_bound` SSE event. We:
+ *   1. verify the pairing row is `consumed` for the demo tenant, AND
+ *   2. verify the desktop holds the `demo_portal_claim` cookie minted
+ *      for THIS session at init-login (constant-time, single-use),
+ * then mint the demo_portal_session cookie on this response.
+ *
+ * Security (post-review hardening — Findings 1-4):
+ *   - Finding 1 (was: session id as bearer capability): the
+ *     `demo_portal_claim` cookie binds the claim to the browser that
+ *     opened the session. A shoulder-surfed session id alone cannot
+ *     claim the session — the SameSite=Strict HttpOnly claim cookie is
+ *     also required. This restores the A-13 (session-fixation) defence
+ *     that ADR-0009's session_bind cookie provides on production.
+ *   - Finding 4 (idempotent re-claim): the claim token is single-use
+ *     (consumed on the first successful match), so a stolen cookie
+ *     cannot be replayed after the desktop has claimed.
+ *   - Finding 3 (enumeration): ALL not-ready cases — unknown id,
+ *     other-tenant id, pending/failed row, missing/wrong claim cookie,
+ *     already-claimed — return the SAME uniform 409 `pairing_not_ready`.
+ *     Only a malformed id (input format) returns 400. No 404/409 split
+ *     leaks existence or bind-state.
+ *   - Finding 2 (audit): a `pairing.desktop_claimed` audit row is
+ *     awaited on success (fail-closed — no cookie if the trail can't be
+ *     written), mirroring the A-21 treatment of `pairing.claimed`.
+ *   - Performs NO cryptography and CANNOT consume a pairing session; the
+ *     proof was already verified by /submit-proof's full crypto chain.
+ *
+ * Returns 200 + { ok, userId, did } on success (session cookie set on
+ * the response); uniform 409 `pairing_not_ready` for every not-ready
+ * case; 400 for a malformed session id; 503 if the demo tenant is not
+ * provisioned.
+ */
+router.post('/sessions/:id/claim', async (req: Request, res: Response) => {
+  // Uniform not-ready response — used for every "can't claim" branch so
+  // none of them are distinguishable (Finding 3 / A-25).
+  const notReady = (): void => {
+    res.status(409).json({
+      error: 'pairing_not_ready',
+      message: 'This sign-in is not complete yet.',
+    });
+  };
+  try {
+    const sessionId = String(req.params.id ?? '');
+    if (!/^[0-9a-fA-F-]{8,64}$/.test(sessionId)) {
+      res.status(400).json({ error: 'invalid_session_id', message: 'Session id is malformed.' });
+      return;
+    }
+    const tenantId = await resolveDemoPortalTenantId();
+    if (!tenantId) {
+      res.status(503).json({
+        error: 'demo_portal_not_provisioned',
+        message: 'The demo portal is not yet provisioned on this deployment.',
+      });
+      return;
+    }
+
+    const row = await loadPairingRow(sessionId, tenantId);
+    // Unknown id, other-tenant id (query is tenant-scoped → no row), or
+    // a row that isn't bound yet → uniform not-ready. We check the row
+    // BEFORE the claim token so a not-consumed session never burns the
+    // single-use token.
+    if (!row || row.state !== 'consumed' || !row.consumed_user_id) {
+      notReady();
+      return;
+    }
+
+    // Desktop-bind check (Finding 1). The claim cookie was set on this
+    // browser at init-login; a third party who only knows the session
+    // id does not hold it. Single-use: consumed on success.
+    const presentedClaim = readNamedCookie(req, DEMO_CLAIM_COOKIE_NAME);
+    if (!verifyAndConsumeClaimToken(sessionId, presentedClaim)) {
+      notReady();
+      return;
+    }
+
+    const user = await loadDemoUser(row.consumed_user_id, tenantId);
+
+    // A-21 / Finding 2: await the audit row BEFORE minting the cookie so
+    // a failed audit write refuses the claim rather than minting an
+    // untraceable session. Actor is the (unauthenticated) desktop; we
+    // record hashed IP + UA so the trail can answer "which device
+    // claimed this session" without storing raw PII.
+    await recordAuditEvent(tenantId, {
+      environment: DEMO_ENVIRONMENT,
+      actorType: 'system',
+      action: 'pairing.desktop_claimed',
+      entityType: 'pairing_session',
+      entityId: row.id,
+      status: 'success',
+      summary: `Desktop claimed session cookie for user ${row.consumed_user_id}`,
+      metadata: {
+        client_ip_sha256: req.ip
+          ? crypto.createHash('sha256').update(req.ip).digest('hex')
+          : null,
+        user_agent_sha256: req.headers['user-agent']
+          ? crypto.createHash('sha256').update(String(req.headers['user-agent'])).digest('hex')
+          : null,
+      },
+    });
+
+    // Bind startedAtMs to the original consume time (not Date.now()) so
+    // a re-mint cannot extend the session lifetime (Finding 4 corollary).
+    const cookieValue = encodeCookie({
+      userId: row.consumed_user_id,
+      pairingSessionId: row.id,
+      startedAtMs: (row.consumed_at ?? new Date()).getTime(),
+    });
+    res.setHeader('Set-Cookie', buildSetCookieHeader(cookieValue));
+    res.status(200).json({
+      ok: true,
+      userId: row.consumed_user_id,
+      did: user?.did ?? '',
+      redirect: '/dashboard',
+    });
+  } catch (err) {
+    logger.error('demo-portal: claim failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'claim_failed', message: 'Could not claim the sign-in session.' });
+  }
+});
+
+// ─── Three-QR signup orchestration ────────────────────────────────────
+//
+// Until a real customer-tenant onboarding flow ships, the demo-portal
+// itself acts as the "tenant signup page" so investors see the full
+// three-QR registration end-to-end on a real phone. The endpoints
+// below are thin wrappers around the existing /v1/registrations
+// service, plus a peek endpoint that lets the SPA see each freshly
+// minted plaintext code so it can re-render the next QR. The peek
+// only reads from the in-memory demo cache (registration.ts) which
+// is populated only in non-production NODE_ENVs — production tenants
+// remain unaffected.
+//
+import {
+  startRegistration,
+  getRegistrationSession,
+  peekPendingDemoCode,
+} from '../services/registration';
+
+/**
+ * POST /api/demo-portal/signup-init
+ *
+ * Body: { name?: string, email?: string }
+ *
+ * Opens a registration session on the NeoBank tenant + returns the
+ * pair_code deeplink. The SPA renders it as QR1 and polls
+ * /signup/:id/peek for QR2 + QR3.
+ */
+router.post('/signup-init', async (req: Request, res: Response) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name : 'Demo User';
+    const email = typeof req.body?.email === 'string' ? req.body.email : 'demo@neobank.example';
+    const result = await startRegistration(
+      DEMO_PORTAL_TENANT_ID,
+      'live',
+      { profile: { name, email } },
+      { type: 'api_key', id: null, email: null },
+    );
+    res.status(201).json({
+      session_id: result.session.id,
+      pair_code: result.pairCode,
+      pair_deeplink: result.pairDeeplink,
+      expires_at: result.pairCodeExpiresAt,
+    });
+  } catch (err) {
+    logger.error('demo-portal: signup-init failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'signup_init_failed', message: (err as Error).message });
+  }
+});
+
+/**
+ * GET /api/demo-portal/signup/:id
+ *
+ * Polled by the SPA every ~1s. Returns:
+ *   - session state ('awaiting_device' | 'awaiting_commitment' |
+ *                    'awaiting_verification' | 'completed' | 'failed')
+ *   - currentDeeplink: the most recently minted plaintext code as a
+ *     ready-to-scan deeplink. The SPA renders this as the active QR.
+ *     null once state == 'completed' (the user is done).
+ */
+router.get('/signup/:id', async (req: Request, res: Response) => {
+  try {
+    const sessionId = String(req.params.id);
+    const session = await getRegistrationSession(
+      DEMO_PORTAL_TENANT_ID,
+      'live',
+      sessionId,
+    );
+    if (!session) {
+      res.status(404).json({ error: 'session_not_found' });
+      return;
+    }
+    const pending = peekPendingDemoCode(sessionId);
+    res.status(200).json({
+      state: session.state,
+      currentDeeplink: pending?.deeplink ?? null,
+      currentStep: pending?.step ?? null,
+    });
+  } catch (err) {
+    logger.error('demo-portal: signup poll failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'signup_poll_failed' });
   }
 });
 

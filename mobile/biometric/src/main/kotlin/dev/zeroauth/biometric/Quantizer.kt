@@ -85,8 +85,14 @@ object Quantizer {
      *         pattern that collides across distinct embeddings).
      */
     fun quantize(embedding: FloatArray): ByteArray {
-        require(embedding.size == 128) {
-            "Quantizer: expected 128-dim embedding, got ${embedding.size}"
+        // Accept either the upstream-sirius 128-dim or the
+        // MCarlomagno-mirror 192-dim MobileFaceNet output. The
+        // quantiser is dimension-agnostic — output length scales
+        // linearly (N × 2 bytes BE int16) and the SHA-256 final step
+        // normalises everything to 32 bytes regardless. We still
+        // gate on a non-empty array to catch obvious wiring bugs.
+        require(embedding.isNotEmpty()) {
+            "Quantizer: empty embedding (wiring bug?)"
         }
         // The L2-normalisation invariant is a caller contract, but we
         // assert sanity on the per-component magnitude: any |x| > 1.0
@@ -105,7 +111,12 @@ object Quantizer {
             }
         }
 
-        val buffer = ByteBuffer.allocate(OUTPUT_LENGTH).order(ByteOrder.BIG_ENDIAN)
+        // Buffer sizing tracks the input dimensionality: 2 bytes BE
+        // int16 per float. The OUTPUT_LENGTH constant remains as the
+        // documented "canonical 128-dim → 256 bytes" reference but is
+        // no longer used to size the allocation — the SHA-256 final
+        // step downstream normalises any length to 32 bytes regardless.
+        val buffer = ByteBuffer.allocate(embedding.size * 2).order(ByteOrder.BIG_ENDIAN)
         for (i in embedding.indices) {
             val scaled = embedding[i] * SCALE
             // roundToInt() rounds half-up away from zero (Kotlin's

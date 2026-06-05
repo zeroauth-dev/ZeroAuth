@@ -125,7 +125,7 @@ function Hero() {
       </p>
       <div className="mt-10 flex flex-wrap gap-4">
         <Link
-          to="/signin"
+          to="/signup"
           className="rounded-md px-7 py-3.5 text-base font-medium text-white shadow-sm transition hover:opacity-90"
           style={{ backgroundColor: ACCENT }}
         >
@@ -201,17 +201,18 @@ function Comparison() {
             ~6 minutes
           </h3>
           <ul className="mt-6 space-y-3">
-            {COMPARISON_ROWS.map(([legacy], i) => (
-              <li
-                key={i}
-                className={`flex items-start gap-3 text-base ${
-                  legacy ? 'text-slate-700' : 'text-transparent select-none'
-                }`}
-              >
-                <span className="mt-2 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-300" />
-                <span>{legacy || 'placeholder'}</span>
-              </li>
-            ))}
+            {COMPARISON_ROWS.map(([legacy], i) =>
+              legacy ? (
+                <li key={i} className="flex items-start gap-3 text-base text-slate-700">
+                  <span className="mt-2 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-300" />
+                  <span>{legacy}</span>
+                </li>
+              ) : (
+                // Empty-row spacer — preserves vertical alignment with
+                // the right column without ever rendering visible text.
+                <li key={i} aria-hidden="true" className="h-6" />
+              ),
+            )}
           </ul>
         </div>
 
@@ -229,20 +230,19 @@ function Comparison() {
             ~12 seconds
           </h3>
           <ul className="mt-6 space-y-3">
-            {COMPARISON_ROWS.map(([, neo], i) => (
-              <li
-                key={i}
-                className={`flex items-start gap-3 text-base ${
-                  neo ? 'text-slate-900' : 'text-transparent select-none'
-                }`}
-              >
-                <span
-                  className="mt-2 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
-                  style={{ backgroundColor: neo ? ACCENT : 'transparent' }}
-                />
-                <span>{neo || 'placeholder'}</span>
-              </li>
-            ))}
+            {COMPARISON_ROWS.map(([, neo], i) =>
+              neo ? (
+                <li key={i} className="flex items-start gap-3 text-base text-slate-900">
+                  <span
+                    className="mt-2 inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                    style={{ backgroundColor: ACCENT }}
+                  />
+                  <span>{neo}</span>
+                </li>
+              ) : (
+                <li key={i} aria-hidden="true" className="h-6" />
+              ),
+            )}
           </ul>
         </div>
       </div>

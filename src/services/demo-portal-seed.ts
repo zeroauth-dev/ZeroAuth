@@ -83,14 +83,19 @@ export const DEMO_PORTAL_SECURITY_POLICY: TenantSecurityPolicy = {
   did_provider: 'off-chain',
   verifier_provider: 'off-chain',
   audit_anchor_provider: 'none',
-  // The demo-portal is a local-only investor showcase; we relax the
-  // Play Integrity gate so the deck can run in a kiosk browser without
-  // a paired Android device.
+  // The demo-portal is an investor showcase; we relax the Play Integrity
+  // gate so the deck can run in a kiosk browser AND a side-loaded
+  // (non-Play-Store-signed) demo APK can register/login against it.
   allow_play_integrity_absent: true,
   allowed_origins: [
     'http://localhost:5174',
     'http://localhost:3000',
     'http://localhost:3030',
+    // Hosted bank demo (zeroauth.dev/bank-demo) + the API host the
+    // phone app talks to directly.
+    'https://zeroauth.dev',
+    'https://www.zeroauth.dev',
+    'https://api.zeroauth.dev',
   ],
 };
 
@@ -221,13 +226,26 @@ export async function seedDemoPortal(): Promise<{ created: boolean }> {
 }
 
 /**
- * Boot hook used by `src/server.ts`. No-op outside development so a
- * production deploy never sees the deterministic key inserted into its
- * tenants table. Set `SEED_DEMO_PORTAL=false` to skip even in dev.
+ * Boot hook used by `src/server.ts`.
+ *
+ * Seeds the demo-portal tenant (deterministic `za_live_` key + permissive
+ * security policy) so the hosted bank demo at zeroauth.dev/bank-demo works.
+ *
+ * Gating:
+ *   - `SEED_DEMO_PORTAL=false` → always skip (even in dev).
+ *   - `SEED_DEMO_PORTAL=true`  → always seed (explicit prod opt-in; this is
+ *     how the hosted demo gets its tenant on a `NODE_ENV=production` box).
+ *   - unset → seed in development only (a vanilla production deploy never
+ *     gets the deterministic key unless the operator opts in).
+ *
+ * The seeded tenant is a zeroauth-owned sandbox showcase tenant with no
+ * real customer data; the deterministic key is acceptable for that scope.
  */
 export async function seedDemoPortalIfDev(): Promise<void> {
-  if ((process.env.NODE_ENV ?? 'development') === 'production') return;
-  if (process.env.SEED_DEMO_PORTAL === 'false') return;
+  const flag = process.env.SEED_DEMO_PORTAL;
+  if (flag === 'false') return;
+  const isProd = (process.env.NODE_ENV ?? 'development') === 'production';
+  if (isProd && flag !== 'true') return;
   try {
     await seedDemoPortal();
   } catch (err) {

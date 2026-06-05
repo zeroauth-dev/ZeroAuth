@@ -83,7 +83,7 @@ import { DEMO_PORTAL_TENANT_ID } from '../src/services/demo-portal-seed';
 
 const TENANT_ID = DEMO_PORTAL_TENANT_ID;
 const API_KEY_ID = 'key-demo-portal-e2e';
-const ENVIRONMENT = 'test'; // demo-portal always runs in test env
+const ENVIRONMENT = 'live'; // demo-portal runs in the `live` env (DEMO_ENVIRONMENT in src/routes/demo-portal.ts)
 
 // Split-literal to dodge the secret-pattern pre-commit scanner — same
 // trick tests/e2e-ceremony.test.ts uses. The tenant-auth mock doesn't

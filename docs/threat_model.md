@@ -162,6 +162,8 @@
 | **Test status** | **Required before merge.** Test names: `stream returns 403 when session_bind cookie is missing`, `stream returns 403 when session_bind cookie differs from row`. |
 | **Audit signal** | `audit_events.action = 'pairing.session_bind_mismatch'`, severity high. |
 
+> **Demo-portal phone-push scope note (2026-06-04).** The mitigation above applies to the **production `/v1/proof-pairing` surface**. The `/api/demo-portal/*` sandbox bridge uses a *phone-push* variant: the phone POSTs its proof to `POST /api/demo-portal/submit-proof` (the demo SPA holds no `session_bind` cookie by design), and the desktop then mints its session cookie via `POST /api/demo-portal/sessions/:id/claim`. To preserve an A-13-equivalent binding on that surface, `/init-login` sets a `Secure; HttpOnly; SameSite=Strict; Path=/api/demo-portal` **`demo_portal_claim`** cookie (32-byte random); `/claim` requires it (constant-time compare against the sha256 stored server-side), is **single-use**, and returns a uniform `409 pairing_not_ready` for every not-ready/missing-cookie/wrong-cookie case so a known session id alone cannot mint a session. The Groth16 + Poseidon-nonce verification in `submitProof` is unchanged, so a proof still only completes the session whose challenge QR the phone scanned. Residual vs production: the demo relaxes the ADR-0009 "phone never POSTs to the backend" property (sandbox only); a `pairing.desktop_claimed` audit row is written on each desktop claim. Promoting phone-push to a real customer tenant requires a superseding ADR + cryptographer-reviewer sign-off (the co-presence assumption changes). Tests: `tests/demo-portal.test.ts` → the `POST /api/demo-portal/sessions/:id/claim` suite.
+
 ### A-14 — Race: two phones scan the same desktop QR
 
 | | |
@@ -292,7 +294,7 @@
 | **Class** | Information disclosure → spoofing (STRIDE: I → S) |
 | **Surface** | The desktop screen rendering the pairing QR |
 | **Description** | A bystander photographs the desktop's pairing QR. The QR carries `(session_id, nonce)`. Without A-13's session-bind cookie, the attacker can complete the flow on their own phone and steal the desktop session. (Distinct from A-13: there the attacker owned the desktop; here the attacker owns the phone.) |
-| **Mitigation** | (a) A-13's session-bind cookie makes the minted JWT undeliverable to the attacker. (b) 5-min TTL with a visible countdown. (c) Desktop modal renders the QR inside an opt-in "Hide screen from others" affordance. (d) After consumption, the desktop's `/stream` carries the user identity in a confirmation dialog the user must click "Yes, this is me" on. |
+| **Mitigation** | (a) A-13's session-bind cookie makes the minted JWT undeliverable to the attacker. (b) 5-min TTL with a visible countdown. (c) Desktop modal renders the QR inside an opt-in "Hide screen from others" affordance. (d) After consumption, the desktop's `/stream` carries the user identity in a confirmation dialog the user must click "Yes, this is me" on. (e) **Demo-portal phone-push:** the `demo_portal_claim` desktop-bind cookie (see A-13 scope note) is the equivalent of (a) on the sandbox surface — a shoulder-surfed `session_id` alone cannot mint a session because the attacker does not hold the `SameSite=Strict` claim cookie, and `/claim` is single-use. |
 | **Test status** | Visual / UX gate, not automatable; add to manual QA. |
 | **Audit signal** | `audit_events.action = 'pairing.expected_user_mismatch'` when the desktop sets `expected_user_did` and the proof's `did` differs. |
 

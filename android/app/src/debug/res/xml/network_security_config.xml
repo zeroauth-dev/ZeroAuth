@@ -1,13 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Debug-only network security config: permits cleartext HTTP to the
-  Android emulator's special host-loopback address (10.0.2.2) so the
-  debug APK can drive a developer's local backend on http://10.0.2.2:3030/.
-  Release builds carry no override and therefore inherit Android 9+ default
-  (all cleartext disabled).
+  Debug-only network security config.
+
+  Permits cleartext HTTP to `localhost` / `127.0.0.1` so the debug
+  APK can hit the Mac's backend via `adb reverse tcp:3030 tcp:3030`
+  on a USB-connected phone (or emulator). Also whitelists 10.0.2.2
+  (the legacy emulator host-loopback alias) for backwards
+  compatibility with the older Wi-Fi-based emulator workflow.
+
+  No LAN IP is whitelisted any more — the `adb reverse` USB path is
+  the canonical dev workflow because it survives Mac IP changes,
+  doesn't depend on Wi-Fi or the macOS firewall, and works
+  identically on emulator + physical device.
+
+  Release builds carry no override and inherit the Android 9+
+  default (all cleartext disabled).
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
         <domain includeSubdomains="false">10.0.2.2</domain>
     </domain-config>
 </network-security-config>

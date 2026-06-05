@@ -72,7 +72,15 @@ import kotlinx.serialization.json.buildJsonObject
 class RegistrationViewModel(
     private val context: Context,
     private val api: RegistrationApi = ApiFactory.createRegistrationApi(),
-    private val secretSource: BiometricSecretSource = RealBiometricSecretSource(context.applicationContext),
+    // The default secret source is now [CapturedFaceSecret] which holds
+    // the 32-byte secret captured by the on-device face-capture composable
+    // for the lifetime of the registration session. The previous default
+    // ([RealBiometricSecretSource]) is still available — tests + the
+    // RegistrationScreen pass it explicitly when the demo-stable-secret
+    // toggle is desired — but the production three-QR ceremony now wires
+    // the face capture between QR1 (pair) and QR2 (commit) and reuses
+    // the cached secret for QR3 (verify).
+    private val secretSource: BiometricSecretSource = CapturedFaceSecret(context.applicationContext),
     private val proofGenerator: ProofGenerator = StubProofGenerator,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
@@ -80,6 +88,21 @@ class RegistrationViewModel(
     sealed class State {
         data object Idle : State()
         data object Pairing : State()
+
+        /**
+         * Inserted between QR1 (pair) and QR2 (commit). The UI host
+         * renders the on-device face-capture composable; once the
+         * 32-byte secret is produced, the ViewModel transitions to
+         * [AwaitingEnrollScan].
+         *
+         * @property sessionId The pair-step session ID — round-tripped
+         *   into [AwaitingEnrollScan] so the operator-facing "scan QR2"
+         *   text still shows the in-flight session.
+         * @property step Which ceremony step this capture feeds. Today
+         *   only step 2 needs an in-line capture (step 3 reuses the
+         *   cached secret); the field is kept for future use.
+         */
+        data class AwaitingFaceCapture(val sessionId: String, val step: Int) : State()
         data class AwaitingEnrollScan(val sessionId: String) : State()
         data object Committing : State()
         data class AwaitingVerifyScan(val sessionId: String) : State()
@@ -131,11 +154,78 @@ class RegistrationViewModel(
                     )
                 }
             }.onSuccess { res ->
-                _state.value = State.AwaitingEnrollScan(res.sessionId)
+                // Insert the face-capture step between QR1 (pair) and QR2
+                // (commit). The UI host renders the inline face-capture
+                // composable when state == AwaitingFaceCapture; once the
+                // 32-byte secret is captured, [onFaceCaptured] transitions
+                // the machine into AwaitingEnrollScan.
+                //
+                // When the secret source isn't a CapturedFaceSecret (e.g.
+                // tests use a PerInstallStableSecret directly) we skip the
+                // capture step and transition straight to AwaitingEnrollScan
+                // — there's no on-device pipeline that needs to run.
+                if (secretSource is CapturedFaceSecret && !secretSource.hasCapturedSecret()) {
+                    _state.value = State.AwaitingFaceCapture(res.sessionId, step = 2)
+                } else {
+                    _state.value = State.AwaitingEnrollScan(res.sessionId)
+                }
             }.onFailure { ex ->
                 _state.value = State.Failed("pair_failed", ex.message ?: "Pair step failed")
             }
         }
+    }
+
+    /**
+     * Entry point the [RegistrationScreen]'s face-capture composable
+     * calls when it produces a 32-byte secret. Stores the secret in the
+     * [CapturedFaceSecret] backing the [secretSource] slot (if that's
+     * what's wired) and transitions out of [State.AwaitingFaceCapture]
+     * into [State.AwaitingEnrollScan].
+     *
+     * Both step 2 (submit-commitment) and step 3 (verify) call
+     * `secretSource.secret()` later — they both see the same 32-byte
+     * buffer this method stores, so the server's `publicSignals[0]`
+     * commitment-equality check passes without a second capture.
+     *
+     * @param secret 32-byte buffer derived from the captured face. The
+     *               caller is responsible for not retaining the buffer
+     *               outside this call site; [CapturedFaceSecret] copies
+     *               internally so the caller may zero its copy.
+     */
+    fun onFaceCaptured(secret: ByteArray) {
+        val current = _state.value
+        if (current !is State.AwaitingFaceCapture) {
+            // Out-of-order capture — drop the secret and surface the bug
+            // rather than silently overwriting. The UI shouldn't reach
+            // this path; defending against it keeps the state machine
+            // honest.
+            _state.value = State.Failed(
+                code = "face_capture_out_of_order",
+                message = "onFaceCaptured fired while state=$current; expected AwaitingFaceCapture",
+            )
+            return
+        }
+        require(secret.size == 32) {
+            "onFaceCaptured: expected 32-byte secret, got ${secret.size}"
+        }
+        val source = secretSource
+        if (source is CapturedFaceSecret) {
+            source.acceptCapturedSecret(secret)
+        }
+        _state.value = State.AwaitingEnrollScan(current.sessionId)
+    }
+
+    /**
+     * Entry point the [RegistrationScreen] calls when the user cancels
+     * the face-capture composable (back button, cancel CTA, or permission
+     * denied). Transitions to a [State.Failed] so the operator can
+     * restart the ceremony.
+     */
+    fun onFaceCaptureCancelled() {
+        _state.value = State.Failed(
+            code = "face_capture_cancelled",
+            message = "Face capture was cancelled. Re-scan QR1 to restart.",
+        )
     }
 
     private fun submitCommitment(challenge: RegChallenge) {

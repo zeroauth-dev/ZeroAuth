@@ -181,10 +181,19 @@ export function createApp() {
     res.sendFile(path.join(dashboardPath, 'index.html'));
   });
 
-  // Serve demo-portal (static, mirrors /dashboard mount pattern)
-  app.use('/demo-portal', express.static(path.join(__dirname, '../demo-portal/dist'), { fallthrough: true }));
-  app.get('/demo-portal/*', (req, res) => {
+  // Serve demo-portal — the public NeoBank "bank demo" — at /bank-demo
+  // (mirrors the /dashboard mount pattern). The SPA's Vite `base` and
+  // react-router `basename` are both pinned to `/bank-demo/` to match.
+  app.use('/bank-demo', express.static(path.join(__dirname, '../demo-portal/dist'), { fallthrough: true }));
+  app.get('/bank-demo/*', (req, res) => {
     res.sendFile(path.join(__dirname, '../demo-portal/dist/index.html'));
+  });
+  // Back-compat: the demo used to live at /demo-portal. Permanent-redirect
+  // the old path (and any sub-path) to /bank-demo so existing links/QRs
+  // and muscle memory keep working.
+  app.get(['/demo-portal', '/demo-portal/*'], (req, res) => {
+    const suffix = req.originalUrl.slice('/demo-portal'.length);
+    res.redirect(301, `/bank-demo${suffix}`);
   });
 
   // Serve Docusaurus documentation

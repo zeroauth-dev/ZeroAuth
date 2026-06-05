@@ -137,6 +137,15 @@ object ApiFactory {
     fun createRegistrationApi(baseUrl: String = DEFAULT_BASE_URL): RegistrationApi =
         retrofit(baseUrl).create(RegistrationApi::class.java)
 
+    /**
+     * Phone-push sign-in — the demo-portal bridge endpoint the
+     * proof-pairing login POSTs its proof to (replacing the desktop
+     * webcam scan-back). Same OkHttp + Retrofit stack as [create]; see
+     * [DemoPortalApi] for the contract + the ADR-0009 air-gap note.
+     */
+    fun createDemoPortalApi(baseUrl: String = DEFAULT_BASE_URL): DemoPortalApi =
+        retrofit(baseUrl).create(DemoPortalApi::class.java)
+
     private fun retrofit(baseUrl: String): Retrofit {
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) {
@@ -160,17 +169,26 @@ object ApiFactory {
     }
 
     /**
-     * Public for unit tests so they can verify the production default
-     * without grepping the source.
+     * The API host every Retrofit factory targets by default. Resolved at
+     * build time from `BuildConfig.ZEROAUTH_BASE_URL`, which is wired in
+     * `app/build.gradle.kts` per build type and overridable with the
+     * `-PZEROAUTH_BASE_URL=…` Gradle property:
      *
-     * In a debug build we override to the Android emulator's special
-     * host-loopback address (10.0.2.2) so the bundled APK can drive
-     * a developer's local backend without rebuild gymnastics. Release
-     * builds always hit the production endpoint.
+     *   - **debug** (default `http://localhost:3030/`): targets the dev
+     *     box over the USB `adb reverse tcp:3030 tcp:3030` tunnel — works
+     *     identically on a real phone and the emulator, survives the Mac's
+     *     IP changing, no Wi-Fi/LAN/firewall in the way. The debug
+     *     `network_security_config.xml` whitelists `localhost` + `127.0.0.1`
+     *     for cleartext; HTTPS to any host is allowed regardless.
+     *   - **release** (default `https://api.zeroauth.dev/`): the production
+     *     host.
+     *   - **override**: pass `-PZEROAUTH_BASE_URL=https://api.zeroauth.dev/`
+     *     to a *debug* build to produce an auto-signed, installable APK
+     *     that talks to the LIVE server without the release keystore — the
+     *     "hosted bank demo" sideload build.
+     *
+     * Operator runbook (local dev only):
+     *   adb reverse tcp:3030 tcp:3030     # once per device reboot
      */
-    val DEFAULT_BASE_URL: String = if (BuildConfig.DEBUG) {
-        "http://10.0.2.2:3030/"
-    } else {
-        "https://api.zeroauth.dev/"
-    }
+    val DEFAULT_BASE_URL: String = BuildConfig.ZEROAUTH_BASE_URL
 }

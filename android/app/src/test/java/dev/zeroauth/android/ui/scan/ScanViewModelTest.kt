@@ -2,9 +2,14 @@ package dev.zeroauth.android.ui.scan
 
 import androidx.fragment.app.FragmentActivity
 import app.cash.turbine.test
+import dev.zeroauth.android.net.DemoPortalApi
 import dev.zeroauth.android.net.PairingSession
 import dev.zeroauth.android.net.SessionResponse
+import dev.zeroauth.android.net.SubmitProofRequest
+import dev.zeroauth.android.net.SubmitProofResponse
 import dev.zeroauth.android.net.ZeroAuthApi
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import dev.zeroauth.android.prover.ProverException
 import dev.zeroauth.android.sec.BiometricResult
 import dev.zeroauth.android.util.ClientMeta
@@ -38,18 +43,24 @@ import org.robolectric.annotation.Config
  * `android.os.Build.MODEL` and `androidx.lifecycle.viewModelScope`,
  * both of which need an Android-shadowed JVM environment.
  *
- * The six required cases from the W3 brief:
+ * The seven required cases from the W3 brief — updated for the
+ * face-first (ADR-0017) pivot, which retires the BiometricPrompt from
+ * the login flow in favour of an on-device face-capture step:
+ *
  *   1. Idle → Scanning on permission grant
  *   2. Scanning → ChallengeParsed on valid QR
  *   3. Scanning stays on invalid QR
- *   4. ChallengeParsed → AwaitingBiometric on Approve
- *   5. Happy path (fake prover) ends in ProofReady
- *   6. Biometric cancel ⇒ Error("biometric_cancelled")
+ *   4. ChallengeParsed → AwaitingFaceCapture on Approve
+ *   5. Happy path (fake prover + canned face secret) ends in ProofReady
+ *   6. Face-capture cancel ⇒ Error("face_capture_cancelled")
  *   7. Prover failure ⇒ Error("prover_failed")
  *
  * All dependencies are fakes from `util/FakeProverAndSec.kt`. The
- * FragmentActivity is mocked because the BiometricGate signature
- * requires it — the FakeBiometricGate never reads the activity.
+ * FragmentActivity is mocked because the legacy BiometricGate
+ * signature still requires it — the gate is kept on the ScanViewModel
+ * constructor for backward compat with the Compose factory and the
+ * `AndroidBiometricGate` wiring, but the proof flow no longer drives
+ * it.
  *
  * Test dispatcher: [Dispatchers.Main] is swapped for a
  * [StandardTestDispatcher] in `setUp`, scrubbed in `tearDown`. Most
@@ -123,6 +134,28 @@ class ScanViewModelTest {
             )
     }
 
+    /** A DemoPortalApi that accepts any proof — phone-push happy path. */
+    private val okDemoPortalApi: DemoPortalApi = object : DemoPortalApi {
+        override suspend fun submitProof(body: SubmitProofRequest): SubmitProofResponse =
+            SubmitProofResponse(ok = true, redirect = "/dashboard")
+    }
+
+    /**
+     * A DemoPortalApi that fails with a Retrofit [retrofit2.HttpException]
+     * carrying a JSON `{ error, message }` body — exercises
+     * ScanViewModel.decodeSubmitError's error-code lift.
+     */
+    private fun erroringDemoPortalApi(status: Int, errorCode: String): DemoPortalApi =
+        object : DemoPortalApi {
+            override suspend fun submitProof(body: SubmitProofRequest): SubmitProofResponse {
+                val json = """{"error":"$errorCode","message":"boom"}"""
+                val rb = json.toResponseBody("application/json".toMediaType())
+                throw retrofit2.HttpException(
+                    retrofit2.Response.error<SubmitProofResponse>(status, rb),
+                )
+            }
+        }
+
     private fun newViewModel(
         keystore: FakeKeystoreManager = FakeKeystoreManager(),
         biometric: FakeBiometricGate = FakeBiometricGate(
@@ -130,11 +163,13 @@ class ScanViewModelTest {
         ),
         prover: FakeMobileProver = FakeMobileProver(delayMs = 0L),
         api: ZeroAuthApi = throwingApi,
+        demoPortalApi: DemoPortalApi = okDemoPortalApi,
     ): ScanViewModel = ScanViewModel(
         keystoreManager = keystore,
         biometricGate   = biometric,
         mobileProver    = prover,
         api             = api,
+        demoPortalApi   = demoPortalApi,
         ioDispatcher    = UnconfinedTestDispatcher(mainDispatcher.scheduler),
         clientMetaFactory = {
             ClientMeta(
@@ -144,6 +179,22 @@ class ScanViewModelTest {
             )
         },
     )
+
+    /**
+     * Drive a fresh ViewModel all the way to [ScanState.ProofReady] via
+     * the standard happy path (permission → scan → approve → face
+     * capture). Shared by the phone-push authorize tests below.
+     */
+    private suspend fun ScanViewModel.driveToProofReady() {
+        onPermissionGranted()
+        mainDispatcher.scheduler.advanceUntilIdle()
+        onQrDetected(validChallengeQr)
+        mainDispatcher.scheduler.runCurrent()
+        onBiometricApproved(mockActivity, FakeKeystoreManager.DEMO_EMAIL)
+        mainDispatcher.scheduler.runCurrent()
+        onFaceCaptureSucceeded(CANNED_FACE_SECRET.copyOf())
+        mainDispatcher.scheduler.advanceUntilIdle()
+    }
 
     // ─── 1. Idle → Scanning on permission grant ──────────────────
 
@@ -225,17 +276,16 @@ class ScanViewModelTest {
         assertEquals(ScanState.Scanning, vm.state.value)
     }
 
-    // ─── 4. ChallengeParsed → AwaitingBiometric on Approve ───────
+    // ─── 4. ChallengeParsed → AwaitingFaceCapture on Approve ──────
 
     @Test
-    fun `approve from ChallengeParsed transitions through AwaitingBiometric`() = runVmTest {
-        // Use a biometric gate that BLOCKS so we can observe the
-        // AwaitingBiometric state before it resolves.
-        val biometric = FakeBiometricGate(
-            nextResult = BiometricResult.Success(Cipher.getInstance("AES/GCM/NoPadding")),
-            delayMs    = 1_000,
-        )
-        val vm = newViewModel(biometric = biometric)
+    fun `approve from ChallengeParsed transitions to AwaitingFaceCapture`() = runVmTest {
+        // No biometric gate involved any more — the proof flow emits
+        // AwaitingFaceCapture immediately on approve and waits for the
+        // Compose host's face-capture composable to feed a 32-byte
+        // secret back via onFaceCaptureSucceeded. The test asserts that
+        // exact transition before completing the capture.
+        val vm = newViewModel()
 
         vm.onPermissionGranted()
         mainDispatcher.scheduler.advanceUntilIdle()
@@ -245,22 +295,37 @@ class ScanViewModelTest {
 
         vm.onBiometricApproved(mockActivity, FakeKeystoreManager.DEMO_EMAIL)
         mainDispatcher.scheduler.runCurrent()
-        assertEquals(ScanState.AwaitingBiometric, vm.state.value)
+
+        val awaiting = vm.state.value
+        assertTrue(
+            "Expected AwaitingFaceCapture but got ${awaiting::class.simpleName}",
+            awaiting is ScanState.AwaitingFaceCapture,
+        )
+        awaiting as ScanState.AwaitingFaceCapture
+        assertEquals(FakeKeystoreManager.DEMO_EMAIL, awaiting.email)
     }
 
     // ─── 5. End-to-end happy path → ProofReady ───────────────────
 
     @Test
     fun `happy path ends in ProofReady with a za_proof_1 QR text`() = runVmTest {
-        val keystore = FakeKeystoreManager()
         val prover   = FakeMobileProver(delayMs = 0L)
-        val vm = newViewModel(keystore = keystore, prover = prover)
+        val vm = newViewModel(prover = prover)
 
         vm.onPermissionGranted()
         mainDispatcher.scheduler.advanceUntilIdle()
         vm.onQrDetected(validChallengeQr)
         mainDispatcher.scheduler.runCurrent()
         vm.onBiometricApproved(mockActivity, FakeKeystoreManager.DEMO_EMAIL)
+        mainDispatcher.scheduler.runCurrent()
+        // The ViewModel is now waiting for a face-capture callback.
+        assertTrue(vm.state.value is ScanState.AwaitingFaceCapture)
+
+        // Feed a canned 32-byte secret in. FaceSecretCredential reduces
+        // mod BN128 internally so any 32-byte buffer produces a valid
+        // commitment; the exact bytes don't matter for this happy-path
+        // assertion.
+        vm.onFaceCaptureSucceeded(CANNED_FACE_SECRET.copyOf())
         mainDispatcher.scheduler.advanceUntilIdle()
 
         val terminal = vm.state.value
@@ -274,29 +339,77 @@ class ScanViewModelTest {
             terminal.qrText.startsWith("za:proof:1:"),
         )
 
-        // The fake credential should have been closed after generate.
-        val issued = keystore.lastIssued
-        assertNotNull("FakeKeystoreManager should have issued a credential", issued)
+        // The FakeMobileProver should have been driven with an
+        // UnlockedCredential derived from the face secret. Validate the
+        // input was non-null and carried a DID prefix consistent with
+        // FaceSecretCredential.fromSecret.
+        val proverInput = prover.lastInput
+        assertNotNull("FakeMobileProver should have been invoked", proverInput)
+        assertTrue(
+            "DID should be face-derived; was ${proverInput!!.unlocked.did}",
+            proverInput.unlocked.did.startsWith("did:zeroauth:face:"),
+        )
     }
 
-    // ─── 6. Biometric cancel ⇒ Error("biometric_cancelled") ──────
+    // ─── 5b. Phone-push authorize: ProofReady → Authorized ───────
 
     @Test
-    fun `biometric cancel transitions to Error with stable code`() = runVmTest {
-        val biometric = FakeBiometricGate(nextResult = BiometricResult.Cancelled)
-        val vm = newViewModel(biometric = biometric)
+    fun `authorizeOnPhone happy path ends in Authorized`() = runVmTest {
+        val vm = newViewModel()
+        vm.driveToProofReady()
+        assertTrue(
+            "Expected ProofReady, got ${vm.state.value::class.simpleName}",
+            vm.state.value is ScanState.ProofReady,
+        )
+
+        vm.authorizeOnPhone()
+        mainDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(ScanState.Authorized, vm.state.value)
+    }
+
+    // ─── 5c. Phone-push authorize: server error surfaces its code ─
+
+    @Test
+    fun `authorizeOnPhone surfaces the server error code on failure`() = runVmTest {
+        val vm = newViewModel(
+            demoPortalApi = erroringDemoPortalApi(410, "pairing_session_expired"),
+        )
+        vm.driveToProofReady()
+        assertTrue(vm.state.value is ScanState.ProofReady)
+
+        vm.authorizeOnPhone()
+        mainDispatcher.scheduler.advanceUntilIdle()
+
+        val terminal = vm.state.value
+        assertTrue(
+            "Expected Error, got ${terminal::class.simpleName}",
+            terminal is ScanState.Error,
+        )
+        assertEquals("pairing_session_expired", (terminal as ScanState.Error).code)
+    }
+
+    // ─── 6. Face capture cancel ⇒ Error("face_capture_cancelled") ─
+
+    @Test
+    fun `face capture cancel transitions to Error with stable code`() = runVmTest {
+        val vm = newViewModel()
 
         vm.onPermissionGranted()
         mainDispatcher.scheduler.advanceUntilIdle()
         vm.onQrDetected(validChallengeQr)
         mainDispatcher.scheduler.runCurrent()
         vm.onBiometricApproved(mockActivity, FakeKeystoreManager.DEMO_EMAIL)
+        mainDispatcher.scheduler.runCurrent()
+        assertTrue(vm.state.value is ScanState.AwaitingFaceCapture)
+
+        vm.onFaceCaptureCancelled()
         mainDispatcher.scheduler.advanceUntilIdle()
 
         val terminal = vm.state.value
         assertTrue(terminal is ScanState.Error)
         terminal as ScanState.Error
-        assertEquals("biometric_cancelled", terminal.code)
+        assertEquals("face_capture_cancelled", terminal.code)
     }
 
     // ─── 7. Prover failure ⇒ Error("prover_failed") ──────────────
@@ -317,6 +430,10 @@ class ScanViewModelTest {
         vm.onQrDetected(validChallengeQr)
         mainDispatcher.scheduler.runCurrent()
         vm.onBiometricApproved(mockActivity, FakeKeystoreManager.DEMO_EMAIL)
+        mainDispatcher.scheduler.runCurrent()
+        assertTrue(vm.state.value is ScanState.AwaitingFaceCapture)
+
+        vm.onFaceCaptureSucceeded(CANNED_FACE_SECRET.copyOf())
         mainDispatcher.scheduler.advanceUntilIdle()
 
         val terminal = vm.state.value
@@ -329,14 +446,15 @@ class ScanViewModelTest {
 
     @Test
     fun `retry from Error returns to Idle`() = runVmTest {
-        val biometric = FakeBiometricGate(nextResult = BiometricResult.Cancelled)
-        val vm = newViewModel(biometric = biometric)
+        val vm = newViewModel()
 
         vm.onPermissionGranted()
         mainDispatcher.scheduler.advanceUntilIdle()
         vm.onQrDetected(validChallengeQr)
         mainDispatcher.scheduler.runCurrent()
         vm.onBiometricApproved(mockActivity, FakeKeystoreManager.DEMO_EMAIL)
+        mainDispatcher.scheduler.runCurrent()
+        vm.onFaceCaptureCancelled()
         mainDispatcher.scheduler.advanceUntilIdle()
         assertTrue(vm.state.value is ScanState.Error)
 
@@ -357,5 +475,17 @@ class ScanViewModelTest {
 
         vm.onChallengeCancelled()
         assertEquals(ScanState.Scanning, vm.state.value)
+    }
+
+    companion object {
+        /**
+         * Canned 32-byte face secret used by the happy-path + prover-
+         * failure tests. The exact bytes don't matter for state-machine
+         * assertions — FaceSecretCredential reduces the buffer mod the
+         * BN128 scalar field, so any 32-byte input produces a valid
+         * commitment. The bytes are deliberately patterned (0..31) so a
+         * heap-dump or log lookup is recognisable as a test fixture.
+         */
+        private val CANNED_FACE_SECRET: ByteArray = ByteArray(32) { it.toByte() }
     }
 }

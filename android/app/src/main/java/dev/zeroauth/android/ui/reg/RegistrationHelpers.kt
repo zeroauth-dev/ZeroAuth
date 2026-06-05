@@ -9,6 +9,8 @@ import dev.zeroauth.android.ui.reg.RegistrationViewModel.ProofResult
 import java.math.BigInteger
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.Arrays
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Default biometric-secret source for the registration demo.
@@ -60,6 +62,146 @@ class PerInstallStableSecret(context: Context) : BiometricSecretSource {
                 ((Character.digit(hex[i * 2], 16) shl 4)
                     + Character.digit(hex[i * 2 + 1], 16)).toByte()
             }
+    }
+}
+
+/**
+ * Session-scoped [BiometricSecretSource] backed by a 32-byte secret
+ * captured up-front by the on-device face-capture composable
+ * ([RegistrationFaceCapture]).
+ *
+ * Lifecycle:
+ *   1. [RegistrationViewModel] is constructed with one of these in its
+ *      `secretSource` slot. Initially [secret] is `null` — calling
+ *      [secret] before [acceptCapturedSecret] throws.
+ *   2. After QR1 (pair) succeeds, the ViewModel transitions to
+ *      `AwaitingFaceCapture`. The [RegistrationScreen] renders the
+ *      inline face-capture composable and the resulting 32-byte secret
+ *      is handed to the ViewModel which calls [acceptCapturedSecret].
+ *   3. Step 2 (submit-commitment) and step 3 (verify) both call
+ *      [secret] — the same 32-byte buffer is returned both times. That
+ *      guarantees the server's `publicSignals[0]` commitment-equality
+ *      check passes without requiring a second capture for step 3.
+ *
+ * ## SharedPreferences bridge (temporary)
+ *
+ * As a temporary bridge until phase 4 swaps the login path, this class
+ * also writes the captured 32-byte secret into the same
+ * SharedPreferences slot [PerInstallStableSecret] uses
+ * (`zeroauth_reg_secret`/`secret_hex`). The
+ * [dev.zeroauth.android.sec.AndroidKeystoreManager.buildRegistrationFallbackCredential]
+ * code path reads from that slot when a returning user logs in via the
+ * proof-pairing flow, so writing here keeps the login flow producing the
+ * same DID as the registration ceremony just did. Once phase 4 wires the
+ * login flow through a real face-capture surface this bridge can be
+ * removed.
+ *
+ * ## Stability contract
+ *
+ * Returns the same byte array (by `copyOf`) on every [secret] call after
+ * [acceptCapturedSecret]. The byte buffer itself is held in an
+ * AtomicReference so concurrent reads are safe; the read returns a
+ * defensive copy so the caller can't mutate the cached secret.
+ *
+ * @param context Application context used to access SharedPreferences.
+ */
+class CapturedFaceSecret(context: Context) : BiometricSecretSource {
+
+    private val appContext = context.applicationContext
+
+    // AtomicReference so the publish-after-capture and the subsequent
+    // reads from step 2 + step 3 see the same byte array without taking
+    // a lock. The captured bytes are mutable in principle (we zero them
+    // when the screen exits) but in practice the registration session
+    // outlives the ViewModel until completion.
+    private val captured = AtomicReference<ByteArray?>(null)
+
+    /**
+     * Store [secret] in memory and (as a bridge) in the SharedPreferences
+     * slot the login flow reads from.
+     *
+     * MUST be called exactly once per registration session, after the
+     * face-capture composable produces a 32-byte secret. Subsequent calls
+     * overwrite the cached value — that's intentional so re-capture (e.g.
+     * if the user dismisses + re-enters the screen) works.
+     *
+     * @param secret 32-byte buffer derived from the captured face. The
+     *               supplied buffer is copied internally; the caller is
+     *               free to zero it after this returns.
+     */
+    fun acceptCapturedSecret(secret: ByteArray) {
+        require(secret.size == 32) {
+            "CapturedFaceSecret: expected 32-byte secret, got ${secret.size}"
+        }
+        val copy = secret.copyOf()
+        captured.set(copy)
+
+        // Temporary bridge until phase 4 swaps the login path too —
+        // write the captured 32-byte secret into the same
+        // SharedPreferences slot PerInstallStableSecret uses so the
+        // AndroidKeystoreManager's "no per-account blob → reconstruct
+        // from prefs" fallback finds it. This keeps the login flow
+        // working with the same DID/commitment the registration
+        // ceremony just produced.
+        val prefs = appContext.getSharedPreferences(
+            PREFS_NAME,
+            Context.MODE_PRIVATE,
+        )
+        prefs.edit().putString(KEY_SECRET_HEX, hexEncode(copy)).apply()
+    }
+
+    /**
+     * Returns the captured secret, throwing if [acceptCapturedSecret]
+     * has not been called yet. A defensive copy is returned on every
+     * call so the caller can mutate (zero) the returned buffer without
+     * touching the cached value.
+     *
+     * Called from [RegistrationViewModel.submitCommitment] (step 2) and
+     * [RegistrationViewModel.complete] (step 3). Both call sites get the
+     * same bytes — the publicSignals[0] commitment-equality contract.
+     */
+    override suspend fun secret(): ByteArray {
+        val bytes = captured.get()
+            ?: error(
+                "CapturedFaceSecret.secret() called before " +
+                    "acceptCapturedSecret(). The face-capture composable " +
+                    "must run between QR1 (pair) and QR2 (commit) so the " +
+                    "secret is available to the submit-commitment step.",
+            )
+        return bytes.copyOf()
+    }
+
+    /**
+     * Whether a captured secret is currently available. Used by the
+     * Compose layer to decide whether to render the face-capture screen
+     * or skip straight to the next QR-scan step (e.g. after a configuration
+     * change re-creates the composable but the ViewModel was retained).
+     */
+    fun hasCapturedSecret(): Boolean = captured.get() != null
+
+    /**
+     * Zero the cached secret. Called when the registration session ends
+     * (Completed terminal state or user navigates away). The buffer is
+     * already a copy so this only affects this class's cache, not the
+     * caller's view of the bytes.
+     */
+    fun clear() {
+        val existing = captured.getAndSet(null)
+        if (existing != null) {
+            Arrays.fill(existing, 0.toByte())
+        }
+    }
+
+    private companion object {
+        // Must match PerInstallStableSecret's PREFS_NAME / KEY_SECRET_HEX
+        // — the AndroidKeystoreManager fallback reads from exactly this
+        // slot when reconstructing a credential from the registration
+        // ceremony. Drift here breaks the login bridge.
+        const val PREFS_NAME = "zeroauth_reg_secret"
+        const val KEY_SECRET_HEX = "secret_hex"
+
+        fun hexEncode(b: ByteArray): String =
+            b.joinToString("") { "%02x".format(it) }
     }
 }
 

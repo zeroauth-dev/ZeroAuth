@@ -61,6 +61,7 @@
  * cross-pollinate.
  */
 
+import { poseidon1 } from 'poseidon-lite';
 import { getPool } from './db';
 import { logger } from './logger';
 import {
@@ -81,6 +82,58 @@ import {
 
 /** Whole-session TTL (the user has 30 min total to complete all 3 steps). */
 export const REGISTRATION_SESSION_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * Demo-portal-only plaintext-code cache.
+ *
+ * The three-QR ceremony mints pair_code / enroll_code / verify_code at
+ * each step. Their HASHES go to Postgres so a DB dump never reveals
+ * them, and the plaintext is returned to the API caller (the phone).
+ * That works in production where the bank's web page is its own
+ * tenant — but for our demo portal the SPA needs to display QR2 and
+ * QR3 to the user *after* the phone has scanned QR1 / QR2, so it
+ * needs to see the plaintext codes that the SERVER minted in response
+ * to the PHONE's API calls.
+ *
+ * This cache is keyed by session_id and only populated for sessions
+ * created via the NeoBank demo-portal tenant (the caller decides
+ * whether to write into it via `cachePendingDemoCode`). It's an
+ * in-memory Map — process-local, no persistence — so a backend
+ * restart clears it. Codes are auto-evicted after
+ * `DEMO_CODE_TTL_MS` to bound memory usage.
+ *
+ * Production tenants do NOT populate this cache; the registration
+ * routes only call `cachePendingDemoCode` when the demo-portal hook
+ * tells them to. So a regular tenant's ceremony is byte-for-byte
+ * unchanged.
+ */
+const DEMO_CODE_TTL_MS = 30 * 60 * 1000;
+interface DemoPendingCode {
+  step: 'pair' | 'enroll' | 'verify';
+  code: string;
+  deeplink: string;
+  challengeNonce?: string;
+  expiresAt: number;
+}
+const demoPendingCodes = new Map<string, DemoPendingCode>();
+
+export function cachePendingDemoCode(sessionId: string, entry: Omit<DemoPendingCode, 'expiresAt'>): void {
+  demoPendingCodes.set(sessionId, { ...entry, expiresAt: Date.now() + DEMO_CODE_TTL_MS });
+}
+
+export function peekPendingDemoCode(sessionId: string): DemoPendingCode | null {
+  const entry = demoPendingCodes.get(sessionId);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    demoPendingCodes.delete(sessionId);
+    return null;
+  }
+  return entry;
+}
+
+export function clearPendingDemoCode(sessionId: string): void {
+  demoPendingCodes.delete(sessionId);
+}
 
 /**
  * Length of the challenge nonce baked into QR3. 62 hex chars = 31 bytes.
@@ -279,11 +332,16 @@ export async function startRegistration(
     },
   }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
+  const pairDeeplink = `zeroauth://reg?step=pair&session=${session.id}&code=${encodeURIComponent(code)}`;
+  if (process.env.NODE_ENV !== 'production') {
+    cachePendingDemoCode(session.id, { step: 'pair', code, deeplink: pairDeeplink });
+  }
+
   return {
     session,
     pairCode: code,
     pairCodeExpiresAt: codeExpiresAt,
-    pairDeeplink: `zeroauth://reg?step=pair&session=${session.id}&code=${encodeURIComponent(code)}`,
+    pairDeeplink,
   };
 }
 
@@ -390,11 +448,15 @@ export async function pairDeviceForRegistration(input: {
       },
     }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
+    const enrollDeeplink = `zeroauth://reg?step=enroll&session=${session.id}&code=${encodeURIComponent(nextCode)}`;
+    if (process.env.NODE_ENV !== 'production') {
+      cachePendingDemoCode(session.id, { step: 'enroll', code: nextCode, deeplink: enrollDeeplink });
+    }
     return {
       session: updated.rows[0],
       nextCode,
       nextCodeExpiresAt,
-      nextDeeplink: `zeroauth://reg?step=enroll&session=${session.id}&code=${encodeURIComponent(nextCode)}`,
+      nextDeeplink: enrollDeeplink,
     };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* already rolled back */ }
@@ -492,11 +554,15 @@ export async function submitCommitmentForRegistration(input: {
       },
     }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
+    const verifyDeeplink = `zeroauth://reg?step=verify&session=${session.id}&code=${encodeURIComponent(nextCode)}&challenge=${challengeNonce}`;
+    if (process.env.NODE_ENV !== 'production') {
+      cachePendingDemoCode(session.id, { step: 'verify', code: nextCode, deeplink: verifyDeeplink, challengeNonce });
+    }
     return {
       session: updated.rows[0],
       nextCode,
       nextCodeExpiresAt,
-      nextDeeplink: `zeroauth://reg?step=verify&session=${session.id}&code=${encodeURIComponent(nextCode)}&challenge=${challengeNonce}`,
+      nextDeeplink: verifyDeeplink,
       challengeNonce,
     };
   } catch (err) {
@@ -610,6 +676,50 @@ export async function completeRegistration(
     const phone = typeof profile.phone === 'string' ? profile.phone : null;
     const employeeCode = typeof profile.employee_code === 'string' ? profile.employee_code : null;
 
+    // Backfill the proof-pairing lookup keys onto the tenant_user
+    // metadata so the subsequent login path can resolve this DID via
+    // findUserByDid (src/services/proof-pairing.ts). That helper keys
+    // on (tenant_id, environment, metadata->>'did') and requires
+    // metadata->>'did_hash' + metadata->>'commitment' to be present
+    // as DECIMAL bigint strings — see proof-pairing's StoredUserCommitment
+    // shape and the Poseidon-fold reconstruction in submitProof's
+    // "expectedDidHashSession" check.
+    //
+    // - did:        same string as the `did` column (canonical lower-case
+    //               did:zeroauth:face:<hex>).
+    // - did_hash:   Poseidon(commitment) as a decimal-string BigInt.
+    //               Mirrors computeDidHashRaw in tests/helpers/ceremony-client.ts
+    //               and the on-device derivation in
+    //               android/.../ui/reg/RealRegistrationProver.kt.
+    // - commitment: the DECIMAL form of the same field element stored in
+    //               the `commitment` column. The column itself holds the
+    //               64-char hex the phone submits to /submit-commitment
+    //               (with or without a 0x prefix per
+    //               submitCommitmentForRegistration's validator);
+    //               proof-pairing compares against publicSignals[0] which
+    //               snarkjs emits in DECIMAL — so we stash the decimal
+    //               representation here as the canonical lookup value.
+    //
+    // parseCommitmentBigInt accepts both 0x-prefixed and unprefixed hex
+    // (and the decimal corner case for pure-digit strings), which is the
+    // same shape submitCommitmentForRegistration's validator already
+    // permits. If somehow the stored commitment is unparseable we let
+    // the rollback in the catch block surface the error rather than
+    // silently writing a null hash.
+    const commitmentBigInt = parseCommitmentBigInt(session.commitment);
+    if (commitmentBigInt === null) {
+      throw new RegistrationStateError('commitment_mismatch');
+    }
+    const commitmentDec = commitmentBigInt.toString(10);
+    const didHashDec = poseidon1([commitmentBigInt]).toString(10);
+    const userMetadata = {
+      via: 'registration',
+      sessionId: session.id,
+      did: session.did,
+      did_hash: didHashDec,
+      commitment: commitmentDec,
+    };
+
     const userInsert = await client.query<TenantUser>(
       `INSERT INTO tenant_users
         (tenant_id, environment, external_id, full_name, email, phone,
@@ -628,7 +738,7 @@ export async function completeRegistration(
         session.device_id,
         session.did,
         session.commitment,
-        JSON.stringify({ via: 'registration', sessionId: session.id }),
+        JSON.stringify(userMetadata),
       ],
     );
     const tenantUser = userInsert.rows[0];

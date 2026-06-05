@@ -3,6 +3,7 @@ import {
   useEffect,
   useReducer,
   useRef,
+  useState,
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -141,6 +142,70 @@ async function initLogin(): Promise<InitLoginResponse> {
   return (await res.json()) as InitLoginResponse;
 }
 
+/**
+ * POST /api/demo-portal/submit-proof with the raw proof-QR string the
+ * operator pasted or the webcam decoded. Throws an Error with an
+ * additional `code` field on any non-2xx so the caller can branch on
+ * the documented submitProof failure classes (proof_failed,
+ * pairing_session_expired, pairing_session_already_bound, etc).
+ */
+async function submitProofPayload(
+  sessionId: string,
+  qrPayload: string,
+): Promise<{ ok: true; redirect: string }> {
+  const res = await fetch('/api/demo-portal/submit-proof', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, qr_payload: qrPayload }),
+  });
+  if (!res.ok) {
+    let code = 'proof_failed';
+    let message = `Proof submission failed (HTTP ${res.status}).`;
+    try {
+      const body = (await res.json()) as { error?: string; message?: string };
+      if (body.error) code = body.error;
+      if (body.message) message = body.message;
+    } catch { /* body wasn't JSON — fall through */ }
+    const err = new Error(message) as Error & { code: string };
+    err.code = code;
+    throw err;
+  }
+  return (await res.json()) as { ok: true; redirect: string };
+}
+
+/**
+ * POST /api/demo-portal/sessions/:id/claim — desktop-side cookie claim
+ * for the phone-push flow. After the phone submits its proof directly,
+ * the pairing row is `consumed` but the desktop has no cookie yet. This
+ * call mints the demo_portal_session cookie on the DESKTOP's response so
+ * the subsequent /me (on the dashboard) authenticates. Idempotent + does
+ * no crypto — see the route's doc in src/routes/demo-portal.ts.
+ */
+async function claimSession(sessionId: string): Promise<void> {
+  const res = await fetch(
+    `/api/demo-portal/sessions/${encodeURIComponent(sessionId)}/claim`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    let message = `Could not finish signing in (HTTP ${res.status}).`;
+    try {
+      const body = (await res.json()) as { message?: string };
+      if (body.message) message = body.message;
+    } catch { /* non-JSON body — fall through */ }
+    const err = new Error(message) as Error & { code: string };
+    err.code = 'claim_failed';
+    throw err;
+  }
+}
+
+const PROOF_QR_PREFIX = 'za:proof:1:';
+
 // ─── The page ──────────────────────────────────────────────────
 
 export default function SignIn() {
@@ -186,7 +251,13 @@ export default function SignIn() {
       return;
     }
 
-    const url = `/api/demo-portal/sessions/${encodeURIComponent(sessionId)}/stream`;
+    // NOTE: the backend route is `/events` (src/routes/demo-portal.ts).
+    // This previously pointed at `/stream`, which 404'd — so the SSE
+    // channel never connected and the desktop could only sign in via the
+    // manual webcam/paste fallback. With the phone-push flow the phone
+    // POSTs its proof directly; this stream is how the desktop hears
+    // "you're in" and auto-navigates to the dashboard.
+    const url = `/api/demo-portal/sessions/${encodeURIComponent(sessionId)}/events`;
     const es = new EventSource(url, { withCredentials: true });
 
     const wire = <T extends SessionStreamEvent['type']>(
@@ -213,7 +284,23 @@ export default function SignIn() {
           /* ignore */
         }
       }
-      dispatch({ type: 'sse_bound', userEmail: ev.userEmail ?? 'demo user' });
+      // Phone-push: the proof was submitted by the phone, so the demo
+      // cookie was set on the PHONE's response — the desktop has none
+      // yet. Claim it on a desktop-originated request before navigating,
+      // otherwise /me on the dashboard 401s. Idempotent: if the SSE
+      // Phase-1 fast path already delivered the cookie, this just
+      // re-mints the same one.
+      void claimSession(sessionId)
+        .then(() => {
+          dispatch({ type: 'sse_bound', userEmail: ev.userEmail ?? 'demo user' });
+        })
+        .catch((err: Error & { code?: string }) => {
+          dispatch({
+            type: 'sse_error',
+            code: err.code ?? 'claim_failed',
+            message: err.message ?? 'Could not finish signing in. Try again.',
+          });
+        });
     });
     const offExpired = wire('session_expired', () => {
       dispatch({ type: 'sse_expired' });
@@ -263,7 +350,13 @@ export default function SignIn() {
 
         {(state.phase === 'idle' || state.phase === 'creating') && <PendingState />}
         {state.phase === 'pending' && (
-          <PendingCard qrPayload={state.qrPayload} secondsLeft={state.secondsLeft} />
+          <>
+            <PendingCard qrPayload={state.qrPayload} secondsLeft={state.secondsLeft} />
+            <ProofCaptureCard
+              sessionId={state.sessionId}
+              onBound={() => dispatch({ type: 'sse_bound', userEmail: 'demo user' })}
+            />
+          </>
         )}
         {state.phase === 'success' && <SuccessState userEmail={state.userEmail} />}
         {(state.phase === 'expired' || state.phase === 'error') && (
@@ -326,6 +419,287 @@ function PendingCard({ qrPayload, secondsLeft }: PendingCardProps): ReactNode {
         QR expires in {formatCountdown(secondsLeft)}
       </div>
     </div>
+  );
+}
+
+// ─── Proof-QR capture (paste + optional webcam) ────────────────────────
+//
+// The "air-gap loop without a webcam" path: after the phone generates
+// the Groth16 proof and renders it as a QR, the operator either pastes
+// the QR text into this textarea OR holds the phone up to the laptop
+// camera and the browser's BarcodeDetector reads it. Either way, the
+// raw `za:proof:1:...` string goes to /api/demo-portal/submit-proof,
+// the server decodes the embedded CBOR + Groth16 proof, runs the full
+// submitProof crypto chain, and on success mints the demo_portal
+// session cookie inline. The SSE stream may also fire `session_bound`
+// independently — both paths end at /dashboard.
+//
+// We DON'T pull a QR-decoding library into the demo-portal bundle. The
+// native BarcodeDetector API is enough for Chromium + Safari 17+ — for
+// every other browser the paste textarea is the supported path.
+
+interface ProofCaptureCardProps {
+  sessionId: string;
+  onBound: () => void;
+}
+
+interface BarcodeDetectorLike {
+  detect(source: HTMLVideoElement | HTMLCanvasElement): Promise<Array<{ rawValue: string }>>;
+}
+
+interface BarcodeDetectorCtor {
+  new (init?: { formats?: string[] }): BarcodeDetectorLike;
+}
+
+function getBarcodeDetectorCtor(): BarcodeDetectorCtor | null {
+  if (typeof window === 'undefined') return null;
+  const w = window as unknown as { BarcodeDetector?: BarcodeDetectorCtor };
+  return w.BarcodeDetector ?? null;
+}
+
+function ProofCaptureCard({ sessionId, onBound }: ProofCaptureCardProps): ReactNode {
+  const navigate = useNavigate();
+  const [pasteValue, setPasteValue] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<{ code: string; message: string } | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const detectorRef = useRef<BarcodeDetectorLike | null>(null);
+  const detectedRef = useRef(false);
+
+  // Submit handler — shared by paste + webcam paths. Throws errors back
+  // to the caller as `code` + `message` so the UI can branch on the
+  // documented submitProof failure classes.
+  const submit = useCallback(
+    async (qrPayload: string): Promise<void> => {
+      if (submitting) return;
+      const trimmed = qrPayload.trim();
+      if (!trimmed.startsWith(PROOF_QR_PREFIX)) {
+        setSubmitError({
+          code: 'invalid_payload',
+          message: `Expected a payload starting with "${PROOF_QR_PREFIX}".`,
+        });
+        return;
+      }
+      setSubmitting(true);
+      setSubmitError(null);
+      try {
+        await submitProofPayload(sessionId, trimmed);
+        onBound();
+        // Brief delay so the operator sees the "Welcome back" splash
+        // before /dashboard renders. SSE may also fire — both are safe.
+        window.setTimeout(() => navigate('/dashboard'), 1000);
+      } catch (err) {
+        const e = err as { code?: string; message?: string };
+        setSubmitError({
+          code: e.code ?? 'proof_failed',
+          message: e.message ?? 'Proof submission failed.',
+        });
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [sessionId, submitting, onBound, navigate],
+  );
+
+  // Webcam teardown — used by both stop button + unmount.
+  const stopCamera = useCallback(() => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    const stream = streamRef.current;
+    if (stream) {
+      for (const t of stream.getTracks()) {
+        try { t.stop(); } catch { /* best-effort */ }
+      }
+      streamRef.current = null;
+    }
+    setCameraActive(false);
+  }, []);
+
+  useEffect(() => () => stopCamera(), [stopCamera]);
+
+  const startCamera = useCallback(async () => {
+    if (cameraActive) return;
+    setCameraError(null);
+    const Ctor = getBarcodeDetectorCtor();
+    if (!Ctor) {
+      setCameraError(
+        "This browser can't scan QRs natively. Paste the code from your phone instead.",
+      );
+      return;
+    }
+    try {
+      detectorRef.current = new Ctor({ formats: ['qr_code'] });
+    } catch {
+      setCameraError(
+        "This browser can't scan QRs natively. Paste the code from your phone instead.",
+      );
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      detectedRef.current = false;
+      setCameraActive(true);
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        try { await video.play(); } catch { /* best-effort */ }
+      }
+      intervalRef.current = setInterval(async () => {
+        if (detectedRef.current) return;
+        const v = videoRef.current;
+        const c = canvasRef.current;
+        const d = detectorRef.current;
+        if (!v || !c || !d || v.readyState < 2) return;
+        const vw = v.videoWidth || 640;
+        const vh = v.videoHeight || 480;
+        if (c.width !== vw) c.width = vw;
+        if (c.height !== vh) c.height = vh;
+        const ctx = c.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(v, 0, 0, vw, vh);
+        let hits: Array<{ rawValue: string }> = [];
+        try {
+          hits = await d.detect(c);
+        } catch {
+          return;
+        }
+        if (detectedRef.current) return;
+        for (const hit of hits) {
+          const text = (hit?.rawValue ?? '').trim();
+          if (!text.startsWith(PROOF_QR_PREFIX)) continue;
+          detectedRef.current = true;
+          stopCamera();
+          void submit(text);
+          return;
+        }
+      }, 250);
+    } catch (err) {
+      const e = err as Error;
+      const denied = /Permission|NotAllowed|denied/i.test(`${e.name} ${e.message}`);
+      setCameraError(
+        denied
+          ? 'Camera access was denied. Allow access in your browser settings or paste the code instead.'
+          : e.message || 'Camera unavailable. Paste the code instead.',
+      );
+      setCameraActive(false);
+    }
+  }, [cameraActive, stopCamera, submit]);
+
+  const onPasteSubmit = useCallback(
+    (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      void submit(pasteValue);
+    },
+    [submit, pasteValue],
+  );
+
+  const supportsNativeQr = getBarcodeDetectorCtor() !== null;
+
+  return (
+    <details
+      className="mt-6 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left"
+      data-testid="signin-proof-capture"
+    >
+      <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-[0.14em] text-slate-700">
+        Phone offline? Capture its proof-QR here instead
+      </summary>
+      <div className="mt-3 space-y-3 text-sm text-slate-700">
+        <p className="text-xs text-slate-500">
+          Normally your phone sends the proof itself and this page signs in automatically —
+          just tap <span className="font-medium">Authorize sign-in</span> on the handset.
+          {' '}If your phone has no internet, tap “No internet on phone?” there to show a QR,
+          then scan it with the laptop camera or paste the text below.
+        </p>
+
+        {supportsNativeQr && (
+          <div className="space-y-2">
+            {!cameraActive && (
+              <button
+                type="button"
+                onClick={() => void startCamera()}
+                disabled={submitting}
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="signin-scan-start"
+              >
+                Use laptop camera
+              </button>
+            )}
+            {cameraActive && (
+              <div className="space-y-2">
+                <div className="relative overflow-hidden rounded-md border border-slate-300 bg-black" style={{ maxWidth: 320 }}>
+                  <video
+                    ref={videoRef}
+                    style={{ transform: 'scaleX(-1)', width: '100%', height: 'auto', display: 'block' }}
+                    playsInline
+                    muted
+                    autoPlay
+                    aria-label="Webcam preview for QR scanning"
+                    data-testid="signin-scan-video"
+                  />
+                  <canvas ref={canvasRef} style={{ display: 'none' }} aria-hidden="true" />
+                </div>
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 transition hover:bg-slate-100"
+                >
+                  Stop camera
+                </button>
+              </div>
+            )}
+            {cameraError && (
+              <p className="text-xs text-amber-600">{cameraError}</p>
+            )}
+          </div>
+        )}
+
+        <form onSubmit={onPasteSubmit} className="space-y-2">
+          <label htmlFor="signin-proof-paste" className="block text-xs font-medium text-slate-700">
+            Or paste the proof text from your phone
+          </label>
+          <textarea
+            id="signin-proof-paste"
+            data-testid="signin-proof-paste"
+            value={pasteValue}
+            onChange={(ev) => setPasteValue(ev.target.value)}
+            disabled={submitting}
+            rows={3}
+            placeholder="za:proof:1:..."
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-[11px] text-slate-800 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={submitting || pasteValue.trim().length === 0}
+            data-testid="signin-proof-submit"
+            className="rounded-md bg-slate-900 px-4 py-2 text-xs font-medium text-white transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? 'Verifying…' : 'Submit proof'}
+          </button>
+        </form>
+
+        {submitError && (
+          <div
+            role="alert"
+            className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+            data-testid="signin-proof-error"
+          >
+            <p>{submitError.message}</p>
+            <code className="mt-1 block font-mono text-[10px] text-rose-500">{submitError.code}</code>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 

@@ -3,15 +3,20 @@ package dev.zeroauth.android
 import android.content.Context
 import dev.zeroauth.android.prover.IsolatedMobileProver
 import dev.zeroauth.android.prover.MobileProver
+import dev.zeroauth.android.sec.AndroidBiometricGate
+import dev.zeroauth.android.sec.AndroidKeystoreManager
+import dev.zeroauth.android.sec.BiometricGate
+import dev.zeroauth.android.sec.KeystoreManager
 
 /**
- * Composition root for the production wiring of the prover layer.
+ * Composition root for the production wiring of the prover + sec layers.
  *
- * Currently exposes only the [productionMobileProver] factory. The
- * Keystore + Biometric wiring lives behind the corresponding sec
- * agent's contracts and lands in a later iteration; the parallel-agent
- * comment block in [dev.zeroauth.android.ui.scan.ScanScreen] documents
- * the seam where Composition.kt slots in.
+ * Exposes factory functions for the three injected dependencies
+ * [dev.zeroauth.android.ui.scan.ScanViewModel] takes — [MobileProver],
+ * [KeystoreManager], [BiometricGate]. The Compose layer threads these
+ * in via [LocalKeystoreManager] / [LocalBiometricGate] / direct
+ * argument so the live UI never touches a `Fake*` from
+ * `dev.zeroauth.android.util.FakeProverAndSec`.
  *
  * Why factory functions, not a singleton object: ZeroAuthApp can hand
  * a [Context] in once at process start, but a process-wide singleton
@@ -20,9 +25,9 @@ import dev.zeroauth.android.prover.MobileProver
  * Context, not the activity Context. Letting callers thread the
  * context in keeps the dependency direction explicit.
  *
- * Production code uses [productionMobileProver] for proof generation.
- * Test code (Robolectric, Compose previews, demo builds) uses
- * `dev.zeroauth.android.util.FakeMobileProver` — see
+ * Production code uses [productionMobileProver] / [productionKeystoreManager]
+ * / [productionBiometricGate]. Test code (Robolectric, Compose previews,
+ * unit tests that instantiate ScanViewModel directly) uses the fakes in
  * `util/FakeProverAndSec.kt`.
  */
 object Composition {
@@ -41,4 +46,33 @@ object Composition {
      */
     fun productionMobileProver(context: Context): IsolatedMobileProver =
         IsolatedMobileProver(context.applicationContext)
+
+    /**
+     * Build the production [KeystoreManager] — [AndroidKeystoreManager]
+     * over the real [dev.zeroauth.android.sec.AndroidKeystoreVault]. The
+     * returned instance is stateless beyond a SecureRandom + a JSON
+     * parser; safe to share across the whole process.
+     *
+     * Reads/writes per-account encrypted blobs under `filesDir/accounts/`
+     * and (as a fallback for the W3 demo + autonomous-test flow) falls
+     * back to the registration ceremony's `zeroauth_reg_secret`
+     * SharedPreferences when no Keystore blob exists for the account.
+     * See [AndroidKeystoreManager.buildRegistrationFallbackCredential]
+     * for the derivation; matches `tests/helpers/ceremony-client.ts`
+     * byte-for-byte so a proof generated under this fallback verifies
+     * against `tenant_users.metadata.{commitment, did_hash}` seeded by
+     * the registration ceremony.
+     */
+    fun productionKeystoreManager(context: Context): KeystoreManager =
+        AndroidKeystoreManager(context.applicationContext)
+
+    /**
+     * Build the production [BiometricGate] — [AndroidBiometricGate]
+     * wired against the provided [keystoreManager]. The gate is
+     * stateless; the per-prompt [androidx.fragment.app.FragmentActivity]
+     * is supplied at `authenticateForProof` call time inside
+     * [dev.zeroauth.android.ui.scan.ScanViewModel.runProofFlow].
+     */
+    fun productionBiometricGate(keystoreManager: KeystoreManager): BiometricGate =
+        AndroidBiometricGate(keystoreManager = keystoreManager)
 }

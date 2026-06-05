@@ -31,15 +31,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -58,6 +60,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -74,10 +77,17 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import dev.zeroauth.android.Composition
+import dev.zeroauth.android.LocalBiometricGate
+import dev.zeroauth.android.LocalKeystoreManager
 import dev.zeroauth.android.R
-import dev.zeroauth.android.util.FakeBiometricGate
-import dev.zeroauth.android.util.FakeKeystoreManager
-import dev.zeroauth.android.util.FakeMobileProver
+import dev.zeroauth.android.ui.reg.CelebrationCard
+import dev.zeroauth.android.ui.reg.LoginStep
+import dev.zeroauth.android.ui.reg.ProofProgressCard
+import dev.zeroauth.android.ui.face.FaceMatchVerification
+import dev.zeroauth.android.ui.reg.StepIndicator
+import dev.zeroauth.android.ui.reg.SuccessCard
+import dev.zeroauth.android.ui.reg.friendlyErrorFor
 import java.util.concurrent.Executors
 import timber.log.Timber
 
@@ -124,12 +134,29 @@ fun ScanScreen(
     onQrDecoded: (String) -> Unit,
     viewModel: ScanViewModel = viewModel(
         factory = ScanViewModel.Factory(
-            // Default to fakes so the demo build runs end-to-end
-            // before the parallel agents land their concrete impls.
-            // Production wires Composition.kt::supplyProverAndSec.
-            keystoreManager = FakeKeystoreManager(),
-            biometricGate   = FakeBiometricGate(),
-            mobileProver    = FakeMobileProver(),
+            // Production Keystore + Biometric — wired by MainActivity into
+            // the Compose tree via CompositionLocalProvider. The
+            // AndroidKeystoreManager backs encrypted-blob accounts AND
+            // (for the W3 demo + autonomous-test flow) falls back to the
+            // registration ceremony's `zeroauth_reg_secret` SharedPreferences
+            // when no Keystore blob exists for the account. The
+            // AndroidBiometricGate gates that unlock with a Class-3
+            // BiometricPrompt.
+            //
+            // Unit tests (ScanViewModelTest) construct ScanViewModel
+            // directly with Fake* implementations — this @Composable
+            // factory is bypassed in that path.
+            keystoreManager = LocalKeystoreManager.current,
+            biometricGate   = LocalBiometricGate.current,
+            // Production prover: builds an IsolatedMobileProver bound to
+            // the `:prover` Service per ADR-0010 so the WebView snarkjs
+            // runtime lives in an isolated OS process. The Service
+            // binding is lazy — no IPC cost until the first generate().
+            // Application Context is mandatory so Service binding
+            // survives configuration changes.
+            mobileProver    = Composition.productionMobileProver(
+                LocalContext.current.applicationContext,
+            ),
         ),
     ),
 ) {
@@ -209,13 +236,46 @@ fun ScanScreen(
                             Timber.tag(TAG).e("Host is not a FragmentActivity")
                             viewModel.retry()
                         } else {
-                            viewModel.onBiometricApproved(act, FakeKeystoreManager.DEMO_EMAIL)
+                            // The email keys the per-user Keystore alias.
+                            // In the W3 demo (and the autonomous-test path)
+                            // the device has not been enrolled with a
+                            // specific email — the AndroidKeystoreManager's
+                            // SharedPreferences fallback triggers on any
+                            // email when no blob exists. We pass a stable
+                            // demo email so the alias derivation is
+                            // deterministic for the (eventual) Keystore
+                            // path.
+                            viewModel.onBiometricApproved(act, DEMO_EMAIL)
                         }
                     },
                     onCancel = { viewModel.onChallengeCancelled() },
                 )
             }
+            is ScanState.AwaitingFaceCapture -> {
+                // Compose host renders the face-match verification surface.
+                // It captures a fresh face, runs the blink-liveness gate,
+                // matches against the stored template, and — on accept —
+                // releases the stored 32-byte secret. The ViewModel then
+                // derives an UnlockedCredential and hands it to the WebView
+                // snarkjs prover. The face bitmap, the fresh embedding, and
+                // the stored template NEVER leave the composable — see
+                // FaceMatchVerification's bitmap-flow contract.
+                FaceCaptureLayer(
+                    onCaptured = { secret ->
+                        viewModel.onFaceCaptureSucceeded(secret)
+                        // Zero the local copy — the ViewModel has its own
+                        // copy stashed inside FaceSecretCredential.
+                        secret.fill(0)
+                    },
+                    onCancelled = { viewModel.onFaceCaptureCancelled() },
+                )
+            }
+            @Suppress("DEPRECATION")
             ScanState.AwaitingBiometric -> {
+                // Legacy biometric-prompt waiting state. The proof flow
+                // no longer emits this — kept here so the sealed-interface
+                // `when` stays exhaustive without forcing every call site
+                // to opt out of the deprecation.
                 BiometricWaitingScrim()
             }
             is ScanState.Proving -> {
@@ -224,11 +284,21 @@ fun ScanScreen(
             is ScanState.ProofReady -> {
                 ProofReadyCard(
                     qrText = s.qrText,
-                    onDone = {
+                    onAuthorize = { viewModel.authorizeOnPhone() },
+                    onScanFallback = {
+                        // Legacy webcam scan-back path: mark the proof as
+                        // "shown to webcam" and feed it to the autonomous
+                        // decode hook for desktops that DO have a camera.
                         viewModel.onProofShownToWebcam()
                         onQrDecoded(s.qrText)
                     },
                 )
+            }
+            is ScanState.Authorizing -> {
+                AuthorizingCard()
+            }
+            is ScanState.Authorized -> {
+                AuthorizedCard(onDone = { viewModel.onProofShownToWebcam() })
             }
             is ScanState.Error -> {
                 ErrorCard(
@@ -465,7 +535,80 @@ private fun ChallengeApprovalCard(
     }
 }
 
-// ─── AwaitingBiometric ───────────────────────────────────────────
+// ─── AwaitingFaceCapture ─────────────────────────────────────────
+
+/**
+ * On-device face-match surface for the login (proof-pairing) flow.
+ *
+ * Renders [FaceMatchVerification]: a single front-facing capture with
+ * a blink-liveness gate, which matches the fresh capture against the
+ * enrollment template persisted in [dev.zeroauth.android.sec.FaceTemplateStore]
+ * via cosine similarity and — on a successful match — releases the
+ * stored 32-byte secret to the caller via [onCaptured].
+ *
+ * Why match (not re-derive): the legacy login path ran the same
+ * `face → MobileFaceNet → Quantize → SHA-256` pipeline the enrollment
+ * uses, hoping the bytes would land identically. MobileFaceNet's
+ * within-class drift (~1e-2 per component) exceeds the Quantizer's
+ * int16 tolerance (~5e-4), so the same face on the same phone
+ * produced different secrets across captures, which broke the server-
+ * side DID lookup. Matching against a persisted multi-pose template
+ * sidesteps the drift entirely — the secret is read from device-
+ * encrypted storage, not re-derived from a fresh embedding.
+ *
+ * ZK property is unchanged: the captured Bitmap, the fresh embedding,
+ * and the stored template never cross the composable boundary; only
+ * the released secret transits the proof flow on-device, and only the
+ * resulting Groth16 proof + DID + commitment cross the wire.
+ *
+ * Layered as a function so the `ScanScreen` `when` block stays terse
+ * and the composable can grow (analytics hooks, retry affordances) in
+ * follow-up commits without bloating the state-dispatch branch.
+ */
+@Composable
+private fun FaceCaptureLayer(
+    onCaptured: (ByteArray) -> Unit,
+    onCancelled: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .systemBarsPadding(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text  = stringResource(R.string.face_capture_title),
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text  = stringResource(R.string.face_capture_subtitle),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            // Delegate to the face-match pipeline. The match-against-
+            // template logic guarantees same-DID-every-time when the
+            // user actually matches the enrolled face; mismatched
+            // captures surface a "Try again" CTA inside the
+            // composable.
+            FaceMatchVerification(
+                onCaptured = onCaptured,
+                onCancelled = onCancelled,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+// ─── AwaitingBiometric (legacy) ──────────────────────────────────
 
 @Composable
 private fun BiometricWaitingScrim() {
@@ -530,8 +673,18 @@ private fun ProvingCard(progress: Float) {
 // ─── ProofReady ──────────────────────────────────────────────────
 
 @Composable
-private fun ProofReadyCard(qrText: String, onDone: () -> Unit) {
-    val bitmap = remember(qrText) { generateQrBitmap(qrText) }
+private fun ProofReadyCard(
+    qrText: String,
+    onAuthorize: () -> Unit,
+    onScanFallback: () -> Unit,
+) {
+    // The QR is only built if the user expands the fallback — most
+    // desktops have no camera, so the phone-push button is the primary
+    // path and we avoid rendering a 320 dp bitmap nobody looks at.
+    var showQrFallback by remember { mutableStateOf(false) }
+    val bitmap = remember(qrText, showQrFallback) {
+        if (showQrFallback) generateQrBitmap(qrText) else null
+    }
 
     Box(
         modifier = Modifier
@@ -541,7 +694,9 @@ private fun ProofReadyCard(qrText: String, onDone: () -> Unit) {
             .padding(horizontal = 24.dp, vertical = 32.dp),
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -550,59 +705,203 @@ private fun ProofReadyCard(qrText: String, onDone: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.padding(top = 24.dp),
             ) {
+                // A big check-style glyph — the proof is done, this is
+                // the "confirm" beat.
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(36.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "🔐",
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                }
                 Text(
-                    text  = stringResource(R.string.proof_ready_title),
+                    text = "Proof ready",
                     style = MaterialTheme.typography.headlineSmall,
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    text  = stringResource(R.string.proof_ready_subtitle),
+                    text = "Your phone built a zero-knowledge proof of your identity. " +
+                        "Tap below to send it to the bank and finish signing in on your laptop.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
             }
-            Card(
-                modifier = Modifier
-                    .size(320.dp)
-                    .padding(12.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = androidx.compose.ui.graphics.Color.White,
-                ),
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Box(
+                Button(
+                    onClick = onAuthorize,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center,
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    contentPadding = PaddingValues(horizontal = 24.dp),
                 ) {
-                    if (bitmap != null) {
-                        Image(
-                            bitmap = bitmap.asImageBitmap(),
-                            contentDescription = "Proof QR — show to the desktop webcam",
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    } else {
+                    Text(
+                        text = "Authorize sign-in",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+
+                // Collapsible legacy fallback for desktops that DO have a
+                // camera. Hidden by default — the phone-push button above
+                // is the primary path.
+                if (!showQrFallback) {
+                    TextButton(onClick = { showQrFallback = true }) {
                         Text(
-                            text  = "QR render failed",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = androidx.compose.ui.graphics.Color.Black,
+                            text = "No internet on phone? Show QR for the laptop camera",
+                            style = MaterialTheme.typography.labelMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                } else {
+                    Card(
+                        modifier = Modifier
+                            .size(280.dp)
+                            .padding(top = 8.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = androidx.compose.ui.graphics.Color.White,
+                        ),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (bitmap != null) {
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "Proof QR — show to the desktop webcam",
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                Text(
+                                    text = "QR render failed",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = androidx.compose.ui.graphics.Color.Black,
+                                )
+                            }
+                        }
+                    }
+                    TextButton(onClick = onScanFallback) {
+                        Text(
+                            text = "I've shown it to the laptop",
+                            style = MaterialTheme.typography.labelMedium,
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Phone-push: the proof is being POSTed to the bank. Transient spinner
+ * between [ScanState.ProofReady] and [ScanState.Authorized].
+ */
+@Composable
+private fun AuthorizingCard() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .systemBarsPadding()
+            .padding(horizontal = 32.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            CircularProgressIndicator(
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 3.dp,
+            )
+            Text(
+                text = "Sending proof to the bank…",
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = "Keep this screen open. Your laptop will sign in automatically.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/**
+ * Phone-push success: the server verified the proof and the desktop is
+ * (or is about to be) signed in. The phone shows a terminal success
+ * affordance with a Done CTA that resets the scanner for a future
+ * sign-in.
+ */
+@Composable
+private fun AuthorizedCard(onDone: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .systemBarsPadding()
+            .padding(horizontal = 32.dp, vertical = 32.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(88.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(44.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(text = "✓", style = MaterialTheme.typography.displaySmall)
+                }
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    text = "Signed in on your laptop",
+                    style = MaterialTheme.typography.headlineSmall,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Your laptop is now inside the bank. Your face never left this phone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
             Button(
-                onClick  = onDone,
+                onClick = onDone,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
                 contentPadding = PaddingValues(horizontal = 24.dp),
             ) {
-                Text(
-                    text  = stringResource(R.string.proof_ready_cta),
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                Text(text = "Done", style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -802,3 +1101,13 @@ private class QrPayloadAnalyzer(
 }
 
 private const val TAG: String = "ScanScreen"
+
+/**
+ * Stable demo account email passed to the BiometricGate + KeystoreManager
+ * for the W3 sign-in flow. The AndroidKeystoreManager keys per-account
+ * encrypted blobs by SHA-256(email); the autonomous-test + W3 demo path
+ * doesn't have a real Keystore blob and falls back to the registration
+ * ceremony's per-install secret, but we still pass a stable email so the
+ * eventual Keystore-blob path is deterministic.
+ */
+private const val DEMO_EMAIL: String = "demo@zeroauth.dev"

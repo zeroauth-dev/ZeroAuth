@@ -218,10 +218,30 @@ describe('src/services/demo-portal-seed', () => {
       process.env.SEED_DEMO_PORTAL = originalSeedFlag;
     });
 
-    it('is a no-op when NODE_ENV=production', async () => {
+    it('is a no-op when NODE_ENV=production and SEED_DEMO_PORTAL is unset', async () => {
       process.env.NODE_ENV = 'production';
+      delete process.env.SEED_DEMO_PORTAL;
       await seedDemoPortalIfDev();
       // No pool.connect() should have happened.
+      expect(mockConnect).not.toHaveBeenCalled();
+    });
+
+    it('seeds in production when SEED_DEMO_PORTAL=true (explicit opt-in)', async () => {
+      // This is how the hosted bank demo gets its tenant on a
+      // NODE_ENV=production box — the operator sets SEED_DEMO_PORTAL=true
+      // in /opt/zeroauth/.env.
+      process.env.NODE_ENV = 'production';
+      process.env.SEED_DEMO_PORTAL = 'true';
+      mockQuery.mockResolvedValue({ rowCount: 0, rows: [] });
+
+      await seedDemoPortalIfDev();
+      expect(mockConnect).toHaveBeenCalledTimes(1);
+    });
+
+    it('SEED_DEMO_PORTAL=false wins even over the prod opt-in', async () => {
+      process.env.NODE_ENV = 'production';
+      process.env.SEED_DEMO_PORTAL = 'false';
+      await seedDemoPortalIfDev();
       expect(mockConnect).not.toHaveBeenCalled();
     });
 
