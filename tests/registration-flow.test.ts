@@ -36,10 +36,13 @@ import {
   completeRegistration,
   getRegistrationSession,
   pairDeviceForRegistration,
+  peekPendingDemoCode,
   RegistrationStateError,
+  shouldCacheDemoCode,
   startRegistration,
   submitCommitmentForRegistration,
 } from '../src/services/registration';
+import { DEMO_PORTAL_TENANT_ID } from '../src/services/demo-portal-seed';
 
 const TENANT = 'tenant-A';
 const ENV = 'live' as const;
@@ -399,5 +402,70 @@ describe('RegistrationStateError reasons', () => {
     expect(e.reason).toBe('challenge_mismatch');
     expect(e.name).toBe('RegistrationStateError');
     expect(e.message).toBe('challenge_mismatch');
+  });
+});
+
+// ─── Regression: demo-code peek cache gating (prod hosted demo) ─────────
+//
+// The hosted bank demo (zeroauth.dev/bank-demo) runs the demo-portal
+// tenant on a NODE_ENV=production box. The SPA renders QR2/QR3 by peeking
+// the plaintext codes the server minted for the phone. That peek cache
+// was gated `NODE_ENV !== 'production'`, so on prod it stayed empty →
+// QR2/QR3 never rendered → registration stalled after QR1 → no user →
+// sign-in `pairing_did_unknown`. Tests missed it because they run under
+// NODE_ENV=test (gate was true). These pin the tenant-scoped gate.
+
+describe('demo-code peek cache gating (shouldCacheDemoCode)', () => {
+  const origEnv = process.env.NODE_ENV;
+  afterEach(() => { process.env.NODE_ENV = origEnv; });
+
+  it('caches for ANY tenant when not in production (local dev / tests)', () => {
+    process.env.NODE_ENV = 'test';
+    expect(shouldCacheDemoCode('some-real-tenant')).toBe(true);
+    expect(shouldCacheDemoCode(DEMO_PORTAL_TENANT_ID)).toBe(true);
+  });
+
+  it('caches for the demo-portal tenant in production (hosted bank demo)', () => {
+    process.env.NODE_ENV = 'production';
+    expect(shouldCacheDemoCode(DEMO_PORTAL_TENANT_ID)).toBe(true);
+  });
+
+  it('does NOT cache for a real tenant in production (codes stay private to the phone)', () => {
+    process.env.NODE_ENV = 'production';
+    expect(shouldCacheDemoCode('some-real-tenant')).toBe(false);
+  });
+
+  it('regression: startRegistration for the demo tenant under prod populates the peek cache', async () => {
+    process.env.NODE_ENV = 'production';
+    const sid = 'demo-prod-sess-regression';
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: sid, tenant_id: DEMO_PORTAL_TENANT_ID, environment: 'live', state: 'awaiting_device', profile: {} }],
+      rowCount: 1,
+    });
+    await startRegistration(
+      DEMO_PORTAL_TENANT_ID,
+      'live',
+      { profile: { name: 'Demo', email: 'demo@neobank.example' } },
+      { type: 'api_key', id: null },
+    );
+    const cached = peekPendingDemoCode(sid);
+    expect(cached).not.toBeNull();
+    expect(cached?.step).toBe('pair');
+  });
+
+  it('regression: startRegistration for a REAL tenant under prod does NOT populate the cache', async () => {
+    process.env.NODE_ENV = 'production';
+    const sid = 'real-prod-sess-regression';
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: sid, tenant_id: 'real-tenant-xyz', environment: 'live', state: 'awaiting_device', profile: {} }],
+      rowCount: 1,
+    });
+    await startRegistration(
+      'real-tenant-xyz',
+      'live',
+      { profile: { name: 'Real', email: 'real@bank.example' } },
+      { type: 'api_key', id: 'k-real' },
+    );
+    expect(peekPendingDemoCode(sid)).toBeNull();
   });
 });

@@ -1485,9 +1485,10 @@ router.post('/sessions/:id/claim', async (req: Request, res: Response) => {
 // below are thin wrappers around the existing /v1/registrations
 // service, plus a peek endpoint that lets the SPA see each freshly
 // minted plaintext code so it can re-render the next QR. The peek
-// only reads from the in-memory demo cache (registration.ts) which
-// is populated only in non-production NODE_ENVs — production tenants
-// remain unaffected.
+// only reads from the in-memory demo cache (registration.ts), which is
+// populated for the demo-portal tenant (any env) + all non-prod envs —
+// see registration.ts::shouldCacheDemoCode. Real production tenants
+// never populate it, so their codes stay private to the phone.
 //
 import {
   startRegistration,

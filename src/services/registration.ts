@@ -73,6 +73,7 @@ import {
   sha256Hex,
 } from './device-enrollment';
 import { recordAuditEvent } from './platform';
+import { DEMO_PORTAL_TENANT_ID } from './demo-portal-seed';
 import {
   ApiKeyEnvironment,
   Device,
@@ -133,6 +134,25 @@ export function peekPendingDemoCode(sessionId: string): DemoPendingCode | null {
 
 export function clearPendingDemoCode(sessionId: string): void {
   demoPendingCodes.delete(sessionId);
+}
+
+/**
+ * Whether to populate the demo-code peek cache for [tenantId].
+ *
+ * The peek cache lets the demo-portal SPA render QR2/QR3 by reading the
+ * plaintext codes the server minted for the phone. It must NOT be
+ * populated for real tenants (they host their own signup page and never
+ * peek), so historically it was gated on `NODE_ENV !== 'production'`.
+ *
+ * That gate broke the HOSTED bank demo: the demo-portal tenant runs on a
+ * `NODE_ENV=production` box, so the cache stayed empty, the SPA couldn't
+ * show QR2/QR3, and registration stalled after QR1 (no commit → no user
+ * → sign-in `pairing_did_unknown`). The correct gate is tenant-scoped —
+ * exactly what this module's doc comment always claimed: cache only for
+ * the demo-portal tenant (plus all non-prod envs for local dev).
+ */
+export function shouldCacheDemoCode(tenantId: string): boolean {
+  return process.env.NODE_ENV !== 'production' || tenantId === DEMO_PORTAL_TENANT_ID;
 }
 
 /**
@@ -333,7 +353,7 @@ export async function startRegistration(
   }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
   const pairDeeplink = `zeroauth://reg?step=pair&session=${session.id}&code=${encodeURIComponent(code)}`;
-  if (process.env.NODE_ENV !== 'production') {
+  if (shouldCacheDemoCode(tenantId)) {
     cachePendingDemoCode(session.id, { step: 'pair', code, deeplink: pairDeeplink });
   }
 
@@ -449,7 +469,7 @@ export async function pairDeviceForRegistration(input: {
     }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
     const enrollDeeplink = `zeroauth://reg?step=enroll&session=${session.id}&code=${encodeURIComponent(nextCode)}`;
-    if (process.env.NODE_ENV !== 'production') {
+    if (shouldCacheDemoCode(session.tenant_id)) {
       cachePendingDemoCode(session.id, { step: 'enroll', code: nextCode, deeplink: enrollDeeplink });
     }
     return {
@@ -555,7 +575,7 @@ export async function submitCommitmentForRegistration(input: {
     }).catch(err => logger.warn('Failed to record audit event', { error: (err as Error).message }));
 
     const verifyDeeplink = `zeroauth://reg?step=verify&session=${session.id}&code=${encodeURIComponent(nextCode)}&challenge=${challengeNonce}`;
-    if (process.env.NODE_ENV !== 'production') {
+    if (shouldCacheDemoCode(session.tenant_id)) {
       cachePendingDemoCode(session.id, { step: 'verify', code: nextCode, deeplink: verifyDeeplink, challengeNonce });
     }
     return {
