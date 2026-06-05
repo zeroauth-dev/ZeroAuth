@@ -144,6 +144,10 @@ services:
       - REDIS_URL=redis://redis:6379
       - POSTGRES_HOST=postgres
       - TRUST_PROXY=true
+      # Seed the (zeroauth-owned, sandbox) demo-portal tenant on boot so
+      # the hosted bank demo at zeroauth.dev/bank-demo works. Idempotent
+      # (ON CONFLICT DO NOTHING). Remove this line to stop seeding it.
+      - SEED_DEMO_PORTAL=true
       # B02 Phase 2 — production cutover. Routes /v1/auth/zkp/verify
       # through the verifier service instead of inline snarkjs. The
       # inline-fallback in src/services/zkp.ts stays in the binary as
