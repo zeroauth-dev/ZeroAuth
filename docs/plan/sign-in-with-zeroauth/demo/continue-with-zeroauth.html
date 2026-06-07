@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Continue with ZeroAuth — demo</title>
+<style>
+  /* ───────────────────────────────────────────────────────────────
+     ZeroAuth — accelerator pitch demo.
+     Self-contained, guided, projector-ready. Press → / Space / click
+     the highlighted control to advance. Press R to restart.
+     Tone: modern · minimal · premium · luxury.
+  ─────────────────────────────────────────────────────────────────── */
+  :root{
+    --bg:#08090d; --bg2:#0c0e15;
+    --ink:#f3f3f7; --muted:#9a9ba8; --faint:#5e6070;
+    --line:rgba(255,255,255,.08);
+    --glass:rgba(255,255,255,.04);
+    --glass-hi:rgba(255,255,255,.07);
+    --a1:#8b7bff; --a2:#c46bff; --a3:#6be1ff;
+    --good:#39d98a; --warn:#ffcf6b;
+    --r:18px; --maxw:1180px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family:var(--font); color:var(--ink); background:var(--bg);
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+    overflow:hidden;
+  }
+  /* ambient aurora */
+  .aurora{position:fixed;inset:-20% -10% auto -10%;height:80vh;z-index:0;filter:blur(80px);opacity:.55;pointer-events:none}
+  .aurora i{position:absolute;border-radius:50%;mix-blend-mode:screen;animation:drift 18s ease-in-out infinite}
+  .aurora i:nth-child(1){width:46vw;height:46vw;left:-6vw;top:-10vw;background:radial-gradient(circle,#5b4bff,transparent 60%)}
+  .aurora i:nth-child(2){width:40vw;height:40vw;right:-4vw;top:-12vw;background:radial-gradient(circle,#b94bff,transparent 60%);animation-delay:-6s}
+  .aurora i:nth-child(3){width:34vw;height:34vw;left:38vw;top:8vw;background:radial-gradient(circle,#2bd4ff,transparent 60%);animation-delay:-11s;opacity:.6}
+  @keyframes drift{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(3vw,2vw,0) scale(1.08)}}
+
+  .stage{position:relative;z-index:1;height:100%;display:grid;grid-template-rows:auto 1fr auto}
+
+  /* top bar */
+  .bar{display:flex;align-items:center;justify-content:space-between;padding:22px 30px}
+  .brand{display:flex;align-items:center;gap:12px;font-weight:600;letter-spacing:.2px}
+  .brand .name{font-size:16px}
+  .brand .name b{font-weight:700}
+  .mark{width:30px;height:30px;display:block}
+  .pill{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:var(--glass)}
+
+  /* center frame */
+  .frame{display:grid;place-items:center;padding:8px 24px}
+  .card{
+    position:relative;width:min(var(--maxw),94vw);min-height:60vh;
+    border:1px solid var(--line);border-radius:26px;background:
+      linear-gradient(180deg,var(--glass-hi),var(--glass));
+    box-shadow:0 40px 120px -40px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.06);
+    overflow:hidden;backdrop-filter:blur(14px)
+  }
+  .scene{position:absolute;inset:0;display:grid;opacity:0;transform:translateY(14px) scale(.99);
+    transition:opacity .5s cubic-bezier(.2,.7,.2,1),transform .5s cubic-bezier(.2,.7,.2,1);pointer-events:none}
+  .scene.active{opacity:1;transform:none;pointer-events:auto}
+  .split{grid-template-columns:1.05fr .95fr}
+  @media(max-width:820px){.split{grid-template-columns:1fr}.rhs{display:none}}
+
+  .pad{padding:54px 56px;display:flex;flex-direction:column;justify-content:center;gap:18px}
+  .eyebrow{font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--a3);font-weight:600}
+  h1{font-size:clamp(30px,4.4vw,52px);line-height:1.04;margin:0;font-weight:680;letter-spacing:-.02em}
+  h2{font-size:clamp(22px,2.6vw,30px);margin:0;font-weight:640;letter-spacing:-.01em}
+  .lead{color:var(--muted);font-size:clamp(15px,1.4vw,18px);line-height:1.55;max-width:46ch}
+  .grad{background:linear-gradient(100deg,var(--a1),var(--a2) 55%,var(--a3));-webkit-background-clip:text;background-clip:text;color:transparent}
+
+  /* mock product (the relying party) */
+  .rhs{position:relative;border-left:1px solid var(--line);display:flex;flex-direction:column;justify-content:center;gap:22px;padding:48px 50px;background:radial-gradient(120% 100% at 100% 0%,rgba(139,123,255,.10),transparent 60%)}
+  .appchip{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px}
+  .appdot{width:26px;height:26px;border-radius:8px;background:conic-gradient(from 200deg,#8b7bff,#c46bff,#6be1ff,#8b7bff);box-shadow:0 6px 18px -6px #8b7bff}
+  .field{border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--faint);background:rgba(255,255,255,.02);font-size:14px;display:flex;align-items:center;justify-content:space-between}
+  .field.dead{text-decoration:line-through;opacity:.55}
+  .or{display:flex;align-items:center;gap:14px;color:var(--faint);font-size:12px;letter-spacing:.12em}
+  .or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  /* the button — the hero parallel to "Sign in with Google" */
+  .za-btn{
+    --glow:0 10px 40px -10px rgba(139,123,255,.7);
+    display:flex;align-items:center;justify-content:center;gap:13px;
+    padding:16px 20px;border-radius:14px;cursor:pointer;border:1px solid rgba(255,255,255,.14);
+    background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.03));
+    font-weight:600;font-size:15.5px;letter-spacing:.01em;position:relative;overflow:hidden;
+    box-shadow:var(--glow),inset 0 1px 0 rgba(255,255,255,.14);transition:transform .25s,box-shadow .25s}
+  .za-btn:hover{transform:translateY(-1px);box-shadow:0 16px 48px -12px rgba(139,123,255,.85),inset 0 1px 0 rgba(255,255,255,.2)}
+  .za-btn .mark{width:22px;height:22px}
+  .za-btn .sheen{position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,rgba(255,255,255,.16) 50%,transparent 70%);transform:translateX(-120%);animation:sheen 3.4s ease-in-out infinite}
+  @keyframes sheen{0%,60%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
+
+  /* generic CTA */
+  .cta{display:inline-flex;align-items:center;gap:10px;align-self:flex-start;padding:13px 20px;border-radius:12px;cursor:pointer;font-weight:600;font-size:14.5px;color:#0a0a10;border:none;background:linear-gradient(100deg,var(--a1),var(--a2));box-shadow:0 14px 40px -14px var(--a2);transition:transform .2s}
+  .cta:hover{transform:translateY(-1px)}
+  .cta.ghost{color:var(--ink);background:transparent;border:1px solid var(--line);box-shadow:none}
+  .cta .arr{transition:transform .2s}.cta:hover .arr{transform:translateX(3px)}
+
+  /* auth layer (the ZeroAuth "account chooser" moment) */
+  .auth{grid-template-columns:1fr;place-items:center;padding:40px}
+  .sheet{width:min(440px,92%);border:1px solid var(--line);border-radius:22px;background:linear-gradient(180deg,rgba(20,21,30,.92),rgba(12,13,20,.92));box-shadow:0 50px 120px -30px rgba(0,0,0,.9);overflow:hidden}
+  .sheet .top{display:flex;align-items:center;gap:12px;padding:20px 22px;border-bottom:1px solid var(--line)}
+  .sheet .top .name{font-weight:650;font-size:15px}
+  .sheet .top .sub{font-size:12px;color:var(--muted)}
+  .sheet .body{padding:26px 24px;display:flex;flex-direction:column;align-items:center;gap:18px;text-align:center}
+  .qr{width:188px;height:188px;border-radius:16px;background:#fff;padding:14px;box-shadow:0 20px 50px -20px rgba(139,123,255,.6)}
+  .consent{width:100%;border:1px solid var(--line);border-radius:12px;padding:13px 15px;background:var(--glass);text-align:left;font-size:13px;color:var(--muted);line-height:1.5}
+  .consent b{color:var(--ink);font-weight:600}
+  .status{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 0 rgba(255,207,107,.6);animation:ping 1.4s ease-out infinite}
+  @keyframes ping{0%{box-shadow:0 0 0 0 rgba(255,207,107,.5)}100%{box-shadow:0 0 0 12px rgba(255,207,107,0)}}
+  .scanline{position:relative;width:188px;height:188px;border-radius:16px;border:1px solid var(--line);overflow:hidden;background:radial-gradient(circle at 50% 40%,rgba(139,123,255,.14),transparent 60%)}
+  .scanline .face{position:absolute;inset:0;display:grid;place-items:center;opacity:.5}
+  .scanline .beam{position:absolute;left:0;right:0;height:34%;background:linear-gradient(180deg,transparent,rgba(107,225,255,.30),transparent);animation:scan 1.5s ease-in-out infinite}
+  @keyframes scan{0%{top:-34%}100%{top:100%}}
+
+  /* success + breach */
+  .center{place-items:center;text-align:center;padding:48px}
+  .check{width:84px;height:84px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,rgba(57,217,138,.22),transparent 70%);border:1px solid rgba(57,217,138,.45);box-shadow:0 0 60px -10px rgba(57,217,138,.5)}
+  .check svg{width:40px;height:40px}
+  .props{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-top:6px}
+  .prop{border:1px solid var(--line);border-radius:12px;padding:11px 15px;font-size:13px;color:var(--muted);background:var(--glass)}
+  .prop b{color:var(--ink)}
+
+  .breachgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;width:100%;max-width:760px;margin-top:6px;max-height:34vh;overflow:hidden;mask-image:linear-gradient(180deg,#000 70%,transparent)}
+  .hash{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#6f7a6f;border:1px solid rgba(57,217,138,.12);border-radius:8px;padding:8px 9px;background:rgba(57,217,138,.03);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stamp{display:inline-flex;align-items:center;gap:8px;color:var(--good);border:1px solid rgba(57,217,138,.4);background:rgba(57,217,138,.08);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600}
+
+  /* everywhere montage */
+  .grid4{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;width:100%;max-width:760px;margin-top:8px}
+  @media(max-width:700px){.grid4{grid-template-columns:1fr}}
+  .siteCard{border:1px solid var(--line);border-radius:16px;padding:18px;background:var(--glass);display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .siteCard .who{display:flex;align-items:center;gap:12px}
+  .logo{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:15px;color:#0a0a10}
+  .mini{font-size:12px;color:var(--muted);border:1px solid rgba(255,255,255,.14);border-radius:9px;padding:8px 11px;display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .mini .mark{width:15px;height:15px}
+
+  /* bottom controls */
+  .controls{display:flex;align-items:center;justify-content:space-between;padding:18px 30px;color:var(--muted);font-size:13px}
+  .steps{display:flex;gap:7px}
+  .step{width:26px;height:4px;border-radius:99px;background:rgba(255,255,255,.12);transition:.3s}
+  .step.on{background:linear-gradient(90deg,var(--a1),var(--a2));width:34px}
+  .hint kbd{font-family:var(--font);border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:1px 7px;font-size:11px;color:var(--ink);background:var(--glass)}
+  .nav{display:flex;gap:10px}
+  .nav button{font:inherit}
+</style>
+</head>
+<body>
+  <div class="aurora"><i></i><i></i><i></i></div>
+
+  <!-- the fingerprint mark, reusable -->
+  <svg width="0" height="0" style="position:absolute"><defs>
+    <linearGradient id="zg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b7bff"/><stop offset=".55" stop-color="#c46bff"/><stop offset="1" stop-color="#6be1ff"/>
+    </linearGradient>
+    <symbol id="zmark" viewBox="0 0 100 100">
+      <g fill="none" stroke="url(#zg)" stroke-width="6" stroke-linecap="round">
+        <path d="M16 50a34 34 0 0 1 68 0"/>
+        <path d="M26 56a24 24 0 0 1 48 0" opacity=".92"/>
+        <path d="M36 60a14 14 0 0 1 28 0" opacity=".85"/>
+        <path d="M30 36a30 30 0 0 1 40 0" opacity=".5"/>
+        <path d="M50 64v14" opacity=".8"/>
+      </g>
+    </symbol>
+  </defs></svg>
+
+  <div class="stage">
+    <!-- top bar -->
+    <div class="bar">
+      <div class="brand"><svg class="mark"><use href="#zmark"/></svg>
+        <span class="name">Zero<b>Auth</b></span></div>
+      <div class="pill">Sign in with ZeroAuth · live demo</div>
+    </div>
+
+    <!-- center -->
+    <div class="frame">
+      <div class="card" id="card">
+
+        <!-- SCENE 0 — the problem / hero -->
+        <section class="scene split active" data-scene="0">
+          <div class="pad">
+            <div class="eyebrow">The problem nobody fixed</div>
+            <h1>The internet still runs on <span class="grad">passwords.</span></h1>
+            <p class="lead">81% of breaches start with a stolen or reused password. Every login is a secret waiting to be leaked — and the "fixes" just hand your identity to Apple and Google.</p>
+            <p class="lead" style="color:var(--ink)">What if the secret <b>never existed on any server</b> — and nobody, not even us, owned your identity?</p>
+            <button class="cta" data-next>Show me <span class="arr">→</span></button>
+          </div>
+          <div class="rhs">
+            <div class="appchip"><span class="appdot"></span> Lumen · your everyday app</div>
+            <div class="field">name@company.com</div>
+            <div class="field dead">Password<span>••••••••</span></div>
+            <div class="or">the old way</div>
+            <p class="lead" style="font-size:13.5px">Forgotten. Reused. Phished. Breached. The password field is the internet admitting defeat.</p>
+          </div>
+        </section>
+
+        <!-- SCENE 1 — the relying party with the button -->
+        <section class="scene split" data-scene="1">
+          <div class="pad">
+            <div class="eyebrow">Step 2 · any website</div>
+            <h2>One button. No password — ever.</h2>
+            <p class="lead">You enrolled your ZeroAuth identity once, on your phone (step 1). Now every app just adds a button — the same way they add "Sign in with Google", in an afternoon, with an SDK + API key.</p>
+            <div class="props"><span class="prop"><b>No</b> password to create</span><span class="prop"><b>No</b> form to fill</span></div>
+          </div>
+          <div class="rhs">
+            <div class="appchip"><span class="appdot"></span> Lumen · sign in</div>
+            <div class="field dead">Email</div>
+            <div class="field dead">Password</div>
+            <div class="or">or, simply</div>
+            <div class="za-btn" id="continueBtn" data-next>
+              <span class="sheen"></span><svg class="mark"><use href="#zmark"/></svg>
+              Continue with ZeroAuth
+            </div>
+            <p class="lead" style="font-size:12.5px;color:var(--faint)">↑ this is the whole integration</p>
+          </div>
+        </section>
+
+        <!-- SCENE 2 — the auth layer (consent + QR) -->
+        <section class="scene auth" data-scene="2">
+          <div class="sheet">
+            <div class="top"><svg class="mark" style="width:26px;height:26px"><use href="#zmark"/></svg>
+              <div><div class="name">Continue to Lumen</div><div class="sub">secured by ZeroAuth · zero-knowledge</div></div></div>
+            <div class="body">
+              <div class="qr" id="qrBox"></div>
+              <div class="consent">Lumen will receive <b>your name</b> and <b>your verified email</b>.<br><span style="color:var(--faint)">Lumen will never see your face. Your biometric stays on your phone.</span></div>
+              <div class="status"><span class="dot"></span> Scan with the ZeroAuth app on your phone…</div>
+              <button class="cta" data-next style="margin-top:2px">Approve on phone <span class="arr">→</span></button>
+            </div>
+          </div>
+        </section>
+
+        <!-- SCENE 3 — verifying (face never leaves device) -->
+        <section class="scene auth" data-scene="3">
+          <div class="sheet">
+            <div class="top"><svg class="mark" style="width:26px;height:26px"><use href="#zmark"/></svg>
+              <div><div class="name">Verifying you</div><div class="sub">generating a zero-knowledge proof…</div></div></div>
+            <div class="body">
+              <div class="scanline"><div class="face"><svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#6be1ff" stroke-width="1.3"><circle cx="12" cy="9" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></div><div class="beam"></div></div>
+              <div class="status"><span class="dot" style="background:var(--a3);box-shadow:0 0 0 0 rgba(107,225,255,.6)"></span> Your face is being matched <b style="color:var(--ink)">on your phone</b> — it never leaves the device.</div>
+              <button class="cta" data-next>Continue <span class="arr">→</span></button>
+            </div>
+          </div>
+        </section>
+
+        <!-- SCENE 4 — success -->
+        <section class="scene center" data-scene="4">
+          <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#39d98a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+          <h2>You're in to Lumen.</h2>
+          <p class="lead" style="margin:0 auto">No password was created. No password was typed. And nothing about your face is on any server.</p>
+          <div class="props">
+            <span class="prop"><b>0</b> passwords</span>
+            <span class="prop"><b>0</b> biometrics stored</span>
+            <span class="prop">~<b>3s</b> to sign in</span>
+          </div>
+          <button class="cta" data-next style="margin-top:10px">Now steal our database <span class="arr">→</span></button>
+        </section>
+
+        <!-- SCENE 5 — breach-proof reveal (the wow) -->
+        <section class="scene center" data-scene="5">
+          <div class="eyebrow" style="color:var(--good)">Breach view · this is what an attacker gets</div>
+          <h2>Steal everything. You still get nothing.</h2>
+          <p class="lead" style="margin:0 auto">Our entire identity database, dumped. No passwords. No faces. No emails in the clear — just one-way cryptographic commitments.</p>
+          <div class="breachgrid" id="breach"></div>
+          <div class="stamp">⛨ Breach-proof by architecture — not by promise</div>
+          <button class="cta" data-next style="margin-top:6px">And it works everywhere <span class="arr">→</span></button>
+        </section>
+
+        <!-- SCENE 6 — everywhere montage -->
+        <section class="scene center" data-scene="6">
+          <div class="eyebrow">One identity · every app</div>
+          <h2>Create once. <span class="grad">Continue with ZeroAuth</span> everywhere.</h2>
+          <div class="grid4">
+            <div class="siteCard"><div class="who"><span class="logo" style="background:linear-gradient(135deg,#34d399,#059669)">B</span><div><div style="font-weight:600;font-size:14px">Bank of Bharat</div><div style="font-size:12px;color:var(--muted)">KYC + login</div></div></div><span class="mini"><svg class="mark"><use href="#zmark"/></svg>Continue</span></div>
+            <div class="siteCard"><div class="who"><span class="logo" style="background:linear-gradient(135deg,#60a5fa,#2563eb)">G</span><div><div style="font-weight:600;font-size:14px">Gov Portal</div><div style="font-size:12px;color:var(--muted)">citizen services</div></div></div><span class="mini"><svg class="mark"><use href="#zmark"/></svg>Continue</span></div>
+            <div class="siteCard"><div class="who"><span class="logo" style="background:linear-gradient(135deg,#fbbf24,#d97706)">S</span><div><div style="font-weight:600;font-size:14px">Shopline</div><div style="font-size:12px;color:var(--muted)">checkout</div></div></div><span class="mini"><svg class="mark"><use href="#zmark"/></svg>Continue</span></div>
+            <div class="siteCard"><div class="who"><span class="logo" style="background:linear-gradient(135deg,#a78bfa,#7c3aed)">D</span><div><div style="font-weight:600;font-size:14px">DefenceNet</div><div style="font-size:12px;color:var(--muted)">secure access</div></div></div><span class="mini"><svg class="mark"><use href="#zmark"/></svg>Continue</span></div>
+          </div>
+          <p class="lead" style="margin:14px auto 0">No passwords. Breach-proof. <b style="color:var(--ink)">Sovereign</b> — an identity layer nobody owns.</p>
+          <button class="cta ghost" data-restart style="margin-top:8px">↺ Replay</button>
+        </section>
+
+      </div>
+    </div>
+
+    <!-- controls -->
+    <div class="controls">
+      <div class="hint">Press <kbd>→</kbd> or <kbd>Space</kbd> to advance · <kbd>R</kbd> to restart</div>
+      <div class="steps" id="steps"></div>
+      <div class="nav"><button class="cta ghost" data-back>← Back</button><button class="cta" data-next>Next →</button></div>
+    </div>
+  </div>
+
+<script>
+  const TOTAL = 7;
+  let i = 0;
+  const scenes = [...document.querySelectorAll('.scene')];
+  const stepsWrap = document.getElementById('steps');
+  for(let s=0;s<TOTAL;s++){const d=document.createElement('div');d.className='step';stepsWrap.appendChild(d);}
+  const steps = [...document.querySelectorAll('.step')];
+
+  function render(){
+    scenes.forEach(s=>s.classList.toggle('active', +s.dataset.scene===i));
+    steps.forEach((s,idx)=>s.classList.toggle('on', idx===i));
+  }
+  function go(n){ i = Math.max(0, Math.min(TOTAL-1, n)); render(); }
+  const next=()=>go(i+1), back=()=>go(i-1), restart=()=>go(0);
+
+  document.addEventListener('click', e=>{
+    if(e.target.closest('[data-next]')) next();
+    else if(e.target.closest('[data-back]')) back();
+    else if(e.target.closest('[data-restart]')) restart();
+  });
+  document.addEventListener('keydown', e=>{
+    if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();next();}
+    else if(e.key==='ArrowLeft'){back();}
+    else if(e.key.toLowerCase()==='r'){restart();}
+  });
+
+  // decorative-but-believable QR (finder squares + module grid)
+  (function buildQR(){
+    const N=21, box=document.getElementById('qrBox');
+    const svg=`<svg viewBox="0 0 ${N} ${N}" width="100%" height="100%" shape-rendering="crispEdges">`+
+      modules()+finder(0,0)+finder(N-7,0)+finder(0,N-7)+`</svg>`;
+    box.innerHTML=svg;
+    function finder(x,y){return `<rect x="${x}" y="${y}" width="7" height="7" fill="#0a0a10"/><rect x="${x+1}" y="${y+1}" width="5" height="5" fill="#fff"/><rect x="${x+2}" y="${y+2}" width="3" height="3" fill="#0a0a10"/>`}
+    function modules(){let r='',seed=7;const rnd=()=>{seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff};
+      for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+        const inFinder=(x<8&&y<8)||(x>N-9&&y<8)||(x<8&&y>N-9);
+        if(inFinder)continue; if(rnd()>.52)r+=`<rect x="${x}" y="${y}" width="1" height="1" fill="#0a0a10"/>`;}
+      return r;}
+  })();
+
+  // breach view — rows of harmless commitments/hashes
+  (function buildBreach(){
+    const g=document.getElementById('breach'); const hex='0123456789abcdef';
+    let seed=42; const rnd=()=>{seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff};
+    const h=(n)=>Array.from({length:n},()=>hex[(rnd()*16)|0]).join('');
+    for(let k=0;k<28;k++){const d=document.createElement('div');d.className='hash';d.textContent='0x'+h(38);g.appendChild(d);}
+  })();
+
+  render();
+</script>
+</body>
+</html>
