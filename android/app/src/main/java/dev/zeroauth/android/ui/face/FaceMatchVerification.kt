@@ -237,11 +237,24 @@ private fun FaceMatchPipeline(
     // we don't churn the FaceTemplateStore on every frame.
     val template = remember(store) { store.readTemplate() ?: emptyList() }
 
-    // Latch — single capture per mount. The match runs once; if it
-    // fails, the [errorMessage] state surfaces the retry CTA.
+    // Decision latch — set true once the match decision is made (accept,
+    // or reject-after-sampling), which stops the analyzer. Reset on retry.
     val matchLatched = remember { AtomicBoolean(false) }
     // Blink state machine — same shape as enrollment's blink stage.
     val blinkState = remember { AtomicReference(BlinkState.WaitingForOpen) }
+
+    // ─── Multi-frame sampling (anti "lucky single frame") ──────────────
+    // After the blink confirms liveness we sample several frames, average
+    // their embeddings (which cancels per-frame noise), and match ONCE on
+    // the clean averaged vector. A different person's occasional high frame
+    // averages out; the real owner's signal stays strong. This is the fix
+    // for "rejected a few times, then accepted a friend's face" — a single
+    // frame was being trusted.
+    val sampling = remember { AtomicBoolean(false) }
+    val sampleDelivered = remember { java.util.concurrent.atomic.AtomicInteger(0) }
+    val sampleDone = remember { java.util.concurrent.atomic.AtomicInteger(0) }
+    val sampleSum = remember { FloatArray(FaceTemplateStore.EMBEDDING_DIM) }
+    val sampleLock = remember { Any() }
 
     var statusMessage by remember { mutableStateOf("Look at the camera") }
     var progress by remember { mutableStateOf(0f) }
@@ -260,84 +273,130 @@ private fun FaceMatchPipeline(
     fun resetForRetry() {
         matchLatched.set(false)
         blinkState.set(BlinkState.WaitingForOpen)
+        sampling.set(false)
+        sampleDelivered.set(0)
+        sampleDone.set(0)
+        synchronized(sampleLock) { java.util.Arrays.fill(sampleSum, 0f) }
         errorMessage = null
         processing = false
         progress = 0f
         statusMessage = "Look at the camera"
     }
 
-    fun onBlinkCaptured(bitmap: Bitmap) {
+    fun resetSampling() {
+        sampling.set(false)
+        matchLatched.set(false)
+        sampleDelivered.set(0)
+        sampleDone.set(0)
+        synchronized(sampleLock) { java.util.Arrays.fill(sampleSum, 0f) }
+        blinkState.set(BlinkState.WaitingForOpen)
+    }
+
+    // Decide once, on the AVERAGED embedding. Frontal anchors only
+    // (front + blink) — never the left/right PROFILE anchors, since a
+    // frontal capture vs a profile shot is unreliable and only widens
+    // false-accepts.
+    fun finishMatch() {
+        if (template.isEmpty()) {
+            errorMessage = "No face enrolled on this device."
+            processing = false
+            return
+        }
+        val avg = synchronized(sampleLock) { sampleSum.copyOf() }
+        var sumSq = 0.0
+        for (v in avg) sumSq += v.toDouble() * v.toDouble()
+        val norm = kotlin.math.sqrt(sumSq)
+        if (norm < 1e-6) {
+            errorMessage = "Couldn't get a clear read of your face. Try again."
+            processing = false
+            resetSampling()
+            return
+        }
+        for (i in avg.indices) avg[i] = (avg[i].toDouble() / norm).toFloat()
+        val frontalAnchors = listOfNotNull(
+            template.getOrNull(0),
+            template.getOrNull(3),
+        ).ifEmpty { template }
+        val result = FaceMatcher.matchesTemplate(
+            avg, frontalAnchors, threshold = SIGNIN_THRESHOLD,
+        )
+        // android.util.Log (not Timber) so the calibration score reliably
+        // reaches logcat regardless of Timber tree planting.
+        Log.i(
+            TAG,
+            "match avg-of-${sampleDone.get()} best=%.3f anchor=%d threshold=%.3f → %s".format(
+                result.bestScore, result.bestAnchorIndex, result.threshold,
+                if (result.matched) "ACCEPT" else "REJECT",
+            ),
+        )
+        if (!result.matched) {
+            errorMessage = "That doesn't match the enrolled face on this device. " +
+                "(score ${"%.2f".format(result.bestScore)})"
+            processing = false
+            resetSampling()
+            return
+        }
+        val secret = store.readSecret()
+        if (secret == null) {
+            errorMessage = "Couldn't read the stored face key. Re-enroll on this device."
+            processing = false
+            return
+        }
+        matched = true
+        statusMessage = "Verified"
+        progress = 1f
+        onCaptured(secret)
+        // Do NOT zero `secret` here — the caller (ScanViewModel) consumes it
+        // into a BigInteger then zeros its own copy.
+    }
+
+    // One frontal frame in the sampling window: embed off the main thread,
+    // accumulate into sampleSum, and trigger the decision once enough frames
+    // are in (averaging cancels the per-frame noise that let a lucky single
+    // frame through).
+    fun onSampleFrame(bitmap: Bitmap) {
         captureScope.launch {
-            processing = true
-            statusMessage = "Verifying…"
+            var ok = false
             try {
                 val fresh = embeddingFromBitmap(context.applicationContext, bitmap)
-                if (!bitmap.isRecycled) bitmap.recycle()
-                if (!FaceMatcher.isWellFormed(fresh)) {
-                    Timber.tag(TAG).w("fresh embedding is not L2-unit length; rejecting")
-                    errorMessage = "Camera produced an unusable frame. Try again."
-                    processing = false
-                    matchLatched.set(false)
-                    blinkState.set(BlinkState.WaitingForOpen)
-                    return@launch
+                if (FaceMatcher.isWellFormed(fresh) && fresh.size == sampleSum.size) {
+                    synchronized(sampleLock) { for (i in fresh.indices) sampleSum[i] += fresh[i] }
+                    ok = true
                 }
-                if (template.isEmpty()) {
-                    errorMessage = "No face enrolled on this device."
-                    processing = false
-                    return@launch
-                }
-                // SECURITY: match the frontal sign-in capture ONLY against
-                // the FRONTAL enrollment anchors (index 0 = front, 3 = blink).
-                // Comparing a frontal capture to the left/right PROFILE
-                // anchors (1, 2) is unreliable and only widens the
-                // false-accept surface — "4 chances to beat the threshold".
-                // And use a strict threshold: accepting the wrong person is
-                // the cardinal sin, so we err toward false-reject over
-                // false-accept.
-                val frontalAnchors = listOfNotNull(
-                    template.getOrNull(0),
-                    template.getOrNull(3),
-                ).ifEmpty { template }
-                val result = FaceMatcher.matchesTemplate(
-                    fresh, frontalAnchors, threshold = SIGNIN_THRESHOLD,
-                )
-                Timber.tag(TAG).i(
-                    "match best=%.3f anchor=%d threshold=%.3f scores=[%s] → %s",
-                    result.bestScore,
-                    result.bestAnchorIndex,
-                    result.threshold,
-                    result.allScores.joinToString(", ") { "%.3f".format(it) },
-                    if (result.matched) "ACCEPT" else "REJECT",
-                )
-                if (!result.matched) {
-                    errorMessage = "That doesn't match the enrolled face on this " +
-                        "device. (score ${"%.2f".format(result.bestScore)})"
-                    processing = false
-                    matchLatched.set(false)
-                    blinkState.set(BlinkState.WaitingForOpen)
-                    return@launch
-                }
-                val secret = store.readSecret()
-                if (secret == null) {
-                    errorMessage = "Couldn't read the stored face key. Re-enroll on this device."
-                    processing = false
-                    return@launch
-                }
-                matched = true
-                statusMessage = "Verified"
-                progress = 1f
-                onCaptured(secret)
-                // Note: do NOT zero `secret` here — onCaptured's caller
-                // (ScanViewModel) immediately consumes the bytes into a
-                // BigInteger inside FaceSecretCredential and then zeros
-                // its local copy. Zeroing here would null the caller's
-                // copy before they could read it.
             } catch (t: Throwable) {
-                Timber.tag(TAG).e(t, "verification failed")
-                errorMessage = "Verification failed: ${t.message ?: "unknown error"}. Try again."
-                processing = false
-                matchLatched.set(false)
-                blinkState.set(BlinkState.WaitingForOpen)
+                Timber.tag(TAG).w(t, "sample embed failed")
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+            val done = if (ok) sampleDone.incrementAndGet() else sampleDone.get()
+            if (done < SIGNIN_SAMPLES) {
+                progress = 0.5f + 0.45f * (done.toFloat() / SIGNIN_SAMPLES)
+            }
+            if (done >= SIGNIN_SAMPLES && matchLatched.compareAndSet(false, true)) {
+                sampling.set(false)
+                finishMatch()
+            }
+        }
+    }
+
+    // The blink (liveness) just completed — open the sampling window and arm
+    // a timeout so the user is never stranded on "Verifying…".
+    fun onSamplingStarted() {
+        processing = true
+        statusMessage = "Verifying…"
+        progress = 0.5f
+        captureScope.launch {
+            kotlinx.coroutines.delay(SAMPLE_TIMEOUT_MS)
+            if (sampling.get() && matchLatched.compareAndSet(false, true)) {
+                sampling.set(false)
+                if (sampleDone.get() >= SIGNIN_MIN_SAMPLES) {
+                    finishMatch()
+                } else {
+                    errorMessage = "Couldn't get a clear read — hold still, facing the " +
+                        "camera, and try again."
+                    processing = false
+                    resetSampling()
+                }
             }
         }
     }
@@ -386,11 +445,14 @@ private fun FaceMatchPipeline(
                                             detector = detector,
                                             matchLatched = matchLatched,
                                             blinkState = blinkState,
+                                            sampling = sampling,
+                                            sampleDelivered = sampleDelivered,
                                             onStatus = { msg, prog ->
                                                 statusMessage = msg
                                                 progress = prog
                                             },
-                                            onBlinkComplete = ::onBlinkCaptured,
+                                            onSamplingStarted = ::onSamplingStarted,
+                                            onSampleFrame = ::onSampleFrame,
                                         ),
                                     )
                                 }
@@ -485,8 +547,11 @@ private class VerificationAnalyzer(
     private val detector: com.google.mlkit.vision.face.FaceDetector,
     private val matchLatched: AtomicBoolean,
     private val blinkState: AtomicReference<BlinkState>,
+    private val sampling: AtomicBoolean,
+    private val sampleDelivered: java.util.concurrent.atomic.AtomicInteger,
     private val onStatus: (String, Float) -> Unit,
-    private val onBlinkComplete: (Bitmap) -> Unit,
+    private val onSamplingStarted: () -> Unit,
+    private val onSampleFrame: (Bitmap) -> Unit,
 ) : ImageAnalysis.Analyzer {
 
     private var lastTransitionMs: Long = 0L
@@ -516,6 +581,22 @@ private class VerificationAnalyzer(
     @AndroidXOptIn(ExperimentalGetImage::class)
     private fun handleResult(faces: List<Face>, proxy: ImageProxy, rotation: Int) {
         val face = pickPrimaryFace(faces, proxy.width, proxy.height)
+
+        // SAMPLING phase — the blink already proved liveness; now collect a
+        // few frontal frames for the averaged match (kills lucky-single-frame
+        // false-accepts). No blink machine while sampling.
+        if (sampling.get()) {
+            if (face == null || kotlin.math.abs(face.headEulerAngleY) > 15f) {
+                onStatus("Hold still, facing the camera…", 0.6f)
+                return
+            }
+            if (sampleDelivered.get() >= SIGNIN_SAMPLES) return
+            val crop = cropFrameToFace(proxy, face, rotation) ?: return
+            sampleDelivered.incrementAndGet()
+            onSampleFrame(crop)
+            return
+        }
+
         if (face == null) {
             onStatus("Looking for your face…", 0f)
             return
@@ -569,15 +650,14 @@ private class VerificationAnalyzer(
             }
             BlinkState.SawClose -> {
                 if (open) {
-                    // Full blink — verify on this frame.
-                    if (!matchLatched.compareAndSet(false, true)) return
-                    onStatus("Matching…", 0.9f)
-                    val cropped = cropFrameToFace(proxy, face, rotation) ?: run {
-                        matchLatched.set(false)
-                        blinkState.set(BlinkState.WaitingForOpen)
-                        return
-                    }
-                    onBlinkComplete(cropped)
+                    // Liveness confirmed (open → close → open). Don't trust
+                    // this single frame — open the multi-frame sampling
+                    // window and let the averaged match decide.
+                    blinkState.set(BlinkState.WaitingForOpen)
+                    sampleDelivered.set(0)
+                    sampling.set(true)
+                    onSamplingStarted()
+                    onStatus("Got it — hold still…", 0.5f)
                 }
                 // Still closed → wait.
             }
@@ -706,4 +786,14 @@ private const val FACE_EDGE = 112
  * sign-in log prints both so it can be tuned precisely).
  */
 private const val SIGNIN_THRESHOLD = 0.65f
+
+/** Frames to average for one sign-in decision. More frames = less noise. */
+private const val SIGNIN_SAMPLES = 6
+
+/** Minimum frames that must arrive before the timeout will still decide. */
+private const val SIGNIN_MIN_SAMPLES = 3
+
+/** Hard cap on the sampling window so the user is never stuck "Verifying…". */
+private const val SAMPLE_TIMEOUT_MS = 6_000L
+
 private const val BLINK_WINDOW_MS = 3_000L
