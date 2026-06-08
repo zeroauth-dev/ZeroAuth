@@ -72,6 +72,7 @@ import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import dev.zeroauth.android.sec.FaceTemplateStore
+import dev.zeroauth.biometric.FaceMatcher
 import dev.zeroauth.biometric.Quantizer
 import dev.zeroauth.biometric.Sha256
 import dev.zeroauth.biometric.TfliteFaceEmbedder
@@ -1010,6 +1011,23 @@ private fun finaliseEnrollment(
         "finaliseEnrollment: expected 4 embeddings (front/left/right/blink), got ${embeddings.size}"
     }
     try {
+        // SECURITY / quality gate: the front (0) and blink (3) captures are
+        // BOTH frontal and from the same ceremony, so they MUST look like
+        // the same person. If they don't, either two different people were
+        // captured across the steps, or the embedder isn't discriminating —
+        // either way we refuse to store a template we can't trust to gate
+        // sign-in. The score is also our "same person, same session"
+        // calibration baseline (logged).
+        val selfSim = FaceMatcher.cosineSimilarity(embeddings[0], embeddings[3])
+        Log.i(TAG, "enrollment self-consistency front~blink=%.3f".format(selfSim))
+        if (selfSim < ENROLL_CONSISTENCY) {
+            onError(
+                "We couldn't confirm it was the same person across the steps " +
+                    "(match ${"%.2f".format(selfSim)}). Make sure it's one person " +
+                    "in steady lighting, and retake.",
+            )
+            return
+        }
         val frontEmbedding = embeddings[0]
         val quantised = Quantizer.quantize(frontEmbedding)
         val secret = Sha256.digest(quantised)
@@ -1071,3 +1089,14 @@ private const val EMBEDDING_DIM = 192
 
 /** Time window inside which the open→close→open blink must complete. */
 private const val BLINK_WINDOW_MS = 3_000L
+
+/**
+ * Minimum cosine similarity between the two FRONTAL enrollment captures
+ * (front + blink) for the enrollment to be accepted. They're the same
+ * person in the same session, so a genuine enrollment scores well above
+ * this; a value below it means two different people were captured, or the
+ * embedder isn't discriminating — either way we refuse to trust the
+ * template. Lenient floor (catches gross mismatches without rejecting
+ * legitimate enrollments); the logged score lets us tighten it.
+ */
+private const val ENROLL_CONSISTENCY = 0.5f

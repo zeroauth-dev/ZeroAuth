@@ -286,17 +286,32 @@ private fun FaceMatchPipeline(
                     processing = false
                     return@launch
                 }
-                val result = FaceMatcher.matchesTemplate(fresh, template)
+                // SECURITY: match the frontal sign-in capture ONLY against
+                // the FRONTAL enrollment anchors (index 0 = front, 3 = blink).
+                // Comparing a frontal capture to the left/right PROFILE
+                // anchors (1, 2) is unreliable and only widens the
+                // false-accept surface — "4 chances to beat the threshold".
+                // And use a strict threshold: accepting the wrong person is
+                // the cardinal sin, so we err toward false-reject over
+                // false-accept.
+                val frontalAnchors = listOfNotNull(
+                    template.getOrNull(0),
+                    template.getOrNull(3),
+                ).ifEmpty { template }
+                val result = FaceMatcher.matchesTemplate(
+                    fresh, frontalAnchors, threshold = SIGNIN_THRESHOLD,
+                )
                 Timber.tag(TAG).i(
-                    "match best=%.3f anchor=%d threshold=%.3f → %s",
+                    "match best=%.3f anchor=%d threshold=%.3f scores=[%s] → %s",
                     result.bestScore,
                     result.bestAnchorIndex,
                     result.threshold,
+                    result.allScores.joinToString(", ") { "%.3f".format(it) },
                     if (result.matched) "ACCEPT" else "REJECT",
                 )
                 if (!result.matched) {
-                    errorMessage = "We couldn't match that to your enrolled face. " +
-                        "Make sure it's you and the lighting is similar to when you signed up."
+                    errorMessage = "That doesn't match the enrolled face on this " +
+                        "device. (score ${"%.2f".format(result.bestScore)})"
                     processing = false
                     matchLatched.set(false)
                     blinkState.set(BlinkState.WaitingForOpen)
@@ -680,4 +695,15 @@ private fun cropAndResize(source: Bitmap, faceBounds: Rect): Bitmap {
 
 private const val TAG = "FaceMatchVerification"
 private const val FACE_EDGE = 112
+
+/**
+ * Sign-in cosine-similarity threshold. STRICTER than the lenient
+ * [FaceMatcher.DEFAULT_THRESHOLD] (0.55), which was letting different
+ * people through. A frontal sign-in capture of the SAME person typically
+ * scores well above this against the frontal enrollment anchors; a
+ * different person should fall below it. This is an interim value pending
+ * calibration against real same-person / different-person scores (the
+ * sign-in log prints both so it can be tuned precisely).
+ */
+private const val SIGNIN_THRESHOLD = 0.65f
 private const val BLINK_WINDOW_MS = 3_000L
