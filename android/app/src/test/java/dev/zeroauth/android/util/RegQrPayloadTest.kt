@@ -22,7 +22,9 @@ class RegQrPayloadTest {
 
     private val sampleSession = "11111111-2222-3333-4444-555555555555"
     private val sampleCode = "ZA-AB23-CD45"
-    private val sampleChallenge = "a".repeat(32)
+    // 62 hex chars = the 31-byte challenge nonce the server emits
+    // (CHALLENGE_NONCE_HEX_LEN = 62). Must match RegQrPayload.CHALLENGE_SHAPE.
+    private val sampleChallenge = "a".repeat(62)
 
     @Test
     fun `parses a valid pair QR`() {

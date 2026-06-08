@@ -52,13 +52,13 @@ object RegQrPayload {
      *   - `step` is one of pair/enroll/verify
      *   - `session` is a non-empty string (UUID shape is server-validated)
      *   - `code` matches the canonical `ZA-XXXX-XXXX` format the server issued
-     *   - if step=verify, `challenge` is a 32-hex-char string
+     *   - if step=verify, `challenge` is a 62-hex-char string
      *
      * Stable error codes inside the failure exception:
      *   - `reg_qr_parse_failed` — malformed URI, wrong scheme/host, bad step
      *   - `reg_qr_missing_field` — required field absent for this step
      *   - `reg_qr_bad_code_shape` — code doesn't match ZA-XXXX-XXXX
-     *   - `reg_qr_bad_challenge_shape` — challenge isn't 32 hex chars
+     *   - `reg_qr_bad_challenge_shape` — challenge isn't 62 hex chars
      */
     fun parse(text: String): Result<RegChallenge> {
         val uri = runCatching { Uri.parse(text) }.getOrNull()
@@ -119,7 +119,7 @@ object RegQrPayload {
                 return Result.failure(
                     RegQrParseException(
                         "reg_qr_bad_challenge_shape",
-                        "Challenge must be 32 hex chars; got ${c.length}",
+                        "Challenge must be 62 hex chars; got ${c.length}",
                     ),
                 )
             }
