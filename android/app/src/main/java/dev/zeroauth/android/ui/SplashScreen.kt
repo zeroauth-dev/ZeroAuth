@@ -128,58 +128,32 @@ fun SplashScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Primary: Sign in. The big white button. This is the
-                // hot path — every cross-device login funnels through
-                // here. Routes to the W3 ScanScreen for proof-pairing.
-                Button(
-                    onClick = {
-                        if (navigated) return@Button
-                        navigated = true
-                        onSignIn()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor   = MaterialTheme.colorScheme.onPrimary,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 24.dp),
-                ) {
-                    Text(
-                        text  = stringResource(R.string.splash_cta),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
-                // Secondary: Create a new account (3-QR signup, ADR
-                // 0023). Demoted to a text link because registration
-                // is a once-per-user ceremony — sign-in is what users
-                // do every day.
-                TextButton(
-                    onClick = {
-                        if (navigated) return@TextButton
-                        navigated = true
-                        onCreateAccount()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text  = stringResource(R.string.splash_create_account_link),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                // Diagnostic affordance — only rendered when a
-                // registration has already run on this install (and
-                // therefore the secret-derived (did, commitment) pair
-                // will round-trip cleanly to the server). An outlined
-                // button keeps it visually subordinate to the two
-                // primary actions above but more discoverable than a
-                // text link, which matters for the investor walk
-                // through — they'll be looking for "show me the
-                // identity" without being told the exact label.
                 if (hasIdentity) {
+                    // This device already holds a ZeroAuth identity. The
+                    // only day-to-day action is sign-in, so it's primary —
+                    // and "Create account" is intentionally gone (you
+                    // already have one). This is the fix for the
+                    // "still shows Create Account after I registered" bug.
+                    Button(
+                        onClick = {
+                            if (navigated) return@Button
+                            navigated = true
+                            onSignIn()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor   = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        contentPadding = PaddingValues(horizontal = 24.dp),
+                    ) {
+                        Text(
+                            text  = stringResource(R.string.splash_cta),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
                     OutlinedButton(
                         onClick = {
                             if (navigated) return@OutlinedButton
@@ -194,6 +168,45 @@ fun SplashScreen(
                         Text(
                             text  = "View my identity",
                             style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                } else {
+                    // No identity on this device yet — the one thing to do
+                    // is create one. Registration is the primary action;
+                    // sign-in is demoted (it can't succeed without a local
+                    // identity to prove).
+                    Button(
+                        onClick = {
+                            if (navigated) return@Button
+                            navigated = true
+                            onCreateAccount()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor   = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        contentPadding = PaddingValues(horizontal = 24.dp),
+                    ) {
+                        Text(
+                            text  = "Create your ZeroAuth identity",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            if (navigated) return@TextButton
+                            navigated = true
+                            onSignIn()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text  = "I already have an identity — sign in",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -219,6 +232,17 @@ fun SplashScreen(
  * surface.
  */
 private fun hasRegisteredIdentity(context: Context): Boolean {
+    // Authoritative: the multi-step face ceremony persists the
+    // {secret, template} enrollment into the Keystore-backed
+    // FaceTemplateStore. If that exists, the user has a usable on-device
+    // identity and the splash routes them to sign-in, not registration.
+    val enrolled = runCatching {
+        dev.zeroauth.android.sec.FaceTemplateStore(context).hasEnrollment()
+    }.getOrDefault(false)
+    if (enrolled) return true
+    // Legacy fallback: older builds wrote a 64-hex secret to this prefs
+    // slot via the CapturedFaceSecret bridge. Kept so an identity created
+    // by an older build still suppresses the create-account path.
     val prefs = context.applicationContext.getSharedPreferences(
         "zeroauth_reg_secret",
         Context.MODE_PRIVATE,

@@ -415,6 +415,13 @@ export async function pairDeviceForRegistration(input: {
     // device row because the pair_code already established intent
     // at the registration level). The fingerprint is the device's
     // production identity from this point on.
+    // UPSERT, not plain INSERT: the device external_id is derived from
+    // the phone's fingerprint, so re-registering the SAME phone (e.g.
+    // the user starts over, or recreates an identity) would otherwise
+    // collide on the (tenant_id, environment, external_id) unique
+    // constraint and fail with pair_failed — the "create account throws
+    // an error when I try again" bug. On conflict we re-enroll the
+    // existing device row instead of erroring.
     const deviceInsert = await client.query<Device>(
       `INSERT INTO devices
         (tenant_id, environment, external_id, name, device_type,
@@ -422,6 +429,13 @@ export async function pairDeviceForRegistration(input: {
          enrolled_at, last_seen_at, metadata)
        VALUES ($1, $2, $3, $4, 'mobile_android', 'enrolled', $5, $6,
                NOW(), NOW(), $7::jsonb)
+       ON CONFLICT (tenant_id, environment, external_id) DO UPDATE SET
+         enrollment_state = 'enrolled',
+         fingerprint_hash = EXCLUDED.fingerprint_hash,
+         attestation_kind = EXCLUDED.attestation_kind,
+         last_seen_at = NOW(),
+         metadata = EXCLUDED.metadata,
+         updated_at = NOW()
        RETURNING *`,
       [
         session.tenant_id,

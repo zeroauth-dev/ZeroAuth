@@ -196,17 +196,6 @@ export function createApp() {
     res.redirect(301, `/bank-demo${suffix}`);
   });
 
-  // `/try` — the generic, premium "Continue with ZeroAuth" demo. A
-  // standalone page (demo-portal/public/try.html, copied into the Vite
-  // build at demo-portal/dist/try.html) that drives the SAME live
-  // /api/demo-portal/* flow as the bank demo, but framed as a universal
-  // "Sign in with ZeroAuth" for any site. Same-origin with the apex API
-  // (the Caddy apex serves /api/demo-portal/* directly, not redirected),
-  // so the cookie + SSE handshake works for the desktop browser.
-  app.get(['/try', '/try/'], (_req, res) => {
-    res.sendFile(path.join(__dirname, '../demo-portal/dist/try.html'));
-  });
-
   // Serve Docusaurus documentation
   const docsPath = path.join(__dirname, '..', 'website', 'build');
   app.use('/docs', express.static(docsPath));

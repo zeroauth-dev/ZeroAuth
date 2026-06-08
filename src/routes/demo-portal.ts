@@ -1507,12 +1507,19 @@ import {
  */
 router.post('/signup-init', async (req: Request, res: Response) => {
   try {
-    const name = typeof req.body?.name === 'string' ? req.body.name : 'Demo User';
-    const email = typeof req.body?.email === 'string' ? req.body.email : 'demo@neobank.example';
+    // The applicant's details, entered on the "open an account" form
+    // before the ZeroAuth ceremony. Stored on the registration session
+    // profile so the created tenant_user carries real name/email/phone.
+    const name = typeof req.body?.name === 'string' && req.body.name.trim()
+      ? req.body.name.trim().slice(0, 120) : 'Demo User';
+    const email = typeof req.body?.email === 'string' && req.body.email.trim()
+      ? req.body.email.trim().slice(0, 160) : 'demo@neobank.example';
+    const phone = typeof req.body?.phone === 'string' && req.body.phone.trim()
+      ? req.body.phone.trim().slice(0, 32) : undefined;
     const result = await startRegistration(
       DEMO_PORTAL_TENANT_ID,
       'live',
-      { profile: { name, email } },
+      { profile: { name, email, ...(phone ? { phone } : {}) } },
       { type: 'api_key', id: null, email: null },
     );
     res.status(201).json({
