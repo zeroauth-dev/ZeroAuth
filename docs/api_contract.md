@@ -120,6 +120,20 @@ The deeplink schema is `zeroauth://reg?step=<pair|enroll|verify>&session=<uuid>&
 | `POST` | `/v1/attendance` | `attendance:write` | Record check-in/out. Body: `{ userId, type, deviceId?, verificationId?, result?, metadata?, occurredAt? }`. `type` ∈ `check_in,check_out`. `result` ∈ `accepted,rejected`. |
 | `GET` | `/v1/attendance` | `attendance:read` | `?type=…`, `?result=…`, `?limit=…`. |
 
+### Attendance bridge (`/api/attendance/*`)
+
+Face-first office attendance from the employee's own phone (slice 1). The phone holds no tenant API key, so — like `/api/demo-portal/*` — this is a public same-process bridge that attaches the company tenant internally and reuses the production proof-pairing verifier. Slice 1 reuses the demo-portal tenant as the single seeded company ("Anchor Corp"); any registered user is treated as an employee. Per-company HR provisioning is a later slice.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/attendance/company` | none | WiFi-anchor config for the phone: `{ company: { name, location, wifi: { ssidLabel, bssids, minSignalPercent } } }`. |
+| `POST` | `/api/attendance/init` | none | Opens a proof-pairing session. Returns `{ sessionId, nonce, expiresAt, company }`. The bind token is held server-side; the phone only sees the session id + nonce. |
+| `POST` | `/api/attendance/record` | none (session-bound) | Body: `{ sessionId, type, did, proof, publicSignals, wifi: { bssid, signal }, clientMeta? }`. `type` ∈ `check_in,check_out`. Verifies the proof via the proof-pairing path, strictly re-checks the WiFi anchor server-side, then records an `attendance_events` row. `201 { ok, type, result, occurredAt }` on success; `403 outside_anchor` (plus a `rejected` row) when the BSSID/signal fails the anchor; proof failures surface the proof-pairing codes (`401 pairing_proof_invalid`, `400 pairing_did_unknown`, …); `410 attendance_session_expired` on a replayed or expired session. |
+
+There is intentionally **no** did-keyed status read — a public endpoint mapping a (public) DID to a person's live in/out state would be a presence-enumeration oracle. The phone renders Home from its own locally-tracked last action; the server stays the auditable source of truth. An authenticated status read lands with the slice-2 per-employee session. The bridge is per-IP rate-limited (60/min).
+
+No biometric, image, or location trail crosses the wire — only the Groth16 proof + a WiFi-presence boolean (BSSID + signal %). Identity verification is byte-identical to `/v1/proof-pairing` (Poseidon nonce binding, commitment match, Groth16 verify, single-use consume); attendance adds the server-side WiFi re-check + the event write (which carries its own audit hash-chain row).
+
 ### Central API — audit (`/v1/audit`)
 
 | Method | Path | Scope | Description |

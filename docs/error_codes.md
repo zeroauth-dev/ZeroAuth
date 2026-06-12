@@ -94,6 +94,11 @@ Some responses carry extra fields (`docs`, `retryAfterSeconds`, `currentScopes`,
 | `user_create_failed`, `user_list_failed`, `user_update_failed` | Users route exceptions. |
 | `verification_create_failed`, `verification_list_failed` | Verifications route exceptions. |
 | `attendance_create_failed`, `attendance_list_failed` | Attendance route exceptions. |
+| `outside_anchor` | `/api/attendance/record` — the attested WiFi BSSID/signal does not match the company's configured anchor. The face proof still verified; the event is recorded as `rejected` and `403` is returned. |
+| `attendance_session_expired` | `/api/attendance/record` — the attendance session was already used (single-use) or expired. Start again from `/api/attendance/init`. |
+| `attendance_not_provisioned` | `/api/attendance/*` — the attendance company tenant is not seeded on this deployment. |
+| `attendance_init_failed`, `attendance_record_failed` | Attendance bridge route exceptions. |
+| `too_many_requests` | `/api/attendance/*` — per-IP rate limit (60/min) exceeded on the public attendance bridge. |
 | `audit_list_failed` | Audit route exceptions. |
 
 ## Proof pairing (`/v1/proof-pairing/*` — W3)
