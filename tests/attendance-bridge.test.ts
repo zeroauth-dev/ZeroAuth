@@ -213,14 +213,18 @@ afterAll(() => {
 // ─── (1) GET /company ──────────────────────────────────────────────────
 
 describe('GET /api/attendance/company', () => {
-  it('returns the configured company + WiFi anchor', async () => {
+  it('returns the company label + threshold but NEVER the anchor BSSID', async () => {
     const res = await request(app).get('/api/attendance/company');
     expect(res.status).toBe(200);
     expect(res.body.company.name).toBe('Anchor Corp');
-    expect(res.body.company.wifi.bssids).toEqual([ANCHOR_BSSID]);
     expect(res.body.company.wifi.minSignalPercent).toBe(85);
-    // The label is informational; the BSSID is the real anchor.
+    // The label is informational and broadcast; the phone shows it as a soft
+    // hint. The BSSID (office router MAC = location identifier) is the real
+    // anchor and is NEVER returned on this public surface (security review
+    // Finding 2 / A-42). The server re-checks the phone's reported BSSID.
     expect(res.body.company.wifi.ssidLabel).toBeDefined();
+    expect(res.body.company.wifi.bssids).toBeUndefined();
+    expect(JSON.stringify(res.body)).not.toContain(ANCHOR_BSSID);
   });
 });
 

@@ -505,6 +505,39 @@
 | **Test status** | `tests/attendance-bridge.test.ts`: a second `record` on the same session id → `410 attendance_session_expired`, `submitProof` invoked exactly once. Inherited nonce-binding + atomic-consume coverage in `tests/proof-pairing.test.ts`. |
 | **Audit signal** | Inherited `pairing.replay_blocked` / `pairing.race_lost` from the proof-pairing verifier. |
 
+### A-44 — HR admin portal session / surface isolation
+
+| | |
+|---|---|
+| **Class** | Spoofing / EoP (STRIDE: S + E) |
+| **Surface** | `/api/hr/*` — the standalone attendance admin portal |
+| **Description** | (1) An HR-admin JWT is replayed on `/v1/*` or `/api/console/*` to escalate into the platform or developer console; or a console/`/v1` token is replayed on `/api/hr/*`. (2) An HR admin reads/writes another tenant's roster or attendance by tampering with a request. |
+| **Mitigation** | (a) The HR JWT carries issuer **and** audience `zeroauth-hr-admin` (distinct from `zeroauth-console` and the `/v1` `zeroauth` issuer); `verifyHrAdminToken` rejects any other audience, and `requireConsoleAuth`/`/v1` verifiers reject the HR audience. (b) Every `/api/hr/*` query is scoped to `req.hrAdmin.tenantId` (from the verified token) — never a client-supplied tenant/company. (c) The cookie is HttpOnly, `SameSite=Strict`, path `/api/hr`. (d) Scrypt password hashing (reused from `tenants.ts`); write routes are rate-limited per admin id. |
+| **Test status** | `tests/hr-admin.test.ts`: an HR token → 401 on `/api/console/keys`; a console-audience token → 401 on `/api/hr/account`; auth required; signup/login/provision happy paths. |
+| **Audit signal** | `audit_events.actor_type='hr_admin'` for company/member writes. |
+
+### A-45 — Provision-then-claim invite abuse
+
+| | |
+|---|---|
+| **Class** | Spoofing (STRIDE: S) |
+| **Surface** | `POST /api/hr/employees` (provision) → `POST /api/attendance/claim` |
+| **Description** | (1) A captured `(did, commitment, proof)` tuple (observable on every prior sign-in) is replayed into an open invite to drive the binding / deny onboarding. (2) A stolen invite code lets a third party complete the ceremony. (3) An invite is reused for multiple identities. |
+| **Mitigation** | (a) **Server-nonce freshness (primary).** The claim is bound to a fresh `/init` session: `proof-pairing.verifyAndConsumeForClaim` enforces `publicSignals[1] = Poseidon(Poseidon(commitment), nonce)` (the SAME A-11 binding as check-in), runs the Groth16 verifier loopback rejecting `structuralFallback`, and consumes the session single-use. A captured proof carries the prior session's nonce fold and fails → `400 pairing_nonce_mismatch`. (b) **Single-use invite** — SHA-256-hashed at rest, consumed atomically (`FOR UPDATE` + `invite_code_hash=NULL`) inside the claim transaction, **48-hour** TTL; a replayed claim finds no live invite → `410`. (c) `commitmentsEqual(publicSignals[0], commitment)` is gated before the proof verify, so `did_hash = Poseidon(commitment)` binds the value the proof committed to. (d) `UNIQUE(company_id, did)` prevents two memberships sharing a DID. See ADR 0025. **Residual:** the invite is a bearer secret delivered out-of-band, so the proof binds *freshness + control of the committed secret*, not *that the claimer is the named employee* — that trust flows through invite delivery. Documented; future hardening = deliver the code to the employee's verified channel + bake the nonce into the circuit's public inputs. |
+| **Test status** | `tests/attendance-membership.test.ts`: claim requires `sessionId` (400 without); valid claim → 200; expired/used invite → 410; bad proof → 401. `tests/attendance-membership-service.test.ts`: real `did_hash = Poseidon(commitment)` derivation; `commitment_mismatch` before proof; rollback (invite unconsumed) on nonce/proof failure. |
+| **Audit signal** | `attendance.member_provisioned` / `attendance.membership_claimed`. |
+
+### A-46 — Cross-company attendance leakage
+
+| | |
+|---|---|
+| **Class** | Information disclosure / EoP (STRIDE: I + E) |
+| **Surface** | `POST /api/attendance/record` with a `companyId` |
+| **Description** | A verified employee of company A submits a check-in against company B's `companyId` to forge presence there, or to probe B's WiFi anchor. |
+| **Mitigation** | (a) `record` resolves the company's own tenant and gates on `findClaimedMembership(companyId, did)` → `403 not_a_member` unless the DID is a **claimed** member of *that* company. (b) The WiFi anchor returned by `/company` is non-sensitive config (the BSSID is required to be matched, not secret); the real gate is the server-side re-check + membership. (c) The demo (`companyId` absent) keeps the slice-1 any-registered-user behaviour and is isolated to the demo tenant. |
+| **Test status** | `tests/attendance-membership.test.ts`: company-scoped record for a claimed member → 201 (scoped to the company's tenant); non-member → `403 not_a_member`, no event written. |
+| **Audit signal** | `attendance.recorded` under the company's own tenant; non-member attempts return 403 without a row. |
+
 ## Open items (no `A-NN` yet)
 
 - The session store is in-memory; restart wipes session continuity. Not exploitable today (JWTs are stateless), but consumers of `/v1/identity/me` will see false 401s on restart.

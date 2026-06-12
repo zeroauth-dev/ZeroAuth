@@ -27,7 +27,7 @@
 import crypto from 'crypto';
 import { URL } from 'url';
 import { v4 as uuidv4 } from 'uuid';
-import { poseidon2 } from 'poseidon-lite';
+import { poseidon1, poseidon2 } from 'poseidon-lite';
 import { getPool } from './db';
 import { logger } from './logger';
 import { recordAuditEvent } from './platform';
@@ -481,6 +481,115 @@ export async function createSession(
     expiresAt: expiresAt.toISOString(),
     qrPayload,
   };
+}
+
+/**
+ * Verify a claim proof against a fresh pairing session — the SAME nonce
+ * freshness `submitProof` gives check-in (A-11), but for the
+ * provision-then-claim flow where no `tenant_users` row exists yet (the
+ * claim is what CREATES it). So `commitment` (and the `didHash` derived
+ * from it) come from the REQUEST — the caller MUST have gated
+ * `publicSignals[0] === commitment` first — instead of from
+ * `findUserByDid`. Every other guarantee is identical to `submitProof`:
+ * the session state machine, the session_bind token (A-13), the
+ * `Poseidon(Poseidon(commitment), nonce)` binding (A-11), the verifier
+ * loopback with structuralFallback rejection, and the atomic single-use
+ * consume (A-14). On success the session is consumed; on failure it throws
+ * the same `Pairing*` errors `submitProof` throws (the bridge maps them).
+ *
+ * Unlike `submitProof` it mints no session token and resolves no user — the
+ * caller binds the membership + creates the `tenant_users` row afterwards.
+ * This closes the captured-proof replay the cryptographer review flagged:
+ * a proof captured from any prior sign-in carries that session's nonce fold
+ * and fails the `publicSignals[1]` check here.
+ */
+export async function verifyAndConsumeForClaim(
+  sessionId: string,
+  tenantId: string,
+  environment: ApiKeyEnvironment,
+  commitment: bigint,
+  proof: Groth16Proof,
+  publicSignals: string[],
+  presentedSessionBindToken: string | undefined,
+): Promise<void> {
+  const start = Date.now();
+  const correlationId = uuidv4();
+  try {
+    // ── Session state machine (mirrors submitProof checks 2 + expiry) ──
+    const row = await loadSessionRow(sessionId, tenantId, environment);
+    if (!row) throw new PairingSessionNotFound();
+    if (row.state === 'consumed') throw new PairingSessionAlreadyBound();
+    if (row.state === 'failed' || row.failure_count >= MAX_FAILURES_BEFORE_LOCK) {
+      throw new PairingSessionLocked();
+    }
+    const expiresMs = row.expires_at instanceof Date
+      ? row.expires_at.getTime()
+      : new Date(row.expires_at as unknown as string).getTime();
+    if (expiresMs <= Date.now()) throw new PairingSessionExpired();
+
+    // ── session_bind token (A-13) ──
+    if (!presentedSessionBindToken) throw new PairingSessionBindMismatch('cookie absent');
+    const presentedHash = crypto.createHash('sha256').update(presentedSessionBindToken).digest();
+    const storedHash = Buffer.from(row.session_bind_token_hash, 'hex');
+    if (presentedHash.length !== storedHash.length
+        || !crypto.timingSafeEqual(presentedHash, storedHash)) {
+      throw new PairingSessionBindMismatch();
+    }
+
+    // ── publicSignals shape ──
+    if (!Array.isArray(publicSignals) || publicSignals.length !== 3) {
+      throw new PairingProofInvalid('public signals shape');
+    }
+
+    // ── Nonce binding (A-11) — the ONLY freshness on the claim, mandatory.
+    // didHash = Poseidon(commitment) is derived from the caller-gated
+    // request commitment; expectedDidHashSession = Poseidon(didHash, nonce).
+    const didHash = poseidon1([commitment]);
+    const nonceField = nonceHexToField(row.nonce_hex);
+    const expectedDidHashSession = poseidon2([didHash, nonceField]);
+    const signalDidHashSession = parseBigIntFromSignal(publicSignals[1]);
+    if (!timingSafeBigIntEqual(signalDidHashSession, expectedDidHashSession)) {
+      await recordAuditEvent(tenantId, {
+        environment,
+        actorType: 'device',
+        action: 'pairing.replay_blocked',
+        entityType: 'pairing_session',
+        entityId: sessionId,
+        status: 'failure',
+        summary: 'claim publicSignals[1] mismatch — replay or wrong-session proof',
+      }).catch(err => logger.warn('proof-pairing: claim replay audit failed', {
+        error: (err as Error).message,
+      }));
+      throw new PairingNonceMismatch();
+    }
+
+    // ── Verifier loopback (structuralFallback rejected inside) ──
+    const verified = await verifierVerify(proof, publicSignals, tenantId, environment, correlationId);
+    if (!verified) throw new PairingProofInvalid();
+
+    // ── Atomic single-use consume (A-14). No user yet → consumed_user_id
+    // stays null (the column is nullable); the caller creates the user. ──
+    const pool = getPool();
+    const claimed = await pool.query(
+      `UPDATE proof_pairing_sessions
+         SET state = 'consumed', consumed_at = NOW()
+       WHERE id = $1 AND state = 'issued'
+       RETURNING id`,
+      [sessionId],
+    );
+    if (claimed.rows.length === 0) throw new PairingSessionAlreadyBound();
+
+    // A-26: pad success latency to the floor (uniform with submitProof).
+    await padToFloor(start);
+  } catch (err) {
+    if (err instanceof PairingSessionBindMismatch
+        || err instanceof PairingNonceMismatch
+        || err instanceof PairingProofInvalid) {
+      await incrementFailureCount(sessionId, err.code).catch(() => -1);
+    }
+    await padToFloor(start);
+    throw err;
+  }
 }
 
 export async function submitProof(

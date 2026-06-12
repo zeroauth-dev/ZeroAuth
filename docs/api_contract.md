@@ -129,10 +129,30 @@ Face-first office attendance from the employee's own phone (slice 1). The phone 
 | `GET` | `/api/attendance/company` | none | WiFi-anchor config for the phone: `{ company: { name, location, wifi: { ssidLabel, bssids, minSignalPercent } } }`. |
 | `POST` | `/api/attendance/init` | none | Opens a proof-pairing session. Returns `{ sessionId, nonce, expiresAt, company }`. The bind token is held server-side; the phone only sees the session id + nonce. |
 | `POST` | `/api/attendance/record` | none (session-bound) | Body: `{ sessionId, type, did, proof, publicSignals, wifi: { bssid, signal }, clientMeta? }`. `type` ∈ `check_in,check_out`. Verifies the proof via the proof-pairing path, strictly re-checks the WiFi anchor server-side, then records an `attendance_events` row. `201 { ok, type, result, occurredAt }` on success; `403 outside_anchor` (plus a `rejected` row) when the BSSID/signal fails the anchor; proof failures surface the proof-pairing codes (`401 pairing_proof_invalid`, `400 pairing_did_unknown`, …); `410 attendance_session_expired` on a replayed or expired session. |
+| `POST` | `/api/attendance/claim` | none (nonce + invite) | The employee's phone claims an HR-provisioned membership. It first calls `/init` (with `companyId`) for a session nonce, binds the face proof to it, then submits `{ companyId, sessionId, inviteCode, did, commitment, proof, publicSignals }`. The server enforces the **nonce binding** (`publicSignals[1] = Poseidon(Poseidon(commitment), nonce)`) + commitment match + Groth16 verify (same path as check-in), then binds the DID, creates/links a `tenant_user`, and consumes the single-use invite **and** session. `200 { ok, companyId, employee }`; `410 invite_not_found_or_expired` / `attendance_session_expired`; `401 proof_verification_failed` / `pairing_proof_invalid`; `400 commitment_mismatch` / `pairing_nonce_mismatch`; `404 company_not_found`. |
+
+`company`, `init`, and `record` accept an optional **`companyId`**: a real `attendance_companies` row uses that company's tenant + DB-stored WiFi anchor and gates `record` on a **claimed membership** (`403 not_a_member` otherwise); with no `companyId` the bridge serves the seeded demo company (any registered user — slice-1 back-compat).
 
 There is intentionally **no** did-keyed status read — a public endpoint mapping a (public) DID to a person's live in/out state would be a presence-enumeration oracle. The phone renders Home from its own locally-tracked last action; the server stays the auditable source of truth. An authenticated status read lands with the slice-2 per-employee session. The bridge is per-IP rate-limited (60/min).
 
 No biometric, image, or location trail crosses the wire — only the Groth16 proof + a WiFi-presence boolean (BSSID + signal %). Identity verification is byte-identical to `/v1/proof-pairing` (Poseidon nonce binding, commitment match, Groth16 verify, single-use consume); attendance adds the server-side WiFi re-check + the event write (which carries its own audit hash-chain row).
+
+### HR admin portal (`/api/hr/*`)
+
+The standalone attendance admin portal (slice 3). Auth: the `zeroauth-hr-admin` JWT (Bearer or HttpOnly `zeroauth_hr_jwt` cookie, path-scoped `/api/hr`) — a distinct issuer/audience so it is **never** accepted on `/v1` or `/api/console`. Each HR admin is bound to one tenant (= one company); every query is tenant-scoped.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/hr/signup` | none | Create a company tenant + HR admin + default company. Body `{ email, password, companyName, location? }`. Sets the cookie. `409 email_taken`. |
+| `POST` | `/api/hr/login` | none | `{ email, password }` → mint the HR session. `401 invalid_credentials`. |
+| `POST` | `/api/hr/logout` | cookie | Clear the cookie. |
+| `GET` | `/api/hr/account` | HR JWT | The admin + their company. |
+| `GET`/`POST` | `/api/hr/company` | HR JWT | Read / update the WiFi presence anchor (`{ ssidLabel, bssids[], minSignalPercent, location? }`). |
+| `GET` | `/api/hr/employees` | HR JWT | Roster (status ∈ `invited,claimed,revoked`). |
+| `POST` | `/api/hr/employees` | HR JWT | Provision `{ employeeId, fullName, department?, email? }` → returns a single-use invite `{ code, deeplink: zeroauth://emp-claim?company=…&code=…, expiresAt }`. |
+| `PATCH` | `/api/hr/employees/:id` | HR JWT | `{ status: revoked\|invited }`. |
+| `GET` | `/api/hr/attendance` | HR JWT | Attendance board (events joined to employee names) + summary. |
+| `GET` | `/api/hr/attendance/export` | HR JWT | CSV. |
 
 ### Central API — audit (`/v1/audit`)
 

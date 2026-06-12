@@ -10,6 +10,8 @@
  *   GET  /api/attendance/company        — anchor config for the phone
  *   POST /api/attendance/init           — open a pairing session, return nonce
  *   POST /api/attendance/record         — verify proof + WiFi gate, record event
+ *   POST /api/attendance/claim          — bind an HR-provisioned membership
+ *                                         (nonce-bound proof + single-use invite)
  *
  * There is intentionally NO did-keyed status read: a public endpoint that
  * maps a (public) DID to a person's live in/out state is a presence-
@@ -61,6 +63,7 @@ import { getTenantById, getTenantByEmail } from '../services/tenants';
 import {
   createSession as pairingCreateSession,
   submitProof as pairingSubmitProof,
+  verifyAndConsumeForClaim,
   PairingSessionNotFound,
   PairingSessionExpired,
   PairingSessionAlreadyBound,
@@ -83,6 +86,12 @@ import {
   verifyWifiAgainstAnchor,
   AttendanceCompany,
 } from '../services/attendance-company';
+import {
+  getCompanyById,
+  findClaimedMembership,
+  claimMembership,
+  AttendanceMembershipError,
+} from '../services/attendance-membership';
 import { ApiKeyEnvironment, AttendanceEventType } from '../types';
 
 const router = Router();
@@ -219,10 +228,52 @@ function publicCompany(c: AttendanceCompany) {
     location: c.location,
     wifi: {
       ssidLabel: c.wifi.ssidLabel,
-      bssids: c.wifi.bssids,
+      // SECURITY (A-42 / security review Finding 2): the anchor BSSIDs are
+      // the office router MACs — a location identifier. They are NEVER
+      // returned on this public, unauthenticated surface: publishing them
+      // would leak a regulated customer's facility location AND hand an
+      // attacker the exact value to spoof, collapsing the presence gate.
+      // The phone shows a soft "you're on <ssidLabel>" hint from its own
+      // connected SSID (broadcast, non-secret); the authoritative presence
+      // check is the server-side re-check in /record against the anchor
+      // held in attendance_companies.wifi (never sent to the client).
       minSignalPercent: c.wifi.minSignalPercent,
     },
   };
+}
+
+interface AttendanceContext {
+  tenantId: string;
+  environment: ApiKeyEnvironment;
+  company: AttendanceCompany;
+  companyId: string | null;
+  isDemo: boolean;
+}
+
+/**
+ * Resolve the attendance context for an optional companyId:
+ *  - a real `attendance_companies` row → its tenant + DB config; check-in
+ *    is membership-gated.
+ *  - no companyId → the demo company (env config + demo-portal tenant);
+ *    any registered user can check in (slice-1 back-compat).
+ * Returns null when nothing resolves (unknown company / not provisioned).
+ */
+async function resolveContext(companyIdRaw: unknown): Promise<AttendanceContext | null> {
+  const companyId = typeof companyIdRaw === 'string' && companyIdRaw.trim() ? companyIdRaw.trim() : null;
+  if (companyId) {
+    const row = await getCompanyById(companyId);
+    if (!row || row.status !== 'active') return null;
+    return {
+      tenantId: row.tenant_id,
+      environment: row.environment,
+      company: { name: row.name, location: row.location, wifi: row.wifi },
+      companyId: row.id,
+      isDemo: false,
+    };
+  }
+  const tenantId = await resolveCompanyTenantId();
+  if (!tenantId) return null;
+  return { tenantId, environment: DEMO_ENVIRONMENT, company: getAttendanceCompany(), companyId: null, isDemo: true };
 }
 
 /** Map a proof-pairing error onto the documented HTTP status. Returns
@@ -263,8 +314,21 @@ function mapPairingError(err: unknown, res: Response): boolean {
  * auto-detect the company and run the local presence gate before
  * prompting for a face scan.
  */
-router.get('/company', (_req: Request, res: Response) => {
-  res.status(200).json({ company: publicCompany(getAttendanceCompany()) });
+router.get('/company', async (req: Request, res: Response) => {
+  const companyId = typeof req.query.companyId === 'string' ? req.query.companyId.trim() : '';
+  if (companyId) {
+    const row = await getCompanyById(companyId);
+    if (!row || row.status !== 'active') {
+      res.status(404).json({ error: 'company_not_found', message: 'Unknown company.' });
+      return;
+    }
+    res.status(200).json({
+      companyId: row.id,
+      company: publicCompany({ name: row.name, location: row.location, wifi: row.wifi }),
+    });
+    return;
+  }
+  res.status(200).json({ companyId: null, company: publicCompany(getAttendanceCompany()) });
 });
 
 /**
@@ -277,8 +341,8 @@ router.get('/company', (_req: Request, res: Response) => {
  */
 router.post('/init', async (req: Request, res: Response) => {
   try {
-    const tenantId = await resolveCompanyTenantId();
-    if (!tenantId) {
+    const ctx = await resolveContext(req.body?.companyId);
+    if (!ctx) {
       res.status(503).json({
         error: 'attendance_not_provisioned',
         message: 'Attendance is not yet provisioned on this deployment.',
@@ -287,8 +351,8 @@ router.post('/init', async (req: Request, res: Response) => {
     }
 
     const result = await pairingCreateSession(
-      tenantId,
-      DEMO_ENVIRONMENT,
+      ctx.tenantId,
+      ctx.environment,
       null,
       req.ip ?? null,
       (req.headers['user-agent'] as string | undefined) ?? null,
@@ -299,7 +363,8 @@ router.post('/init', async (req: Request, res: Response) => {
       sessionId: result.id,
       nonce: result.nonce,
       expiresAt: result.expiresAt,
-      company: publicCompany(getAttendanceCompany()),
+      companyId: ctx.companyId,
+      company: publicCompany(ctx.company),
     });
   } catch (err) {
     if (err instanceof TooManyPendingSessions) {
@@ -354,8 +419,8 @@ router.post('/record', async (req: Request, res: Response) => {
       return;
     }
 
-    const tenantId = await resolveCompanyTenantId();
-    if (!tenantId) {
+    const ctx = await resolveContext(req.body?.companyId);
+    if (!ctx) {
       res.status(503).json({ error: 'attendance_not_provisioned', message: 'Attendance is not yet provisioned.' });
       return;
     }
@@ -374,8 +439,8 @@ router.post('/record', async (req: Request, res: Response) => {
     try {
       const result = await pairingSubmitProof(
         sessionId,
-        tenantId,
-        DEMO_ENVIRONMENT,
+        ctx.tenantId,
+        ctx.environment,
         did,
         proof,
         publicSignals,
@@ -392,8 +457,17 @@ router.post('/record', async (req: Request, res: Response) => {
       return;
     }
 
+    // ── Membership: real companies gate on a claimed membership ──
+    if (!ctx.isDemo && ctx.companyId) {
+      const member = await findClaimedMembership(ctx.companyId, did);
+      if (!member) {
+        res.status(403).json({ error: 'not_a_member', message: 'You are not an enrolled member of this company.' });
+        return;
+      }
+    }
+
     // ── Presence: strict server-side WiFi anchor re-check ──
-    const company = getAttendanceCompany();
+    const company = ctx.company;
     const verdict = verifyWifiAgainstAnchor(
       {
         bssid: typeof wifi.bssid === 'string' ? wifi.bssid : null,
@@ -402,8 +476,8 @@ router.post('/record', async (req: Request, res: Response) => {
       company.wifi,
     );
 
-    const apiKeyId = await resolveApiKeyId(tenantId);
-    const event = await createAttendanceEvent(tenantId, DEMO_ENVIRONMENT, apiKeyId, {
+    const apiKeyId = await resolveApiKeyId(ctx.tenantId);
+    const event = await createAttendanceEvent(ctx.tenantId, ctx.environment, apiKeyId, {
       userId,
       type,
       result: verdict.ok ? 'accepted' : 'rejected',
@@ -438,6 +512,103 @@ router.post('/record', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('attendance: record failed', { error: (err as Error).message });
     res.status(500).json({ error: 'attendance_record_failed', message: 'Could not record attendance.' });
+  }
+});
+
+/**
+ * POST /api/attendance/claim
+ *
+ * The employee's phone claims a provisioned membership. It first opens a
+ * fresh session via /init (with this companyId) and binds the face proof to
+ * that session's nonce — exactly like check-in. The claim then presents the
+ * single-use invite code HR issued. On success the membership is bound to
+ * the DID and a tenant_user is created/linked so later check-ins verify.
+ *
+ * Two independent anti-replay layers:
+ *   - the nonce binding (verifyAndConsumeForClaim) — a proof captured from a
+ *     prior sign-in carries that session's nonce fold and is rejected; the
+ *     pairing session is single-use (A-11/A-14);
+ *   - the single-use invite code — consumed atomically with the binding.
+ */
+router.post('/claim', async (req: Request, res: Response) => {
+  try {
+    const companyId = typeof req.body?.companyId === 'string' ? req.body.companyId.trim() : '';
+    const inviteCode = typeof req.body?.inviteCode === 'string' ? req.body.inviteCode.trim() : '';
+    const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : '';
+    const did = typeof req.body?.did === 'string' ? req.body.did : '';
+    const commitment = typeof req.body?.commitment === 'string' ? req.body.commitment : '';
+    const proof = req.body?.proof;
+    const publicSignals = req.body?.publicSignals;
+
+    if (!companyId || !inviteCode) {
+      res.status(400).json({ error: 'invalid_request', message: 'companyId and inviteCode are required.' });
+      return;
+    }
+    if (!sessionId || !SESSION_ID_SHAPE.test(sessionId)) {
+      res.status(400).json({ error: 'invalid_request', message: 'A sessionId from /init is required.' });
+      return;
+    }
+    if (!did || !DID_PATTERN.test(did) || !commitment) {
+      res.status(400).json({ error: 'invalid_request', message: 'A valid did + commitment are required.' });
+      return;
+    }
+    if (!proof || typeof proof !== 'object'
+        || !Array.isArray(publicSignals) || publicSignals.length !== 3
+        || publicSignals.some((s) => typeof s !== 'string')) {
+      res.status(400).json({ error: 'invalid_request', message: 'proof + 3-element publicSignals are required.' });
+      return;
+    }
+
+    // Claim is always company-scoped — resolve the company's own tenant so
+    // the pairing session (opened via /init with this companyId) and the
+    // membership both live under the right tenant.
+    const company = await getCompanyById(companyId);
+    if (!company || company.status !== 'active') {
+      res.status(404).json({ error: 'company_not_found', message: 'Unknown company.' });
+      return;
+    }
+
+    const bindToken = consumeBindToken(sessionId);
+    if (!bindToken) {
+      res.status(410).json({
+        error: 'attendance_session_expired',
+        message: 'This attendance session has expired or was already used. Start again.',
+      });
+      return;
+    }
+
+    const result = await claimMembership(
+      { companyId, inviteCode, did, commitment, publicSignals },
+      (commitmentBigInt) => verifyAndConsumeForClaim(
+        sessionId,
+        company.tenant_id,
+        company.environment,
+        commitmentBigInt,
+        proof as never,
+        publicSignals as string[],
+        bindToken,
+      ),
+    );
+    res.status(200).json({
+      ok: true,
+      companyId,
+      employee: {
+        id: result.membership.id,
+        employeeId: result.membership.employee_id,
+        fullName: result.membership.full_name,
+      },
+    });
+  } catch (err) {
+    if (err instanceof AttendanceMembershipError) {
+      const status = err.code === 'invite_not_found_or_expired' ? 410
+        : err.code === 'proof_verification_failed' ? 401 : 400;
+      res.status(status).json({ error: err.code, message: err.message });
+      return;
+    }
+    // Nonce / bind / verifier / session errors from verifyAndConsumeForClaim.
+    if (mapPairingError(err, res)) return;
+    logger.error('attendance: claim failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'attendance_claim_failed', message: 'Could not claim membership.' });
   }
 });
 

@@ -31,7 +31,7 @@ export async function hashPassword(password: string): Promise<string> {
  * tampered with we return false outright to avoid `timingSafeEqual`'s
  * `RangeError` on length mismatch.
  */
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   if (typeof stored !== 'string') return false;
   const colonIndex = stored.indexOf(':');
   if (colonIndex < 0) return false;

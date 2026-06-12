@@ -20,6 +20,7 @@ import adminLogsRoutes from './routes/admin-logs';
 import leadsRoutes from './routes/leads';
 import demoPortalRoutes from './routes/demo-portal';
 import attendanceBridgeRoutes from './routes/attendance-bridge';
+import hrAdminRoutes from './routes/hr-admin';
 
 // Side-effect import: wires an in-memory ring buffer into Winston so
 // the /api/admin/logs/stream SSE route has something to replay + tail.
@@ -175,6 +176,10 @@ export function createApp() {
   // holding a tenant API key. Same public-bridge posture as
   // /api/demo-portal/* above; the phone hits api.zeroauth.dev directly.
   app.use('/api/attendance', attendanceBridgeRoutes);
+
+  // Standalone HR attendance admin portal API. Cookie-/JWT-authed with
+  // the zeroauth-hr-admin audience — never the console or /v1 surface.
+  app.use('/api/hr', hrAdminRoutes);
 
   // Host-aware gate. Anything on api.zeroauth.dev that didn't match an
   // API route stops here (JSON 404) instead of being served the

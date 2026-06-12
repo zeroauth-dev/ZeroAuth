@@ -263,6 +263,81 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_attendance_events_tenant ON attendance_events(tenant_id, environment, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_attendance_events_user ON attendance_events(tenant_id, environment, user_id, occurred_at DESC);
 
+  -- ─── Attendance companies (slice 2: per-tenant company + WiFi anchor) ───
+  -- HR-configurable office: name + location + the WiFi presence anchor
+  -- (bssids + min signal). Replaces the env-backed single company; the
+  -- env fallback in attendance-company.ts still serves the demo when no
+  -- row exists.
+  CREATE TABLE IF NOT EXISTS attendance_companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL DEFAULT 'live'
+      CHECK (environment IN ('live', 'test')),
+    name VARCHAR(255) NOT NULL,
+    location VARCHAR(255) NOT NULL DEFAULT '',
+    wifi JSONB NOT NULL DEFAULT '{}',
+    status VARCHAR(20) NOT NULL DEFAULT 'active'
+      CHECK (status IN ('active', 'inactive')),
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, environment, name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_attendance_companies_tenant ON attendance_companies(tenant_id, environment);
+
+  -- ─── Attendance memberships (provision-then-claim) ───
+  -- HR provisions an employee row (status='provisioned' + a single-use
+  -- invite code). The employee's phone claims it, binding the phone's
+  -- DID + commitment and creating/linking a tenant_user (status='claimed').
+  CREATE TABLE IF NOT EXISTS attendance_memberships (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES attendance_companies(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL DEFAULT 'live'
+      CHECK (environment IN ('live', 'test')),
+    user_id UUID REFERENCES tenant_users(id) ON DELETE SET NULL,
+    employee_id VARCHAR(100) NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    department VARCHAR(120),
+    email VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'provisioned'
+      CHECK (status IN ('provisioned', 'invited', 'claimed', 'revoked')),
+    invite_code_hash VARCHAR(64),
+    invite_code_expires_at TIMESTAMPTZ,
+    invited_at TIMESTAMPTZ,
+    claimed_at TIMESTAMPTZ,
+    did TEXT,
+    did_hash TEXT,
+    commitment TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (company_id, employee_id)
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_invite ON attendance_memberships(invite_code_hash) WHERE invite_code_hash IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_memberships_did ON attendance_memberships(company_id, did) WHERE did IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_memberships_company_status ON attendance_memberships(company_id, status);
+
+  -- ─── HR admins (standalone attendance admin portal auth) ───
+  -- Distinct from the tenants table (developer console). An HR admin
+  -- belongs to one tenant (= one customer company) and authenticates via
+  -- the zeroauth-hr-admin JWT — never accepted on /v1 or /api/console.
+  CREATE TABLE IF NOT EXISTS hr_admins (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255),
+    role VARCHAR(20) NOT NULL DEFAULT 'admin'
+      CHECK (role IN ('admin', 'editor', 'viewer')),
+    status VARCHAR(20) NOT NULL DEFAULT 'active'
+      CHECK (status IN ('active', 'inactive')),
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_hr_admins_tenant ON hr_admins(tenant_id);
+
   -- ─── Proof Pairing Sessions (W3, ADR-0009) ───────────────
   -- Desktop-issued, single-use, 5-min TTL. The session_bind cookie's
   -- sha256 is the second factor that prevents an attacker-issued QR
@@ -367,7 +442,7 @@ const SCHEMA = `
     environment VARCHAR(10)
       CHECK (environment IN ('live', 'test')),
     actor_type VARCHAR(20) NOT NULL
-      CHECK (actor_type IN ('api_key', 'console', 'device', 'system')),
+      CHECK (actor_type IN ('api_key', 'console', 'device', 'system', 'hr_admin')),
     actor_id VARCHAR(255),
     action VARCHAR(100) NOT NULL,
     entity_type VARCHAR(50) NOT NULL,
@@ -380,6 +455,15 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_audit_events_tenant ON audit_events(tenant_id, environment, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_audit_events_action ON audit_events(tenant_id, action, created_at DESC);
+
+  -- Widen actor_type for the HR admin portal (slice-2). The inline CHECK
+  -- above only applies on first CREATE; existing deployments need the
+  -- DROP/ADD to pick up 'hr_admin'. Keep this list in lockstep with the
+  -- AuditActorType union in src/types/index.ts — schema-purity.test.ts
+  -- asserts they never drift.
+  ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS audit_events_actor_type_check;
+  ALTER TABLE audit_events ADD CONSTRAINT audit_events_actor_type_check
+    CHECK (actor_type IN ('api_key', 'console', 'device', 'system', 'hr_admin'));
 
   -- ─── ADR 0013 hash chain columns ─────────────────────────
   -- previous_hash and event_hash are computed at INSERT time by

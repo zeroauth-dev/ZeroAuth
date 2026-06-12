@@ -130,6 +130,31 @@ describe('schema-purity (tenant-scoped tables)', () => {
     expect(unexpected).toEqual([]);
   });
 
+  it('audit_events actor_type CHECK matches the AuditActorType union (no drift)', () => {
+    // The DB CHECK and the TS union MUST list the same actor types. If they
+    // drift, an actor that TypeScript accepts (e.g. 'hr_admin') is silently
+    // rejected by Postgres at INSERT and the audit row is dropped — security
+    // review Finding 1, which was invisible because the suite mocks the DB.
+    const typesSrc = fs.readFileSync(
+      path.resolve(__dirname, '../src/types/index.ts'), 'utf8',
+    );
+    const unionMatch = typesSrc.match(/AuditActorType\s*=\s*([^;]+);/);
+    expect(unionMatch).not.toBeNull();
+    const unionValues = [
+      ...(unionMatch as RegExpMatchArray)[1].matchAll(/'([a-z_]+)'/g),
+    ].map(m => m[1]).sort();
+
+    const checkMatch = dbSrc.match(
+      /audit_events_actor_type_check\s+CHECK\s*\(actor_type IN \(([^)]+)\)\)/i,
+    );
+    expect(checkMatch).not.toBeNull();
+    const checkValues = [
+      ...(checkMatch as RegExpMatchArray)[1].matchAll(/'([a-z_]+)'/g),
+    ].map(m => m[1]).sort();
+
+    expect(checkValues).toEqual(unionValues);
+  });
+
   // ─── audit_anchors (ADR 0014) ─────────────────────────────────────
 
   it('audit_anchors has only the ADR 0014 allowed columns', () => {
@@ -176,6 +201,12 @@ describe('schema-purity (tenant-scoped tables)', () => {
     'api_keys',
     'usage_logs',
     'usage_monthly',
+    // Slice-2 attendance: per-company config + provision-then-claim
+    // memberships. Tenant + environment scoped; org PII only (name/email/
+    // employee_id), never biometric-derived. (hr_admins is KNOWN-only —
+    // it has no `environment` column, like user_sessions/tenant_webhooks.)
+    'attendance_companies',
+    'attendance_memberships',
   ];
 
   for (const table of TENANT_SCOPED_TABLES) {
@@ -273,6 +304,14 @@ describe('schema-purity (tenant-scoped tables)', () => {
       // not load-bearing here. The biometric-name guard would pass
       // trivially.
       'tenant_webhooks',
+      // Slice-2 attendance. attendance_companies + attendance_memberships
+      // are tenant+environment scoped (in TENANT_SCOPED_TABLES above, so
+      // the biometric-name guard runs on them). hr_admins holds the
+      // standalone HR portal login (tenant-scoped but no `environment`
+      // column) — KNOWN-only, like user_sessions. All store org PII only.
+      'attendance_companies',
+      'attendance_memberships',
+      'hr_admins',
     ]);
     const createTableRe = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)/gi;
     const tables = new Set<string>();

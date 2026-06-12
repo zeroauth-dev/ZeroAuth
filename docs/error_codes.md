@@ -98,7 +98,15 @@ Some responses carry extra fields (`docs`, `retryAfterSeconds`, `currentScopes`,
 | `attendance_session_expired` | `/api/attendance/record` — the attendance session was already used (single-use) or expired. Start again from `/api/attendance/init`. |
 | `attendance_not_provisioned` | `/api/attendance/*` — the attendance company tenant is not seeded on this deployment. |
 | `attendance_init_failed`, `attendance_record_failed` | Attendance bridge route exceptions. |
-| `too_many_requests` | `/api/attendance/*` — per-IP rate limit (60/min) exceeded on the public attendance bridge. |
+| `too_many_requests` | `/api/attendance/*` + `/api/hr/*` — rate limit exceeded. |
+| `not_a_member` | `/api/attendance/record` — the verified DID is not a claimed member of the given company. |
+| `invite_not_found_or_expired` | `/api/attendance/claim` — the invite code is unknown, already used, or expired (single-use). |
+| `commitment_mismatch` | `/api/attendance/claim` — `publicSignals[0]` does not equal the submitted commitment. |
+| `proof_verification_failed` | `/api/attendance/claim` — the Groth16 face proof failed. |
+| `attendance_claim_failed`, `company_not_found` | Claim/company route exceptions. |
+| `email_taken` | `/api/hr/signup` — an HR admin already exists for that email. |
+| `invalid_credentials` | `/api/hr/login` — wrong email or password. |
+| `weak_password`, `invalid_email`, `employee_exists`, `no_company`, `invalid_status` | `/api/hr/*` validation / provisioning errors. |
 | `audit_list_failed` | Audit route exceptions. |
 
 ## Proof pairing (`/v1/proof-pairing/*` — W3)
