@@ -146,6 +146,15 @@ object ApiFactory {
     fun createDemoPortalApi(baseUrl: String = DEFAULT_BASE_URL): DemoPortalApi =
         retrofit(baseUrl).create(DemoPortalApi::class.java)
 
+    /**
+     * Face-first office attendance — the public `/api/attendance`
+     * bridge the check-in/out ceremony hits. Same OkHttp + Retrofit stack
+     * as [create]; the phone holds no tenant key, so the bridge attaches
+     * the company tenant server-side (mirrors [createDemoPortalApi]).
+     */
+    fun createAttendanceApi(baseUrl: String = DEFAULT_BASE_URL): AttendanceApi =
+        retrofit(baseUrl).create(AttendanceApi::class.java)
+
     private fun retrofit(baseUrl: String): Retrofit {
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) {

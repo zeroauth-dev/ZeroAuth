@@ -2,6 +2,8 @@ package dev.zeroauth.android.nav
 
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -10,6 +12,9 @@ import androidx.navigation.navArgument
 import dev.zeroauth.android.ui.DoneScreen
 import dev.zeroauth.android.ui.EnrollScreen
 import dev.zeroauth.android.ui.SplashScreen
+import dev.zeroauth.android.ui.hasRegisteredIdentity
+import dev.zeroauth.android.ui.attendance.AttendanceScreen
+import dev.zeroauth.android.ui.home.HomeScreen
 import dev.zeroauth.android.ui.identity.IdentityDetailsScreen
 import dev.zeroauth.android.ui.reg.RegistrationScreen
 import dev.zeroauth.android.ui.scan.ScanScreen
@@ -33,6 +38,15 @@ sealed class Screen(val route: String) {
     /** ADR 0023 three-QR end-user signup ceremony. */
     data object Registration : Screen("registration")
 
+    /** UPI-style hub — the returning user's landing surface. */
+    data object Home : Screen("home")
+
+    /** Attendance check-in / check-out ceremony. Carries the punch type. */
+    data object Attendance : Screen("attendance/{type}") {
+        const val ARG_TYPE = "type"
+        fun build(type: String): String = "attendance/$type"
+    }
+
     /**
      * Read-only identity diagnostic surface. Reachable from the splash
      * "View my identity" affordance once a registration has run on
@@ -53,10 +67,16 @@ sealed class Screen(val route: String) {
 @Composable
 fun ZeroAuthNavHost() {
     val navController = rememberNavController()
+    val context = LocalContext.current
+    // First launch (no on-device identity) → Splash → create identity. A
+    // returning user with an identity lands straight on the Home hub.
+    val startDestination = remember {
+        if (hasRegisteredIdentity(context)) Screen.Home.route else Screen.Splash.route
+    }
 
     NavHost(
         navController    = navController,
-        startDestination = Screen.Splash.route,
+        startDestination = startDestination,
     ) {
         composable(Screen.Splash.route) {
             SplashScreen(
@@ -90,7 +110,9 @@ fun ZeroAuthNavHost() {
         composable(Screen.Registration.route) {
             RegistrationScreen(
                 onDone = {
-                    navController.navigate(Screen.Splash.route) {
+                    // Identity now exists on-device → land on the hub, and
+                    // clear the back-stack so system-back exits the app.
+                    navController.navigate(Screen.Home.route) {
                         popUpTo(0) { inclusive = true }
                     }
                 },
@@ -139,6 +161,37 @@ fun ZeroAuthNavHost() {
                 onQrDecoded = { payload ->
                     navController.navigate(Screen.Done.build(payload))
                 },
+            )
+        }
+
+        composable(Screen.Home.route) {
+            HomeScreen(
+                onCheckInOut = { type ->
+                    navController.navigate(Screen.Attendance.build(type))
+                },
+                onScan = {
+                    navController.navigate(Screen.Scan.route)
+                },
+                onViewIdentity = {
+                    navController.navigate(Screen.Identity.route)
+                },
+            )
+        }
+
+        composable(
+            route     = Screen.Attendance.route,
+            arguments = listOf(
+                navArgument(Screen.Attendance.ARG_TYPE) {
+                    type = NavType.StringType
+                }
+            ),
+        ) { backStackEntry ->
+            val punchType = backStackEntry.arguments
+                ?.getString(Screen.Attendance.ARG_TYPE) ?: "check_in"
+            AttendanceScreen(
+                type = punchType,
+                onDone = { navController.popBackStack() },
+                onCancel = { navController.popBackStack() },
             )
         }
 

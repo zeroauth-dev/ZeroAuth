@@ -45,6 +45,18 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!--
+      Attendance presence gate (slice 1): read the connected WiFi BSSID +
+      signal to confirm the employee is on the office network. ACCESS_WIFI_STATE
+      + ACCESS_NETWORK_STATE read the connection; ACCESS_FINE_LOCATION is
+      required by Android 9+ to expose the BSSID/SSID. No GPS fix is taken and
+      no location ever leaves the device — only a yes/no "on the office router"
+      boolean is attached to the attendance proof.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
     <uses-feature
         android:name="android.hardware.camera"
         android:required="true" />

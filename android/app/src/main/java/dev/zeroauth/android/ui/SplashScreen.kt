@@ -242,7 +242,7 @@ fun SplashScreen(
  * so a partially-completed registration doesn't unlock the diagnostic
  * surface.
  */
-private fun hasRegisteredIdentity(context: Context): Boolean {
+internal fun hasRegisteredIdentity(context: Context): Boolean {
     // Authoritative: the multi-step face ceremony persists the
     // {secret, template} enrollment into the Keystore-backed
     // FaceTemplateStore. If that exists, the user has a usable on-device
