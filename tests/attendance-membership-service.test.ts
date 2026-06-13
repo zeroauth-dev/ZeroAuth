@@ -14,6 +14,7 @@ import { poseidon1 } from 'poseidon-lite';
 let lastInsertParams: unknown[] | null = null;
 let lastMembershipUpdateParams: unknown[] | null = null;
 let inviteFound = true;
+let insertThrows = false;
 
 function makeClient() {
   return {
@@ -27,7 +28,11 @@ function makeClient() {
           : { rows: [] };
       }
       if (/SELECT id FROM tenant_users/i.test(sql)) return { rows: [] };
-      if (/INSERT INTO tenant_users/i.test(sql)) { lastInsertParams = params ?? null; return { rows: [{ id: 'u-1' }] }; }
+      if (/INSERT INTO tenant_users/i.test(sql)) {
+        if (insertThrows) throw new Error('duplicate user_id');
+        lastInsertParams = params ?? null;
+        return { rows: [{ id: 'u-1' }] };
+      }
       if (/UPDATE attendance_memberships/i.test(sql)) { lastMembershipUpdateParams = params ?? null; return { rows: [{ id: 'm-1', status: 'claimed' }] }; }
       return { rows: [] };
     }),
@@ -50,6 +55,7 @@ beforeEach(() => {
   lastInsertParams = null;
   lastMembershipUpdateParams = null;
   inviteFound = true;
+  insertThrows = false;
 });
 
 describe('claimMembership (real Poseidon derivation)', () => {
@@ -62,9 +68,12 @@ describe('claimMembership (real Poseidon derivation)', () => {
       verify,
     );
 
-    // The nonce-bound verify is invoked with the parsed commitment bigint.
+    // The nonce-bound verify is invoked with the parsed commitment bigint
+    // AND this transaction's client (so the session consume rolls back with
+    // the claim — review finding: session-consume must ride the claim tx).
     expect(verify).toHaveBeenCalledTimes(1);
     expect(verify.mock.calls[0][0]).toBe(BigInt(commitment));
+    expect(verify.mock.calls[0][1]).toBe(mockClient);
 
     const expectedDidHash = poseidon1([BigInt(commitment)]).toString(10);
     const insertedMeta = JSON.parse(String((lastInsertParams as unknown[])[8]));
@@ -102,6 +111,23 @@ describe('claimMembership (real Poseidon derivation)', () => {
     )).rejects.toThrow('pairing_nonce_mismatch');
     expect(lastInsertParams).toBeNull();
     expect(lastMembershipUpdateParams).toBeNull();
+    const sqls = (mockClient.query as jest.Mock).mock.calls.map((c) => String(c[0]));
+    expect(sqls.some((s) => /ROLLBACK/i.test(s))).toBe(true);
+  });
+
+  it('rolls back when a post-verify step fails — session consume rides the tx', async () => {
+    // verify SUCCEEDS (and, in production, consumes the pairing session on
+    // this same client). A later failure (duplicate user) must ROLL BACK the
+    // whole tx, so the session is un-consumed and a fresh /init + retry works.
+    insertThrows = true;
+    const verify = jest.fn().mockResolvedValue(undefined);
+    await expect(claimMembership(
+      { companyId: 'co-1', inviteCode: 'ZA-AB23-CD45', did: DID, commitment: '111', publicSignals: ['111', '2', '3'] },
+      verify,
+    )).rejects.toThrow('duplicate user_id');
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(verify.mock.calls[0][1]).toBe(mockClient); // got the tx client
+    expect(lastMembershipUpdateParams).toBeNull();     // never bound
     const sqls = (mockClient.query as jest.Mock).mock.calls.map((c) => String(c[0]));
     expect(sqls.some((s) => /ROLLBACK/i.test(s))).toBe(true);
   });

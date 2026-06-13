@@ -22,6 +22,7 @@
  */
 
 import crypto from 'crypto';
+import type { PoolClient } from 'pg';
 import { poseidon1 } from 'poseidon-lite';
 import { getPool } from './db';
 import { recordAuditEvent } from './platform';
@@ -343,13 +344,15 @@ export async function findClaimedMembership(
  * code is consumed, and a `tenant_users` row is created/linked so the DID
  * verifies on later check-ins.
  *
- * `verifyProof(commitment)` is injected — the route wires the nonce-bound
+ * `verifyProof(commitment, tx)` is injected — the route wires the nonce-bound
  * `verifyAndConsumeForClaim` (proof-pairing), which enforces
  * `publicSignals[1] = Poseidon(Poseidon(commitment), nonce)` against a fresh
- * `/init` session and consumes it single-use. It throws `Pairing*` errors on
- * failure, which the route maps to HTTP — so a captured proof tuple cannot be
- * replayed into an open invite (cryptographer review Finding 1). Tests inject
- * a stub so they don't need the circuit on disk.
+ * `/init` session and consumes it single-use. We hand it THIS transaction's
+ * client so the session consume rolls back with the claim — a post-verify
+ * failure (e.g. the user INSERT) must not burn the session while leaving the
+ * claim unpersisted. It throws `Pairing*` errors on failure, which the route
+ * maps to HTTP — so a captured proof tuple cannot be replayed into an open
+ * invite (cryptographer review Finding 1). Tests inject a stub.
  */
 export async function claimMembership(
   input: {
@@ -359,7 +362,7 @@ export async function claimMembership(
     commitment: string;
     publicSignals: unknown;
   },
-  verifyProof: (commitment: bigint) => Promise<void>,
+  verifyProof: (commitment: bigint, tx: PoolClient) => Promise<void>,
 ): Promise<{ membership: AttendanceMembershipRow; userId: string }> {
   if (!input.inviteCode) throw new AttendanceMembershipError('invite_not_found_or_expired', 'Invite code required.');
   if (!Array.isArray(input.publicSignals) || input.publicSignals.length < 1) {
@@ -397,9 +400,11 @@ export async function claimMembership(
     }
 
     // Nonce-bound proof verification (A-11) — consumes the single-use
-    // pairing session. Throws Pairing* on failure; the invite stays
-    // unconsumed (ROLLBACK below) so a fresh /init + retry is possible.
-    await verifyProof(commitmentBigInt);
+    // pairing session ON THIS TX (via `client`). Throws Pairing* on failure;
+    // and because the consume rides this transaction, a later failure (or a
+    // bad invite) ROLLs BACK both the invite and the session, so a fresh
+    // /init + retry is always possible.
+    await verifyProof(commitmentBigInt, client);
 
     const commitmentDec = commitmentBigInt.toString(10);
     const didHashDec = poseidon1([commitmentBigInt]).toString(10);

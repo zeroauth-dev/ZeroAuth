@@ -579,7 +579,7 @@ router.post('/claim', async (req: Request, res: Response) => {
 
     const result = await claimMembership(
       { companyId, inviteCode, did, commitment, publicSignals },
-      (commitmentBigInt) => verifyAndConsumeForClaim(
+      (commitmentBigInt, tx) => verifyAndConsumeForClaim(
         sessionId,
         company.tenant_id,
         company.environment,
@@ -587,6 +587,7 @@ router.post('/claim', async (req: Request, res: Response) => {
         proof as never,
         publicSignals as string[],
         bindToken,
+        tx,
       ),
     );
     res.status(200).json({

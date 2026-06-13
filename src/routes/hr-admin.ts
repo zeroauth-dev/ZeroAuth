@@ -37,6 +37,7 @@ import {
   AttendanceMembershipError,
 } from '../services/attendance-membership';
 import { createTenant } from '../services/tenants';
+import { recordAuditEvent } from '../services/platform';
 import crypto from 'crypto';
 
 const router = Router();
@@ -117,7 +118,7 @@ router.post('/signup', authLimiter, async (req: Request, res: Response) => {
     // company-create failure, and an audit-write failure on either.
     if (createdTenantId) {
       await getPool().query('DELETE FROM tenants WHERE id = $1', [createdTenantId])
-        .catch((e) => logger.warn('hr signup: orphan tenant cleanup failed', {
+        .catch((e) => logger.error('hr signup: orphan tenant cleanup FAILED — manual cleanup may be needed', {
           tenantId: createdTenantId, error: (e as Error).message,
         }));
     }
@@ -182,9 +183,17 @@ router.post('/company', requireHrAdminAuth, writeLimiter, async (req: Request, r
       minSignalPercent: typeof minSignalPercent === 'number' ? minSignalPercent : company.wifi.minSignalPercent,
     };
     const updated = await updateCompanyWifi(company.id, hr.tenantId, wifi, { type: 'hr_admin', id: hr.hrAdminId, email: hr.email });
-    if (location !== undefined && typeof location === 'string') {
+    if (updated && location !== undefined && typeof location === 'string' && location !== updated.location) {
       await getPool().query(`UPDATE attendance_companies SET location = $2, updated_at = NOW() WHERE id = $1 AND tenant_id = $3`,
         [company.id, location, hr.tenantId]);
+      updated.location = location;
+      // A-21: the location change is its own admin action — audit it (the
+      // updateCompanyWifi audit above only covers the WiFi anchor).
+      await recordAuditEvent(hr.tenantId, {
+        environment: ENV, actorType: 'hr_admin', actorId: hr.hrAdminId,
+        action: 'attendance.company_location_updated', entityType: 'attendance_company',
+        entityId: company.id, status: 'success', summary: `Office location updated to "${location}"`,
+      });
     }
     res.status(200).json({ company: updated ? publicCompany(updated) : null });
   } catch (err) {

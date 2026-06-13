@@ -28,6 +28,7 @@ import crypto from 'crypto';
 import { URL } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import { poseidon1, poseidon2 } from 'poseidon-lite';
+import type { PoolClient } from 'pg';
 import { getPool } from './db';
 import { logger } from './logger';
 import { recordAuditEvent } from './platform';
@@ -511,12 +512,24 @@ export async function verifyAndConsumeForClaim(
   proof: Groth16Proof,
   publicSignals: string[],
   presentedSessionBindToken: string | undefined,
+  tx?: PoolClient,
 ): Promise<void> {
   const start = Date.now();
   const correlationId = uuidv4();
+  // When the caller runs inside a transaction (the membership claim), do the
+  // session load + the single-use consume on THAT connection, so a rollback
+  // of the claim also un-consumes the session. Otherwise a post-verify
+  // failure (e.g. the tenant_user INSERT) would burn the session on a
+  // separate connection while the claim never persists (review finding).
+  const exec = tx ?? getPool();
   try {
     // ── Session state machine (mirrors submitProof checks 2 + expiry) ──
-    const row = await loadSessionRow(sessionId, tenantId, environment);
+    const sessionRes = await exec.query<ProofPairingSession>(
+      `SELECT * FROM proof_pairing_sessions
+         WHERE id = $1 AND tenant_id = $2 AND environment = $3`,
+      [sessionId, tenantId, environment],
+    );
+    const row = sessionRes.rows[0] ?? null;
     if (!row) throw new PairingSessionNotFound();
     if (row.state === 'consumed') throw new PairingSessionAlreadyBound();
     if (row.state === 'failed' || row.failure_count >= MAX_FAILURES_BEFORE_LOCK) {
@@ -567,10 +580,10 @@ export async function verifyAndConsumeForClaim(
     const verified = await verifierVerify(proof, publicSignals, tenantId, environment, correlationId);
     if (!verified) throw new PairingProofInvalid();
 
-    // ── Atomic single-use consume (A-14). No user yet → consumed_user_id
-    // stays null (the column is nullable); the caller creates the user. ──
-    const pool = getPool();
-    const claimed = await pool.query(
+    // ── Atomic single-use consume (A-14), on the caller's tx when given so
+    // it rolls back with the claim. No user yet → consumed_user_id stays
+    // null (the column is nullable); the caller creates the user. ──
+    const claimed = await exec.query(
       `UPDATE proof_pairing_sessions
          SET state = 'consumed', consumed_at = NOW()
        WHERE id = $1 AND state = 'issued'
