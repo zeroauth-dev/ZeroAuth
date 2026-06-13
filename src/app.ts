@@ -208,6 +208,15 @@ export function createApp() {
     res.redirect(301, `/bank-demo${suffix}`);
   });
 
+  // Serve the standalone HR attendance admin portal at /admin (mirrors the
+  // /dashboard + /bank-demo mounts). The SPA's Vite `base` and react-router
+  // `basename` are both pinned to `/admin/`. Its API is the same-origin
+  // /api/hr/* surface mounted above.
+  app.use('/admin', express.static(path.join(__dirname, '../admin-portal/dist'), { fallthrough: true }));
+  app.get('/admin/*', (_req, res) => {
+    res.sendFile(path.join(__dirname, '../admin-portal/dist/index.html'));
+  });
+
   // Serve Docusaurus documentation
   const docsPath = path.join(__dirname, '..', 'website', 'build');
   app.use('/docs', express.static(docsPath));

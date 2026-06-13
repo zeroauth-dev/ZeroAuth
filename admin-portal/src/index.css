@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/*
+ * ZeroAuth — Attendance Admin surface.
+ *
+ * Visual language: premium, dark by default. Near-black surfaces, one
+ * indigo accent, generous breathing room. Display headings in Fraunces,
+ * UI in Inter Tight, code/MACs/invite-codes in JetBrains Mono.
+ *
+ * Tokens are exposed as CSS variables so component code reads them with
+ * `text-[var(--color-text)]` etc. — same pattern as the dashboard and
+ * demo-portal. Tailwind v4's @theme is build-time; there is no runtime
+ * theme swap here (the admin portal is dark-only).
+ */
+@theme {
+  /* Surfaces — near-black, layered. */
+  --color-bg: #0a0a0a;
+  --color-bg-raised: #121212;
+  --color-bg-surface: #1a1a1a;
+  --color-border: #262626;
+  --color-border-subtle: #1f1f1f;
+
+  /* Ink. */
+  --color-text: #fafafa;
+  --color-text-secondary: #a3a3a3;
+  --color-text-dim: #737373;
+
+  /* Indigo accent. */
+  --color-accent: #6366f1;
+  --color-accent-dark: #4f46e5;
+  --color-accent-light: #a5b4fc;
+
+  /* Status. */
+  --color-success: #10b981;
+  --color-warn: #f59e0b;
+  --color-danger: #ef4444;
+
+  /* Type families. */
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-sans: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+html,
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* A soft indigo glow used behind hero/auth panels. */
+.accent-glow {
+  background-image: radial-gradient(
+    60% 60% at 50% 0%,
+    color-mix(in oklab, var(--color-accent) 18%, transparent),
+    transparent 70%
+  );
+}
+
+/* Thin, dark scrollbars so long tables don't paint a bright gutter. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-border);
+  border-radius: 9999px;
+}
