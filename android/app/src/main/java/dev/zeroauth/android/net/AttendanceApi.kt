@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Query
 
 /**
  * Retrofit binding for the face-first office-attendance bridge
@@ -24,9 +25,13 @@ import retrofit2.http.POST
  */
 interface AttendanceApi {
 
-    /** WiFi-anchor config so the phone can auto-detect the company + gate. */
+    /**
+     * WiFi-anchor config so the phone can auto-detect the company + gate.
+     * An optional `companyId` scopes to a real HR-provisioned company; with
+     * none, the seeded demo company is served (slice-1 back-compat).
+     */
     @GET("api/attendance/company")
-    suspend fun company(): CompanyResponse
+    suspend fun company(@Query("companyId") companyId: String? = null): CompanyResponse
 
     /** Open a pairing session; returns the nonce the prover binds to. */
     @POST("api/attendance/init")
@@ -35,6 +40,15 @@ interface AttendanceApi {
     /** Verify the proof + WiFi gate and record the attendance event. */
     @POST("api/attendance/record")
     suspend fun record(@Body body: RecordRequest): RecordResponse
+
+    /**
+     * Bind an HR-provisioned membership to this device's identity. The phone
+     * proves FRESH control of its (did, commitment) against the `/init`
+     * nonce, then presents the single-use invite code. Identity-only — no
+     * WiFi/presence (that's enforced at check-in, not at join).
+     */
+    @POST("api/attendance/claim")
+    suspend fun claim(@Body body: ClaimRequest): ClaimResponse
 }
 
 // ─── Request / response DTOs ───────────────────────────────────────────
@@ -43,6 +57,8 @@ interface AttendanceApi {
 data class InitRequest(
     /** Optional; the server does not require it to open a session. */
     val did: String? = null,
+    /** Scopes the session to a real company; null = the demo company. */
+    val companyId: String? = null,
 )
 
 @Serializable
@@ -68,9 +84,16 @@ data class CompanyDto(
 
 @Serializable
 data class CompanyWifiDto(
-    /** Human-readable label only — never the security anchor. */
+    /**
+     * Human-readable SSID label — the local presence hint matches on this
+     * (the BSSID is no longer sent on the public surface; security A-42).
+     */
     val ssidLabel: String = "",
-    /** Allowed router MACs (lower-cased). Empty = not configured. */
+    /**
+     * Anchor router MACs. The public surface no longer ships these (the
+     * server keeps the MAC private and verdicts the phone-reported BSSID),
+     * so this is always empty from `/company` now — kept for back-compat.
+     */
     val bssids: List<String> = emptyList(),
     /** Minimum signal strength percent 0..100 (the office "85%"). */
     val minSignalPercent: Int = 85,
@@ -85,6 +108,8 @@ data class RecordRequest(
     val proof: ProofDto,
     val publicSignals: List<String>,
     val wifi: WifiDto,
+    /** Scopes the check-in to a real company; null = the demo company. */
+    val companyId: String? = null,
     val clientMeta: ClientMetaDto? = null,
 )
 
@@ -126,4 +151,36 @@ data class RecordResponse(
     val type: String? = null,
     val result: String? = null,
     val occurredAt: String? = null,
+)
+
+/**
+ * Body for `POST /api/attendance/claim`. Field order matches the backend's
+ * validation. `commitment` must equal `publicSignals[0]`; `publicSignals`
+ * has exactly 3 elements with `[1] = Poseidon(Poseidon(commitment), nonce)`
+ * bound to the `/init` session. No wifi/clientMeta — claim is identity-only.
+ */
+@Serializable
+data class ClaimRequest(
+    val companyId: String,
+    val inviteCode: String,
+    val sessionId: String,
+    val did: String,
+    val commitment: String,
+    val proof: ProofDto,
+    val publicSignals: List<String>,
+)
+
+@Serializable
+data class ClaimResponse(
+    val ok: Boolean = false,
+    val companyId: String? = null,
+    val employee: ClaimEmployeeDto? = null,
+)
+
+@Serializable
+data class ClaimEmployeeDto(
+    /** The membership row id (NOT the tenant_user id). */
+    val id: String,
+    val employeeId: String,
+    val fullName: String,
 )

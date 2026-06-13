@@ -16,8 +16,13 @@ import timber.log.Timber
  * re-validates the attested BSSID + signal against the configured anchor.
  *
  * No GPS, no continuous location — a single yes/no read of "am I on the
- * office router, strongly enough". The BSSID (router MAC) is the anchor;
- * the SSID label is informational only.
+ * office router, strongly enough". The local hint matches on the **SSID
+ * label** because the public `/company` surface no longer returns the
+ * anchor BSSIDs — a router MAC is a location identifier (security A-42), so
+ * the server keeps the BSSID anchor private and only verdicts the
+ * phone-reported BSSID itself. The phone still reads + reports its connected
+ * BSSID for that server-side gate; the SSID is the broadcast, non-secret
+ * label we compare locally for the UX hint.
  */
 open class WifiAnchorChecker(appContext: Context) {
 
@@ -59,15 +64,19 @@ open class WifiAnchorChecker(appContext: Context) {
     }
 
     /**
-     * Local presence gate mirroring the server's verifyWifiAgainstAnchor:
-     * the reading's BSSID must be one of the anchor BSSIDs AND the signal
-     * must meet the minimum. Fails closed on a null reading or an
-     * unconfigured anchor.
+     * Local presence hint: the reading's SSID must equal the anchor's
+     * ssidLabel AND the signal must meet the minimum. SSID-based (not
+     * BSSID) because the public `/company` surface no longer ships the
+     * anchor BSSIDs — the server keeps the MAC private and re-checks the
+     * phone-reported BSSID itself. Fails closed on a null reading, a blank
+     * anchor label, or an unknown SSID. This is a UX hint only; the
+     * authoritative gate is server-side in `/api/attendance/record`.
      */
     fun matches(reading: WifiReading?, anchor: CompanyWifiDto): Boolean {
-        val bssid = reading?.bssid ?: return false
-        if (anchor.bssids.isEmpty()) return false
-        return anchor.bssids.any { it.equals(bssid, ignoreCase = true) } &&
+        if (reading == null) return false
+        val anchorSsid = anchor.ssidLabel.takeIf { it.isNotBlank() } ?: return false
+        val ssid = reading.ssid ?: return false
+        return ssid.equals(anchorSsid, ignoreCase = true) &&
             reading.signalPercent >= anchor.minSignalPercent
     }
 

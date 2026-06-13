@@ -16,8 +16,10 @@ import dev.zeroauth.android.ui.hasRegisteredIdentity
 import dev.zeroauth.android.ui.attendance.AttendanceScreen
 import dev.zeroauth.android.ui.home.HomeScreen
 import dev.zeroauth.android.ui.identity.IdentityDetailsScreen
+import dev.zeroauth.android.ui.join.JoinScreen
 import dev.zeroauth.android.ui.reg.RegistrationScreen
 import dev.zeroauth.android.ui.scan.ScanScreen
+import dev.zeroauth.android.ui.settings.SettingsScreen
 
 /**
  * Navigation graph. Sealed class describes the destinations, with the
@@ -41,11 +43,22 @@ sealed class Screen(val route: String) {
     /** UPI-style hub — the returning user's landing surface. */
     data object Home : Screen("home")
 
-    /** Attendance check-in / check-out ceremony. Carries the punch type. */
-    data object Attendance : Screen("attendance/{type}") {
+    /**
+     * Attendance check-in / check-out ceremony. Carries the punch type and
+     * an optional companyId (a claimed pass); no companyId = the demo company.
+     */
+    data object Attendance : Screen("attendance/{type}?companyId={companyId}") {
         const val ARG_TYPE = "type"
-        fun build(type: String): String = "attendance/$type"
+        const val ARG_COMPANY = "companyId"
+        fun build(type: String, companyId: String? = null): String =
+            if (companyId != null) "attendance/$type?companyId=${Uri.encode(companyId)}" else "attendance/$type"
     }
+
+    /** Join a company by scanning an HR invite QR (the Home Scan FAB). */
+    data object Join : Screen("join")
+
+    /** "Me" surface — passes, identity, web sign-in, app info. */
+    data object Settings : Screen("settings")
 
     /**
      * Read-only identity diagnostic surface. Reachable from the splash
@@ -166,14 +179,17 @@ fun ZeroAuthNavHost() {
 
         composable(Screen.Home.route) {
             HomeScreen(
-                onCheckInOut = { type ->
-                    navController.navigate(Screen.Attendance.build(type))
+                onCheckInOut = { type, companyId ->
+                    navController.navigate(Screen.Attendance.build(type, companyId))
                 },
-                onScan = {
-                    navController.navigate(Screen.Scan.route)
+                onJoin = {
+                    navController.navigate(Screen.Join.route)
                 },
                 onViewIdentity = {
                     navController.navigate(Screen.Identity.route)
+                },
+                onOpenSettings = {
+                    navController.navigate(Screen.Settings.route)
                 },
             )
         }
@@ -183,15 +199,43 @@ fun ZeroAuthNavHost() {
             arguments = listOf(
                 navArgument(Screen.Attendance.ARG_TYPE) {
                     type = NavType.StringType
-                }
+                },
+                navArgument(Screen.Attendance.ARG_COMPANY) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
             ),
         ) { backStackEntry ->
             val punchType = backStackEntry.arguments
                 ?.getString(Screen.Attendance.ARG_TYPE) ?: "check_in"
+            val companyId = backStackEntry.arguments?.getString(Screen.Attendance.ARG_COMPANY)
             AttendanceScreen(
                 type = punchType,
+                companyId = companyId,
                 onDone = { navController.popBackStack() },
                 onCancel = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.Join.route) {
+            JoinScreen(
+                // Back to Home, which refreshes on resume and shows the new
+                // pass. Fall back to an explicit nav if the back-stack is empty.
+                onJoined = {
+                    if (!navController.popBackStack(Screen.Home.route, inclusive = false)) {
+                        navController.navigate(Screen.Home.route) { popUpTo(0) { inclusive = true } }
+                    }
+                },
+                onCancel = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.Settings.route) {
+            SettingsScreen(
+                onViewIdentity = { navController.navigate(Screen.Identity.route) },
+                onScanSignIn = { navController.navigate(Screen.Scan.route) },
+                onBack = { navController.popBackStack() },
             )
         }
 

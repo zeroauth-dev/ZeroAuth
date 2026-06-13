@@ -19,20 +19,22 @@ import androidx.core.view.WindowCompat
  * palette and a Material You teal tint on a Pixel would dilute it.
  */
 private val ZeroAuthColorScheme = darkColorScheme(
-    primary           = InkPrimary,
-    onPrimary         = InkOnPrimary,
-    secondary         = InkSecondary,
-    onSecondary       = InkOnPrimary,
-    background        = InkBackground,
-    onBackground      = InkOnSurface,
-    surface           = InkSurface,
-    onSurface         = InkOnSurface,
-    surfaceVariant    = InkSurfaceVariant,
-    onSurfaceVariant  = InkOnSurfaceVariant,
-    outline           = InkOutline,
-    outlineVariant    = InkOutline,
-    error             = InkError,
-    onError           = InkOnError,
+    primary             = InkPrimary,
+    onPrimary           = InkOnPrimary,
+    primaryContainer    = InkPrimaryContainer,
+    onPrimaryContainer  = InkOnPrimaryContainer,
+    secondary           = InkSecondary,
+    onSecondary         = InkOnSecondary,
+    background          = InkBackground,
+    onBackground        = InkOnSurface,
+    surface             = InkSurface,
+    onSurface           = InkOnSurface,
+    surfaceVariant      = InkSurfaceVariant,
+    onSurfaceVariant    = InkOnSurfaceVariant,
+    outline             = InkOutline,
+    outlineVariant      = InkOutline,
+    error               = InkError,
+    onError             = InkOnError,
 )
 
 @Composable

@@ -10,10 +10,11 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * Unit tests for [WifiAnchorChecker.matches] — the on-device presence
- * gate that mirrors the server's `verifyWifiAgainstAnchor`. Robolectric
- * supplies the Context the constructor needs; `matches` itself reads no
- * WiFi state, so the assertions are deterministic.
+ * Unit tests for [WifiAnchorChecker.matches] — the on-device presence hint.
+ * It now matches on the SSID **label** (the public `/company` surface no
+ * longer ships the anchor BSSIDs; security A-42), AND the signal floor. The
+ * authoritative gate stays server-side. Robolectric supplies the Context the
+ * constructor needs; `matches` reads no live WiFi, so this is deterministic.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
@@ -21,33 +22,34 @@ class WifiAnchorCheckerTest {
 
     private val checker = WifiAnchorChecker(RuntimeEnvironment.getApplication())
 
+    // The public surface sends ssidLabel + minSignalPercent only (bssids empty).
     private val anchor = CompanyWifiDto(
         ssidLabel = "AnchorCorp-Office",
-        bssids = listOf("aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66"),
+        bssids = emptyList(),
         minSignalPercent = 85,
     )
 
-    private fun reading(bssid: String?, signal: Int) =
-        WifiAnchorChecker.WifiReading(ssid = "Office", bssid = bssid, signalPercent = signal)
+    private fun reading(ssid: String?, signal: Int) =
+        WifiAnchorChecker.WifiReading(ssid = ssid, bssid = "aa:bb:cc:dd:ee:ff", signalPercent = signal)
 
     @Test
-    fun `matches when bssid is an anchor and signal meets the floor`() {
-        assertTrue(checker.matches(reading("aa:bb:cc:dd:ee:ff", 90), anchor))
+    fun `matches when ssid is the anchor label and signal meets the floor`() {
+        assertTrue(checker.matches(reading("AnchorCorp-Office", 90), anchor))
     }
 
     @Test
-    fun `matches is case-insensitive on the bssid`() {
-        assertTrue(checker.matches(reading("AA:BB:CC:DD:EE:FF", 88), anchor))
+    fun `matches is case-insensitive on the ssid`() {
+        assertTrue(checker.matches(reading("anchorcorp-office", 88), anchor))
     }
 
     @Test
-    fun `rejects a bssid not in the anchor set`() {
-        assertFalse(checker.matches(reading("99:99:99:99:99:99", 99), anchor))
+    fun `rejects an ssid that is not the anchor label`() {
+        assertFalse(checker.matches(reading("Cafe-WiFi", 99), anchor))
     }
 
     @Test
     fun `rejects a weak signal even on the right network`() {
-        assertFalse(checker.matches(reading("aa:bb:cc:dd:ee:ff", 50), anchor))
+        assertFalse(checker.matches(reading("AnchorCorp-Office", 50), anchor))
     }
 
     @Test
@@ -56,8 +58,13 @@ class WifiAnchorCheckerTest {
     }
 
     @Test
-    fun `fails closed when the anchor has no bssids configured`() {
-        val empty = anchor.copy(bssids = emptyList())
-        assertFalse(checker.matches(reading("aa:bb:cc:dd:ee:ff", 99), empty))
+    fun `rejects a reading with no ssid`() {
+        assertFalse(checker.matches(reading(null, 99), anchor))
+    }
+
+    @Test
+    fun `fails closed when the anchor has no ssid label`() {
+        val blank = anchor.copy(ssidLabel = "")
+        assertFalse(checker.matches(reading("AnchorCorp-Office", 99), blank))
     }
 }

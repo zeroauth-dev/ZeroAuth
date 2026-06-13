@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.zeroauth.android.net.AttendanceApi
 import dev.zeroauth.android.net.ClientMetaDto
+import dev.zeroauth.android.net.InitRequest
 import dev.zeroauth.android.net.ProofDto
 import dev.zeroauth.android.net.RecordRequest
 import dev.zeroauth.android.net.WifiDto
@@ -61,10 +62,14 @@ class AttendanceViewModel(
     @Volatile
     private var pendingFaceCapture: CompletableDeferred<FaceOutcome>? = null
 
-    /** Begin a check-in or check-out ceremony. `type` ∈ check_in,check_out. */
-    fun start(type: String) {
+    /**
+     * Begin a check-in or check-out ceremony. `type` ∈ check_in,check_out.
+     * `companyId` scopes to a real HR-provisioned company (a claimed pass);
+     * null = the seeded demo company (slice-1 back-compat).
+     */
+    fun start(type: String, companyId: String? = null) {
         inFlightJob?.cancel()
-        inFlightJob = viewModelScope.launch { runCeremony(type) }
+        inFlightJob = viewModelScope.launch { runCeremony(type, companyId) }
     }
 
     fun onFaceCaptureSucceeded(secret: ByteArray) {
@@ -91,13 +96,13 @@ class AttendanceViewModel(
         _state.value = AttendanceUiState.Idle
     }
 
-    private suspend fun runCeremony(type: String) {
+    private suspend fun runCeremony(type: String, companyId: String?) {
         _state.value = AttendanceUiState.Locating
 
         // 1. Company anchor + local WiFi presence gate (UX pre-check; the
         //    server is authoritative).
         val company = try {
-            withContext(ioDispatcher) { attendanceApi.company() }.company
+            withContext(ioDispatcher) { attendanceApi.company(companyId) }.company
         } catch (t: Throwable) {
             Timber.tag(TAG).w(t, "company fetch failed")
             _state.value = AttendanceUiState.Error(
@@ -117,7 +122,7 @@ class AttendanceViewModel(
 
         // 2. Open a pairing session — the nonce the prover binds to.
         val init = try {
-            withContext(ioDispatcher) { attendanceApi.init() }
+            withContext(ioDispatcher) { attendanceApi.init(InitRequest(companyId = companyId)) }
         } catch (t: Throwable) {
             Timber.tag(TAG).w(t, "attendance init failed")
             _state.value = AttendanceUiState.Error(
@@ -190,6 +195,7 @@ class AttendanceViewModel(
             ),
             publicSignals = generated.publicSignals,
             wifi = WifiDto(bssid = reading?.bssid, signal = reading?.signalPercent),
+            companyId = companyId,
             clientMeta = ClientMetaDto(
                 appVersion = dev.zeroauth.android.BuildConfig.VERSION_NAME,
                 platform = "android",
@@ -202,7 +208,7 @@ class AttendanceViewModel(
             val occurredAt = resp.occurredAt
             if (resp.ok && occurredAt != null) {
                 val recordedType = resp.type ?: type
-                stateStore.record(recordedType, occurredAt)
+                stateStore.record(recordedType, occurredAt, companyId)
                 _state.value = AttendanceUiState.Done(recordedType, occurredAt)
             } else {
                 _state.value = AttendanceUiState.Error("attendance_record_failed", "Attendance wasn't recorded. Try again.")

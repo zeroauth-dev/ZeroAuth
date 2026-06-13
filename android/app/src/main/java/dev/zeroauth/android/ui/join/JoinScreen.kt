@@ -1,9 +1,5 @@
-package dev.zeroauth.android.ui.attendance
+package dev.zeroauth.android.ui.join
 
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -27,75 +22,41 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.zeroauth.android.Composition
 import dev.zeroauth.android.net.ApiFactory
-import dev.zeroauth.android.sec.AttendanceStateStore
-import dev.zeroauth.android.sec.WifiAnchorChecker
+import dev.zeroauth.android.sec.PassStore
 import dev.zeroauth.android.ui.face.FaceMatchVerification
+import dev.zeroauth.android.ui.reg.RegistrationQrCamera
 
 /**
- * Attendance check-in / check-out ceremony screen.
+ * Join-a-company ceremony. Scan the HR invite QR → confirm the company →
+ * face check → on-device proof bound to the /init nonce → claim. On success
+ * the pass is cached locally and we hand control back to Home.
  *
- * Drives [AttendanceViewModel.state]: requests fine-location (needed to
- * read the office BSSID), then runs Locating → Face → Proving → Done.
- * The face surface is the same [FaceMatchVerification] the sign-in flow
- * uses, so the captured face never leaves the device — only the Groth16
- * proof + the WiFi-presence reading reach the server.
- *
- * @param type "check_in" or "check_out"
+ * The face surface is the same [FaceMatchVerification] sign-in + attendance
+ * use, and the QR scanner is the registration camera — the captured face and
+ * the invite never leave the device beyond the Groth16 proof + DID.
  */
 @Composable
-fun AttendanceScreen(
-    type: String,
-    companyId: String? = null,
-    onDone: () -> Unit,
+fun JoinScreen(
+    onJoined: (companyId: String) -> Unit,
     onCancel: () -> Unit,
-    viewModel: AttendanceViewModel = viewModel(
-        factory = AttendanceViewModel.Factory(
+    viewModel: JoinViewModel = viewModel(
+        factory = JoinViewModel.Factory(
             mobileProver = Composition.productionMobileProver(LocalContext.current.applicationContext),
             attendanceApi = ApiFactory.createAttendanceApi(),
-            wifiChecker = WifiAnchorChecker(LocalContext.current.applicationContext),
-            stateStore = AttendanceStateStore(LocalContext.current.applicationContext),
+            passStore = PassStore(LocalContext.current.applicationContext),
         ),
     ),
 ) {
     val state by viewModel.state.collectAsState()
-    val context = LocalContext.current
-    val started = remember { mutableStateOf(false) }
-
-    fun startOnce() {
-        if (!started.value) {
-            started.value = true
-            viewModel.start(type, companyId)
-        }
-    }
-
-    val locationLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { _ ->
-        // Start regardless of the grant outcome — without the permission
-        // the WiFi read returns null and the ceremony lands on OffNetwork,
-        // which already explains the situation to the user.
-        startOnce()
-    }
-
-    LaunchedEffect(Unit) {
-        val granted = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.ACCESS_FINE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED
-        if (granted) startOnce() else locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-    }
 
     Box(
         modifier = Modifier
@@ -103,109 +64,113 @@ fun AttendanceScreen(
             .background(MaterialTheme.colorScheme.background),
     ) {
         when (val s = state) {
-            AttendanceUiState.Idle, AttendanceUiState.Locating -> {
-                StatusCard(
-                    title = if (type == TYPE_CHECK_OUT) "Checking you out…" else "Checking you in…",
-                    subtitle = "Confirming you're on the office network.",
-                    showSpinner = true,
-                )
-            }
-            is AttendanceUiState.OffNetwork -> {
-                OffNetworkCard(
-                    requiredLabel = s.requiredLabel,
-                    detectedSsid = s.detectedSsid,
-                    onRetry = { viewModel.start(type, companyId) },
-                    onCancel = onCancel,
-                )
-            }
-            is AttendanceUiState.AwaitingFaceCapture -> {
-                FaceCaptureLayer(
-                    onCaptured = { secret ->
-                        viewModel.onFaceCaptureSucceeded(secret)
-                        secret.fill(0)
-                    },
-                    onCancelled = { viewModel.onFaceCaptureCancelled() },
-                )
-            }
-            is AttendanceUiState.Proving -> {
-                ProvingCard(progress = s.progress)
-            }
-            is AttendanceUiState.Done -> {
-                DoneCard(type = s.type, occurredAt = s.occurredAt, onDone = onDone)
-            }
-            is AttendanceUiState.Error -> {
-                ErrorCard(code = s.code, message = s.message, onRetry = { viewModel.start(type, companyId) }, onCancel = onCancel)
-            }
+            JoinUiState.Scanning -> ScanLayer(
+                onQrText = viewModel::onQrText,
+                onCancel = onCancel,
+            )
+            JoinUiState.Resolving -> StatusCard(
+                title = "Opening your invite…",
+                subtitle = "Setting up a secure join session.",
+            )
+            is JoinUiState.Confirm -> ConfirmCard(
+                companyName = s.companyName,
+                locationLabel = s.locationLabel,
+                onJoin = viewModel::onConfirm,
+                onRescan = viewModel::rescan,
+            )
+            JoinUiState.AwaitingFaceCapture -> FaceCaptureLayer(
+                onCaptured = { secret ->
+                    viewModel.onFaceCaptureSucceeded(secret)
+                    secret.fill(0)
+                },
+                onCancelled = viewModel::onFaceCaptureCancelled,
+            )
+            is JoinUiState.Proving -> ProvingCard(progress = s.progress)
+            JoinUiState.Claiming -> StatusCard(
+                title = "Joining…",
+                subtitle = "Binding your identity to this company.",
+            )
+            is JoinUiState.Done -> DoneCard(
+                companyName = s.companyName,
+                fullName = s.fullName,
+                employeeId = s.employeeId,
+                onDone = { onJoined(s.companyId) },
+            )
+            is JoinUiState.Error -> ErrorCard(
+                code = s.code,
+                message = s.message,
+                onRetry = viewModel::rescan,
+                onCancel = onCancel,
+            )
         }
     }
 }
 
-// ─── Status / locating ───────────────────────────────────────────────
+// ─── Scanning ────────────────────────────────────────────────────────
 
 @Composable
-private fun StatusCard(title: String, subtitle: String, showSpinner: Boolean) {
-    CenteredColumn {
-        if (showSpinner) {
-            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 3.dp)
-            Spacer(Modifier.height(8.dp))
-        }
-        Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+private fun ScanLayer(onQrText: (String) -> Unit, onCancel: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 24.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(24.dp))
+        Text("Join a company", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         Text(
-            subtitle,
+            "Scan the invite QR your HR team shared.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        RegistrationQrCamera(
+            onResult = onQrText,
+            onCancel = onCancel,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
-// ─── Off-network ─────────────────────────────────────────────────────
+// ─── Confirm ─────────────────────────────────────────────────────────
 
 @Composable
-private fun OffNetworkCard(
-    requiredLabel: String,
-    detectedSsid: String?,
-    onRetry: () -> Unit,
-    onCancel: () -> Unit,
+private fun ConfirmCard(
+    companyName: String,
+    locationLabel: String,
+    onJoin: () -> Unit,
+    onRescan: () -> Unit,
 ) {
     BottomActionLayout(
         body = {
-            Text("You're not at the office", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+            Text("Join $companyName?", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Text(
                 buildString {
-                    append("Attendance can only be marked on the ")
-                    append(requiredLabel)
-                    append(" network.")
-                    if (!detectedSsid.isNullOrBlank()) {
-                        append("\n\nYou're on \"")
-                        append(detectedSsid)
-                        append("\" right now.")
-                    }
+                    if (locationLabel.isNotBlank()) append(locationLabel).append("\n\n")
+                    append("We'll verify it's you with a quick face check, then add this company to your passes.")
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
         },
-        primaryText = "Try again",
-        onPrimary = onRetry,
-        secondaryText = "Cancel",
-        onSecondary = onCancel,
+        primaryText = "Join",
+        onPrimary = onJoin,
+        secondaryText = "Scan again",
+        onSecondary = onRescan,
     )
 }
 
-// ─── Face capture (reuses the sign-in surface) ───────────────────────
+// ─── Face capture ────────────────────────────────────────────────────
 
 @Composable
-private fun FaceCaptureLayer(
-    onCaptured: (ByteArray) -> Unit,
-    onCancelled: () -> Unit,
-) {
+private fun FaceCaptureLayer(onCaptured: (ByteArray) -> Unit, onCancelled: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding(),
+            .background(MaterialTheme.colorScheme.background),
     ) {
         Column(
             modifier = Modifier
@@ -238,7 +203,6 @@ private fun ProvingCard(progress: Float) {
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding()
             .padding(horizontal = 32.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -261,13 +225,11 @@ private fun ProvingCard(progress: Float) {
 // ─── Done ────────────────────────────────────────────────────────────
 
 @Composable
-private fun DoneCard(type: String, occurredAt: String, onDone: () -> Unit) {
-    val isOut = type == TYPE_CHECK_OUT
+private fun DoneCard(companyName: String, fullName: String, employeeId: String, onDone: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding()
             .padding(horizontal = 32.dp, vertical = 32.dp),
     ) {
         Column(
@@ -278,7 +240,6 @@ private fun DoneCard(type: String, occurredAt: String, onDone: () -> Unit) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
             ) {
                 Spacer(Modifier.height(48.dp))
                 Box(
@@ -290,14 +251,10 @@ private fun DoneCard(type: String, occurredAt: String, onDone: () -> Unit) {
                     Text("✓", style = MaterialTheme.typography.displaySmall)
                 }
                 Spacer(Modifier.height(20.dp))
-                Text(
-                    text = if (isOut) "Checked out" else "Checked in",
-                    style = MaterialTheme.typography.headlineMedium,
-                    textAlign = TextAlign.Center,
-                )
+                Text("You're in", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = friendlyTime(occurredAt),
+                    text = "$companyName · ${fullName.ifBlank { employeeId }}",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -320,7 +277,7 @@ private fun DoneCard(type: String, occurredAt: String, onDone: () -> Unit) {
 private fun ErrorCard(code: String, message: String, onRetry: () -> Unit, onCancel: () -> Unit) {
     BottomActionLayout(
         body = {
-            Text("Couldn't mark attendance", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+            Text("Couldn't join", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             Text(
                 code,
@@ -329,7 +286,7 @@ private fun ErrorCard(code: String, message: String, onRetry: () -> Unit, onCanc
                 textAlign = TextAlign.Center,
             )
         },
-        primaryText = "Try again",
+        primaryText = "Scan again",
         onPrimary = onRetry,
         secondaryText = "Cancel",
         onSecondary = onCancel,
@@ -339,19 +296,28 @@ private fun ErrorCard(code: String, message: String, onRetry: () -> Unit, onCanc
 // ─── Shared layout helpers ───────────────────────────────────────────
 
 @Composable
-private fun CenteredColumn(content: @Composable () -> Unit) {
+private fun StatusCard(title: String, subtitle: String) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding()
             .padding(horizontal = 32.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) { content() }
+        ) {
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 3.dp)
+            Spacer(Modifier.height(8.dp))
+            Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -367,7 +333,6 @@ private fun BottomActionLayout(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding()
             .padding(horizontal = 32.dp, vertical = 32.dp),
     ) {
         Column(
@@ -401,13 +366,3 @@ private fun BottomActionLayout(
         }
     }
 }
-
-/** Pull "HH:mm" out of an ISO-8601 timestamp; fall back to the raw value. */
-private fun friendlyTime(iso: String): String {
-    return runCatching {
-        val t = iso.indexOf('T')
-        if (t >= 0 && iso.length >= t + 6) iso.substring(t + 1, t + 6) else iso
-    }.getOrDefault(iso)
-}
-
-private const val TYPE_CHECK_OUT = "check_out"

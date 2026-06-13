@@ -2,6 +2,8 @@ package dev.zeroauth.android.ui.attendance
 
 import android.content.Context
 import dev.zeroauth.android.net.AttendanceApi
+import dev.zeroauth.android.net.ClaimRequest
+import dev.zeroauth.android.net.ClaimResponse
 import dev.zeroauth.android.net.CompanyDto
 import dev.zeroauth.android.net.CompanyResponse
 import dev.zeroauth.android.net.CompanyWifiDto
@@ -73,7 +75,7 @@ class AttendanceViewModelTest {
         WifiAnchorChecker.WifiReading(ssid = "AnchorCorp-Office", bssid = onAnchorBssid, signalPercent = 92)
 
     private fun fakeApi(throwOnRecord: Throwable? = null) = object : AttendanceApi {
-        override suspend fun company(): CompanyResponse = CompanyResponse(company)
+        override suspend fun company(companyId: String?): CompanyResponse = CompanyResponse(company)
         override suspend fun init(body: InitRequest): InitResponse = InitResponse(
             sessionId = "11111111-2222-3333-4444-555555555555",
             nonce = "a".repeat(62),
@@ -83,6 +85,8 @@ class AttendanceViewModelTest {
             throwOnRecord?.let { throw it }
             return RecordResponse(ok = true, type = body.type, result = "accepted", occurredAt = "2026-06-12T09:02:00.000Z")
         }
+        override suspend fun claim(body: ClaimRequest): ClaimResponse =
+            throw UnsupportedOperationException("claim not exercised in AttendanceViewModel tests")
     }
 
     private fun vm(wifi: WifiAnchorChecker, api: AttendanceApi = fakeApi()) =
