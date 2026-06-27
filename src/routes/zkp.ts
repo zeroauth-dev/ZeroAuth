@@ -5,9 +5,27 @@ import { registerIdentity } from '../services/identity';
 import { issueTokens } from '../services/jwt';
 import { sessionStore } from '../services/session-store';
 import { logger } from '../services/logger';
+import { demoAuthOnly } from '../middleware/demo-auth-gate';
 import { UserSession, ZKPVerificationRequest, RegistrationRequest } from '../types';
 
 const router = Router();
+
+// K-1 close-out: this legacy /api/auth/zkp/* surface is an UNAUTHENTICATED
+// demo stub — /register ingests a raw base64 `biometricTemplate` and derives
+// the commitment server-side, which is exactly the "raw-biometric path" the
+// architecture forbids and the master-plan §10 kill-signal names. It is now
+// (a) advertised as deprecated and (b) gated behind ENABLE_DEMO_AUTH, so it
+// returns 503 in production (the flag is off by default there). The
+// authenticated, deprecated successor for the W3 demo client is
+// /v1/auth/zkp/register; the production face-first path that never accepts a
+// raw biometric is /v1/identity/register.
+router.use((_req: Request, res: Response, next) => {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Sunset', 'Wed, 31 Dec 2026 23:59:59 GMT');
+  res.setHeader('Link', '</v1/identity/register>; rel="successor-version"');
+  next();
+});
+router.use(demoAuthOnly);
 
 /**
  * POST /api/auth/zkp/register
