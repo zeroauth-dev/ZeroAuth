@@ -89,7 +89,9 @@ Some responses carry extra fields (`docs`, `retryAfterSeconds`, `currentScopes`,
 | `signup_failed` | Database insert failed. Detailed error logged via Winston; generic message returned to the client. |
 | `login_failed` | Tenant lookup or password verification threw. |
 | `registration_failed` | `/v1/auth/zkp/register` — identity pipeline failed. |
-| `verification_failed` | `/v1/auth/zkp/verify` — proof verification threw. |
+| `verification_failed` | `/v1/auth/zkp/verify` — proof verification threw. Also `/v1/identity/verify` (401): the uniform enumeration-defended failure for did_unknown / commitment_mismatch / nonce_mismatch / proof_invalid. |
+| `challenge_not_found` (404), `challenge_expired` (410), `challenge_already_used` (409), `challenge_locked` (423) | `/v1/identity/verify` — the `challengeId` is unknown, expired, already consumed (replay), or locked after repeated failures. Request a fresh `/v1/identity/challenge`. |
+| `too_many_pending_challenges` (429), `challenge_failed` (500) | `/v1/identity/challenge` — open-challenge cap exceeded / internal error. |
 | `device_create_failed`, `device_list_failed`, `device_update_failed` | Devices route exceptions. |
 | `user_create_failed`, `user_list_failed`, `user_update_failed` | Users route exceptions. |
 | `verification_create_failed`, `verification_list_failed` | Verifications route exceptions. |

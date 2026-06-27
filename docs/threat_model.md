@@ -38,11 +38,11 @@
 | | |
 |---|---|
 | **Class** | Spoofing (STRIDE: S) |
-| **Surface** | `POST /v1/auth/zkp/verify`, `POST /api/auth/zkp/verify` |
-| **Description** | An attacker replays a captured Groth16 proof + public signals + nonce after the original session has ended. |
-| **Mitigation** | `src/services/zkp.ts` enforces a 5-minute timestamp window on the request and validates the nonce format. **Note:** the nonce is not currently bound to an issued-nonce table — replay within the 5-minute window is not blocked. Open issue. |
-| **Test status** | Timestamp window + nonce format tests in `tests/zkp.test.ts`. **Missing:** within-window replay test. |
-| **Audit signal** | `audit_events.action = 'zkp.verify'` is recorded; no special replay signal yet. |
+| **Surface** | `POST /v1/identity/verify` (production); the deprecated `/v1/auth/zkp/verify` + `/api/auth/zkp/verify` (the latter now gated off in prod, K-1). |
+| **Description** | An attacker replays a captured `(proof, publicSignals)` after the original verification, to authenticate as the victim. |
+| **Mitigation** | **CLOSED for the production surface.** `/v1/identity/verify` now converges onto the hardened proof-pairing verifier (`verifyIdentityProof`): the client first calls `/v1/identity/challenge` for a server-minted single-use nonce, the proof binds it as `publicSignals[1] = Poseidon(didHash, nonce)` (re-derived + constant-time compared server-side, A-11), and the challenge is consumed atomically (`UPDATE … WHERE state='issued' RETURNING`, A-14). A captured proof carries a spent/foreign nonce and fails. The legacy `zkp.ts` 5-minute timestamp window remains the (weaker) defence only on the deprecated `/v1/auth/zkp/verify`; `/api/auth/zkp/verify` is gated off in production (K-1). |
+| **Test status** | `tests/identity-verify-face.test.ts`: challenge issuance; verify requires `challengeId` (400 without); nonce-mismatch → 401; replayed/consumed challenge → 409 `challenge_already_used`; expired → 410. Inherits the proof-pairing nonce-binding + single-use consume tests (`tests/proof-pairing.test.ts`). |
+| **Audit signal** | `pairing.replay_blocked` on a `publicSignals[1]` mismatch; `identity.verify` (success/failure) per attempt. |
 
 ### A-03 — Forged SAML assertion via demo callback
 

@@ -8,38 +8,24 @@ import { recordAuditEvent } from '../../services/platform';
 import { v4 as uuidv4 } from 'uuid';
 import {
   registerFaceFirstIdentity,
-  findUserByDid,
   IdentityValidationError,
   IdentityAlreadyExistsError,
 } from '../../services/identity';
-import { verifyBiometricProof } from '../../services/zkp';
-import type { UserSession, ZKPVerificationRequest } from '../../types';
+import {
+  createSession as createPairingChallenge,
+  verifyIdentityProof,
+  PairingSessionNotFound,
+  PairingSessionExpired,
+  PairingSessionAlreadyBound,
+  PairingSessionLocked,
+  PairingNonceMismatch,
+  PairingDidUnknown,
+  PairingProofInvalid,
+  TooManyPendingSessions,
+} from '../../services/proof-pairing';
+import type { UserSession } from '../../types';
 
 const router = Router();
-
-/**
- * Parse a commitment string into a BigInt, accepting either HEX
- * (with or without 0x prefix, the form the mobile prover sends to
- * /register) or DECIMAL (the form snarkjs emits in publicSignals[0]).
- * Returns null on a non-parseable input — callers should treat that
- * as a mismatch. Mirrors the helper in src/services/registration.ts.
- */
-function parseCommitmentBigInt(raw: unknown): bigint | null {
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  try {
-    if (trimmed.startsWith('0x') || trimmed.startsWith('0X')) {
-      return BigInt(trimmed);
-    }
-    if (/[a-f]/i.test(trimmed)) {
-      return BigInt('0x' + trimmed);
-    }
-    return BigInt(trimmed);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * POST /v1/identity/register
@@ -131,32 +117,105 @@ router.post('/register',
   },
 );
 
+/** Map a verifyIdentityProof failure onto the documented HTTP status. The
+ *  enumeration-defended cases (unknown DID, commitment mismatch, wrong-nonce,
+ *  invalid proof) collapse to a uniform 401 verification_failed. */
+function mapVerifyError(err: unknown): { status: number; code: string; reason: string } {
+  if (err instanceof PairingDidUnknown
+      || err instanceof PairingNonceMismatch
+      || err instanceof PairingProofInvalid) {
+    return { status: 401, code: 'verification_failed', reason: (err as { code?: string }).code ?? 'verification_failed' };
+  }
+  if (err instanceof PairingSessionNotFound) return { status: 404, code: 'challenge_not_found', reason: 'challenge_not_found' };
+  if (err instanceof PairingSessionExpired) return { status: 410, code: 'challenge_expired', reason: 'challenge_expired' };
+  if (err instanceof PairingSessionAlreadyBound) return { status: 409, code: 'challenge_already_used', reason: 'challenge_already_used' };
+  if (err instanceof PairingSessionLocked) return { status: 423, code: 'challenge_locked', reason: 'challenge_locked' };
+  return { status: 500, code: 'verify_failed', reason: 'internal_error' };
+}
+
+function verifyMessage(code: string): string {
+  switch (code) {
+    case 'verification_failed': return 'Identity verification failed.';
+    case 'challenge_not_found': return 'Challenge not found. Request a new one from /v1/identity/challenge.';
+    case 'challenge_expired': return 'Challenge expired. Request a new one.';
+    case 'challenge_already_used': return 'Challenge already used. Request a new one.';
+    case 'challenge_locked': return 'Challenge locked after repeated failures. Request a new one.';
+    default: return 'Verification could not be completed.';
+  }
+}
+
+/**
+ * POST /v1/identity/challenge
+ *
+ * Issue a single-use, time-boxed challenge for /v1/identity/verify (A-02
+ * close-out). Returns a server-minted nonce the on-device prover folds into
+ * the proof as `publicSignals[1] = Poseidon(didHash, nonce)`. The challenge is
+ * consumed atomically on verify, so a captured proof cannot be replayed.
+ *
+ * The challenge reuses the proof-pairing session row + state machine; the
+ * tenant API key authenticates the call, so no session_bind cookie is needed.
+ *
+ * Request:  Authorization: Bearer za_live_xxx
+ * Response: 201 { challengeId, nonce, expiresAt }
+ *
+ * Requires scope: zkp:verify
+ */
+router.post('/challenge',
+  authenticateTenantApiKey(['zkp:verify']),
+  pgRateLimit({ route: 'identity:challenge', windowMs: 60_000, max: 60, keyBy: 'apiKey' }),
+  async (req: Request, res: Response) => {
+    const { tenant, apiKey } = getTenantContext(req);
+    const environment = (apiKey.environment === 'live' || apiKey.environment === 'test')
+      ? apiKey.environment
+      : 'live';
+    try {
+      const challenge = await createPairingChallenge(
+        tenant.id,
+        environment,
+        apiKey.id,
+        req.ip ?? null,
+        (req.headers['user-agent'] as string | undefined) ?? null,
+      );
+      res.status(201).json({
+        challengeId: challenge.id,
+        nonce: challenge.nonce,
+        expiresAt: challenge.expiresAt,
+      });
+    } catch (err) {
+      if (err instanceof TooManyPendingSessions) {
+        res.status(429).json({
+          error: 'too_many_pending_challenges',
+          message: 'Too many open identity challenges. Retry shortly.',
+        });
+        return;
+      }
+      logger.error('v1: identity challenge error', { error: (err as Error).message });
+      res.status(500).json({ error: 'challenge_failed' });
+    }
+  },
+);
+
 /**
  * POST /v1/identity/verify
  *
- * Face-first identity verification (ADR 0017). The client produces a
- * Groth16 proof on-device using `mobile/prover` with the actual
- * commitment + secret + nonce as inputs. The server:
- *
- *   1. Looks up the enrolled user by DID.
- *   2. Asserts publicSignals[0] (the commitment) matches the stored
- *      commitment for that DID — same-DID-different-face attacks are
- *      blocked here, not downstream.
- *   3. Calls verifyBiometricProof() which runs snarkjs.groth16.verify
- *      against the platform's pinned verification key (ADR 0015).
- *   4. On success: creates a session, issues access + refresh tokens,
- *      writes an audit row.
- *   5. On failure: writes an audit row with the failure reason and
- *      returns 401.
+ * Face-first identity verification (ADR 0017) — now replay-safe (A-02). The
+ * client first calls POST /v1/identity/challenge for a fresh nonce, binds the
+ * on-device Groth16 proof to it (`publicSignals[1] = Poseidon(didHash, nonce)`),
+ * then submits `{ did, challengeId, proof, publicSignals }`. The server reuses
+ * the hardened proof-pairing verifier (`verifyIdentityProof`): it looks up the
+ * user, constant-time-compares the stored commitment, re-derives and compares
+ * the nonce binding, runs the Groth16 verifier, and consumes the challenge
+ * single-use — so a captured proof cannot be replayed.
  *
  * Request:
  *   Authorization: Bearer za_live_xxx
- *   { did, proof, publicSignals, nonce, timestamp }
+ *   { did, challengeId, proof, publicSignals }
  *
  * Responses:
  *   200 { accessToken, refreshToken, tokenType, expiresIn, sessionId, did }
  *   400 invalid_did / invalid_request
- *   401 verification_failed / commitment_mismatch / did_unknown
+ *   401 verification_failed (uniform: did_unknown / commitment / nonce / proof)
+ *   404 challenge_not_found · 409 challenge_already_used · 410 challenge_expired
  *
  * Requires scope: zkp:verify
  */
@@ -169,115 +228,52 @@ router.post('/verify',
       ? apiKey.environment
       : 'live';
 
-    const { did, proof, publicSignals, nonce, timestamp } = req.body ?? {};
+    const { did, challengeId, proof, publicSignals } = req.body ?? {};
 
     // Format guards.
     if (typeof did !== 'string' || did.length === 0) {
       res.status(400).json({ error: 'invalid_did', message: 'did is required (string).' });
       return;
     }
-    if (!Array.isArray(publicSignals) || publicSignals.length === 0) {
+    if (typeof challengeId !== 'string' || challengeId.length === 0) {
       res.status(400).json({
         error: 'invalid_request',
-        message: 'publicSignals is required (array).',
+        message: 'challengeId from POST /v1/identity/challenge is required.',
+      });
+      return;
+    }
+    if (!Array.isArray(publicSignals) || publicSignals.length !== 3
+        || publicSignals.some((s) => typeof s !== 'string')) {
+      res.status(400).json({
+        error: 'invalid_request',
+        message: 'publicSignals must be a 3-element string array.',
       });
       return;
     }
     if (!proof || typeof proof !== 'object') {
-      res.status(400).json({
-        error: 'invalid_request',
-        message: 'proof is required (object).',
-      });
+      res.status(400).json({ error: 'invalid_request', message: 'proof is required (object).' });
       return;
     }
 
     try {
-      // Step 1: look up user.
-      const user = await findUserByDid(tenant.id, environment, did);
-      if (!user) {
-        // Uniform error for enumeration defence — same response for
-        // unknown DID and commitment-mismatch (Step 2 below).
-        await recordAuditEvent(tenant.id, {
-          environment,
-          actorType: 'api_key',
-          actorId: apiKey.id,
-          action: 'identity.verify',
-          entityType: 'tenant_user',
-          entityId: null,
-          status: 'failure',
-          summary: 'verify: did unknown',
-          metadata: { did, reason: 'did_unknown' },
-        });
-        res.status(401).json({ error: 'verification_failed', message: 'Identity verification failed.' });
-        return;
-      }
+      // The hardened proof-pairing verifier: commitment CT-compare + nonce
+      // binding (publicSignals[1]) + Groth16 verify + single-use consume of
+      // the challenge. A captured proof bound to a spent/other challenge fails.
+      const result = await verifyIdentityProof(
+        challengeId,
+        tenant.id,
+        environment,
+        did,
+        proof as never,
+        publicSignals as string[],
+      );
 
-      // Step 2: assert commitment match. publicSignals[0] is the
-      // commitment per the circuit's wire layout.
-      //
-      // The mobile prover submits the commitment to /register as HEX
-      // (64-char Poseidon BigInt rendered with toString(16)), but
-      // snarkjs emits publicSignals[0] as the same BigInt in DECIMAL.
-      // A naive lowercase-string compare never matches. Coerce both
-      // sides to BigInt and compare numerically. parseCommitmentBigInt
-      // is defined inline so identity.ts stays self-contained — the
-      // registration ceremony has its own copy in
-      // src/services/registration.ts.
-      const presentedCommitmentBI = parseCommitmentBigInt(publicSignals[0]);
-      const storedCommitmentBI = parseCommitmentBigInt(user.commitment ?? '');
-      if (
-        presentedCommitmentBI === null ||
-        storedCommitmentBI === null ||
-        presentedCommitmentBI !== storedCommitmentBI
-      ) {
-        await recordAuditEvent(tenant.id, {
-          environment,
-          actorType: 'api_key',
-          actorId: apiKey.id,
-          action: 'identity.verify',
-          entityType: 'tenant_user',
-          entityId: user.id,
-          status: 'failure',
-          summary: 'verify: commitment mismatch',
-          metadata: { did, reason: 'commitment_mismatch' },
-        });
-        // Uniform error — see Step 1.
-        res.status(401).json({ error: 'verification_failed', message: 'Identity verification failed.' });
-        return;
-      }
-
-      // Step 3: snarkjs.groth16.verify.
-      const verifyResult = await verifyBiometricProof({
-        proof,
-        publicSignals,
-        nonce,
-        timestamp,
-      } as ZKPVerificationRequest);
-
-      if (!verifyResult.verified) {
-        await recordAuditEvent(tenant.id, {
-          environment,
-          actorType: 'api_key',
-          actorId: apiKey.id,
-          action: 'identity.verify',
-          entityType: 'tenant_user',
-          entityId: user.id,
-          status: 'failure',
-          summary: 'verify: groth16 proof invalid',
-          metadata: { did, reason: 'proof_invalid' },
-        });
-        res.status(401).json({ error: 'verification_failed', message: 'Identity verification failed.' });
-        return;
-      }
-
-      // Step 4: mint session + tokens.
-      const sessionId = verifyResult.sessionId;
-      const userId = user.id;
+      const sessionId = uuidv4();
       const now = new Date();
       const expiresAt = new Date(now.getTime() + 3600000);
       const session: UserSession = {
         sessionId,
-        userId,
+        userId: result.userId,
         provider: 'zkp',
         verified: true,
         createdAt: now.toISOString(),
@@ -285,45 +281,32 @@ router.post('/verify',
       };
       sessionStore.create(session);
       const tokens = issueTokens({
-        sub: userId,
+        sub: result.userId,
         provider: 'zkp',
         verified: true,
         sessionId,
         did,
       });
 
-      // Step 5: audit row.
       await recordAuditEvent(tenant.id, {
         environment,
         actorType: 'api_key',
         actorId: apiKey.id,
         action: 'identity.verify',
         entityType: 'tenant_user',
-        entityId: userId,
+        entityId: result.userId,
         status: 'success',
         summary: `Face-first verification succeeded for DID ${did}`,
         metadata: { did, sessionId },
       });
 
       logger.info('v1: face-first identity verified', {
-        tenantId: tenant.id,
-        environment,
-        did,
-        userId,
-        sessionId,
+        tenantId: tenant.id, environment, did, userId: result.userId, sessionId,
       });
 
-      res.json({
-        ...tokens,
-        verified: true,
-        sessionId,
-        did,
-        provider: 'zkp',
-      });
+      res.json({ ...tokens, verified: true, sessionId, did, provider: 'zkp' });
     } catch (err) {
-      logger.error('v1: face-first identity verify error', { error: (err as Error).message });
-      // Audit even the unexpected-error path so a verifier outage is
-      // attributable.
+      const { status, code, reason } = mapVerifyError(err);
       await recordAuditEvent(tenant.id, {
         environment,
         actorType: 'api_key',
@@ -332,10 +315,13 @@ router.post('/verify',
         entityType: 'tenant_user',
         entityId: null,
         status: 'failure',
-        summary: 'verify: internal error',
-        metadata: { did, reason: 'internal_error', error: (err as Error).message },
+        summary: `verify: ${reason}`,
+        metadata: { did, reason },
       }).catch(() => undefined);
-      res.status(500).json({ error: 'verify_failed' });
+      if (status >= 500) {
+        logger.error('v1: face-first identity verify error', { error: (err as Error).message });
+      }
+      res.status(status).json({ error: code, message: verifyMessage(code) });
     }
   },
 );

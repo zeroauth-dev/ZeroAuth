@@ -605,6 +605,118 @@ export async function verifyAndConsumeForClaim(
   }
 }
 
+/**
+ * Verify a face-first identity proof for `POST /v1/identity/verify` — the
+ * SAME replay-safe machinery `submitProof` gives the W3 sign-in, adapted to
+ * the tenant-API-key surface where the user PRE-EXISTS (registered via
+ * `/v1/identity/register`).
+ *
+ * Closes the A-02 replay finding: `/v1/identity/verify` previously checked
+ * only `publicSignals[0]` (the commitment) plus a 5-minute timestamp window,
+ * so a captured `(proof, publicSignals)` replayed for 5 minutes. Here the
+ * proof is bound to a fresh `/v1/identity/challenge` nonce
+ * (`publicSignals[1] = Poseidon(storedDidHash, nonce)`) and the challenge row
+ * is consumed single-use.
+ *
+ * Differs from `submitProof` only in what the surface needs: NO session_bind
+ * cookie (the tenant API key authenticates the call) and NO W3 token mint
+ * (the route mints the identity session). Every cryptographic check —
+ * `findUserByDid`, the commitment constant-time compare, the
+ * `Poseidon(didHash, nonce)` binding (A-11), the verifier loopback, and the
+ * atomic single-use consume (A-14) — is identical. Throws the same `Pairing*`
+ * errors; the route maps them.
+ */
+export async function verifyIdentityProof(
+  challengeId: string,
+  tenantId: string,
+  environment: ApiKeyEnvironment,
+  did: string,
+  proof: Groth16Proof,
+  publicSignals: string[],
+): Promise<{ userId: string; did: string }> {
+  const start = Date.now();
+  const correlationId = uuidv4();
+  try {
+    // ── Session state machine (mirrors submitProof checks 2 + expiry) ──
+    const row = await loadSessionRow(challengeId, tenantId, environment);
+    if (!row) throw new PairingSessionNotFound();
+    if (row.state === 'consumed') throw new PairingSessionAlreadyBound();
+    if (row.state === 'failed' || row.failure_count >= MAX_FAILURES_BEFORE_LOCK) {
+      throw new PairingSessionLocked();
+    }
+    const expiresMs = row.expires_at instanceof Date
+      ? row.expires_at.getTime()
+      : new Date(row.expires_at as unknown as string).getTime();
+    if (expiresMs <= Date.now()) throw new PairingSessionExpired();
+
+    // No session_bind check — the tenant API key already authenticated the
+    // caller, and both /challenge and /verify are made by that same tenant.
+
+    if (!Array.isArray(publicSignals) || publicSignals.length !== 3) {
+      throw new PairingProofInvalid('public signals shape');
+    }
+
+    // ── Check 4: user lookup by (tenant, did) ──
+    const user = await findUserByDid(tenantId, environment, did);
+    if (!user) throw new PairingDidUnknown();
+
+    // ── Check 5: publicSignals[0] === stored commitment (CT compare) ──
+    const signalCommitment = parseBigIntFromSignal(publicSignals[0]);
+    const storedCommitment = parseBigIntFromSignal(user.commitment);
+    if (!timingSafeBigIntEqual(signalCommitment, storedCommitment)) {
+      // Uniform with did-unknown for enumeration defence (A-25).
+      throw new PairingDidUnknown('commitment mismatch');
+    }
+
+    // ── Check 6+7: publicSignals[1] === Poseidon(storedDidHash, nonce) ──
+    const storedDidHash = parseBigIntFromSignal(user.did_hash);
+    const nonceField = nonceHexToField(row.nonce_hex);
+    const expectedDidHashSession = poseidon2([storedDidHash, nonceField]);
+    const signalDidHashSession = parseBigIntFromSignal(publicSignals[1]);
+    if (!timingSafeBigIntEqual(signalDidHashSession, expectedDidHashSession)) {
+      await recordAuditEvent(tenantId, {
+        environment,
+        actorType: 'api_key',
+        action: 'pairing.replay_blocked',
+        entityType: 'pairing_session',
+        entityId: challengeId,
+        status: 'failure',
+        summary: 'identity verify publicSignals[1] mismatch — replay or wrong-challenge proof',
+      }).catch(err => logger.warn('proof-pairing: identity replay audit failed', {
+        error: (err as Error).message,
+      }));
+      throw new PairingNonceMismatch();
+    }
+
+    // ── Check 8: verifier loopback (structuralFallback rejected inside) ──
+    const verified = await verifierVerify(proof, publicSignals, tenantId, environment, correlationId);
+    if (!verified) throw new PairingProofInvalid();
+
+    // ── Check 9: atomic single-use consume (A-14) ──
+    const pool = getPool();
+    const claim = await pool.query<ProofPairingSession>(
+      `UPDATE proof_pairing_sessions
+         SET state = 'consumed', consumed_user_id = $2, consumed_at = NOW()
+       WHERE id = $1 AND state = 'issued'
+       RETURNING *`,
+      [challengeId, user.id],
+    );
+    if (claim.rows.length === 0) throw new PairingSessionAlreadyBound();
+
+    await padToFloor(start);
+    return { userId: user.id, did };
+  } catch (err) {
+    if (err instanceof PairingSessionBindMismatch
+        || err instanceof PairingDidUnknown
+        || err instanceof PairingNonceMismatch
+        || err instanceof PairingProofInvalid) {
+      await incrementFailureCount(challengeId, err.code).catch(() => -1);
+    }
+    await padToFloor(start);
+    throw err;
+  }
+}
+
 export async function submitProof(
   sessionId: string,
   tenantId: string,
