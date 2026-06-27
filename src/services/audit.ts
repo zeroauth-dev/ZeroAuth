@@ -280,14 +280,27 @@ export async function verifyAuditChain(
   );
 
   let expectedPreviousHash: string | null = null;
+  let chainStarted = false;
 
   for (const row of result.rows) {
-    // Backfill window: rows with NULL hash columns are skipped but the
-    // chain restarts from the next non-null row.
+    // A NULL-hash row is only legitimate as a LEADING legacy row that
+    // predates the hash chain (ADR 0013 / the C-121 backfill window). A
+    // NULL appearing AFTER the chain has started means the hashes were
+    // cleared to hide a mutation — fail CLOSED (AL-1). The prior
+    // skip-and-restart let an attacker tamper with a row's content and
+    // then NULL its two hash columns to make verification silently
+    // resume from the next row, hiding the break.
     if (row.previous_hash === null || row.event_hash === null) {
-      expectedPreviousHash = null;
+      if (chainStarted) {
+        return {
+          ok: false,
+          brokenAt: row.id,
+          reason: 'null_hash_after_chain_start: audit row hashes cleared (tamper or corruption)',
+        };
+      }
       continue;
     }
+    chainStarted = true;
     if (expectedPreviousHash !== null && row.previous_hash !== expectedPreviousHash) {
       return {
         ok: false,

@@ -474,6 +474,18 @@ const SCHEMA = `
   ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS event_hash TEXT;
   CREATE INDEX IF NOT EXISTS idx_audit_events_chain ON audit_events(tenant_id, environment, id);
 
+  -- AL-1: when present, the chain hashes MUST be well-formed (0x + 64 hex;
+  -- previous_hash may also be the literal 'genesis'). NULL is still allowed
+  -- for leading legacy rows that predate the chain — verifyAuditChain()
+  -- fails closed on any NULL that appears AFTER the chain has started, so a
+  -- tamperer can't hide a mutation by clearing the two hash columns.
+  ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS audit_events_event_hash_format;
+  ALTER TABLE audit_events ADD CONSTRAINT audit_events_event_hash_format
+    CHECK (event_hash IS NULL OR event_hash ~ '^0x[0-9a-f]{64}$');
+  ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS audit_events_previous_hash_format;
+  ALTER TABLE audit_events ADD CONSTRAINT audit_events_previous_hash_format
+    CHECK (previous_hash IS NULL OR previous_hash = 'genesis' OR previous_hash ~ '^0x[0-9a-f]{64}$');
+
   -- ─── Audit Anchors (ADR 0014) ────────────────────────────
   -- One row per (tenant_id, environment, day_utc) recording the
   -- on-chain anchor of the audit-events chain terminal hash for
