@@ -606,6 +606,54 @@ export async function verifyAndConsumeForClaim(
 }
 
 /**
+ * Column-based user lookup for the face-first `/v1/identity/verify` surface.
+ * `registerFaceFirstIdentity` (identity.ts) writes the DID + commitment to the
+ * dedicated `tenant_users` columns (commitment as bare lowercase hex) and
+ * leaves metadata empty — so the metadata-keyed `findUserByDid` above (used by
+ * the W3 `submitProof` path, whose users come from registration.ts which DOES
+ * backfill metadata) never resolves a face-first user. Read the columns and
+ * normalise the commitment to a field element; `did_hash` is derived fresh by
+ * the caller as `Poseidon(commitment)`, exactly as `verifyAndConsumeForClaim`.
+ */
+async function findFaceFirstUserByDid(
+  tenantId: string,
+  environment: ApiKeyEnvironment,
+  did: string,
+): Promise<{ id: string; commitment: bigint } | null> {
+  const pool = getPool();
+  const result = await pool.query<{ id: string; commitment: string | null }>(
+    `SELECT id, commitment FROM tenant_users
+       WHERE tenant_id = $1 AND environment = $2 AND did = $3
+       LIMIT 1`,
+    [tenantId, environment, did],
+  );
+  const row = result.rows[0];
+  if (!row || !row.commitment) return null;
+  const commitment = commitmentToField(row.commitment);
+  if (commitment === null) return null;
+  return { id: row.id, commitment };
+}
+
+/**
+ * Normalise a stored commitment (`0x`-hex, bare lowercase hex, or decimal) to a
+ * BN128 field element. registerFaceFirstIdentity stores it as bare lowercase
+ * hex; snarkjs emits the same value as decimal in `publicSignals[0]`. Mirrors
+ * the comparison normaliser the legacy `/v1/identity/verify` used. Returns null
+ * on a non-parseable value (treated as a lookup miss).
+ */
+function commitmentToField(raw: string): bigint | null {
+  const s = raw.trim();
+  if (s.length === 0) return null;
+  try {
+    if (s.startsWith('0x') || s.startsWith('0X')) return BigInt(s);
+    if (/[a-f]/i.test(s)) return BigInt('0x' + s);
+    return BigInt(s);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Verify a face-first identity proof for `POST /v1/identity/verify` — the
  * SAME replay-safe machinery `submitProof` gives the W3 sign-in, adapted to
  * the tenant-API-key surface where the user PRE-EXISTS (registered via
@@ -620,11 +668,12 @@ export async function verifyAndConsumeForClaim(
  *
  * Differs from `submitProof` only in what the surface needs: NO session_bind
  * cookie (the tenant API key authenticates the call) and NO W3 token mint
- * (the route mints the identity session). Every cryptographic check —
- * `findUserByDid`, the commitment constant-time compare, the
- * `Poseidon(didHash, nonce)` binding (A-11), the verifier loopback, and the
- * atomic single-use consume (A-14) — is identical. Throws the same `Pairing*`
- * errors; the route maps them.
+ * (the route mints the identity session), and the user lookup is column-based
+ * (`findFaceFirstUserByDid`) because /v1/identity/register writes columns, not
+ * metadata. Every cryptographic check — the commitment constant-time compare,
+ * the `Poseidon(Poseidon(commitment), nonce)` binding (A-11), the verifier
+ * loopback, and the atomic single-use consume (A-14) — is identical to the
+ * claim path. Throws the same `Pairing*` errors; the route maps them.
  */
 export async function verifyIdentityProof(
   challengeId: string,
@@ -656,20 +705,27 @@ export async function verifyIdentityProof(
       throw new PairingProofInvalid('public signals shape');
     }
 
-    // ── Check 4: user lookup by (tenant, did) ──
-    const user = await findUserByDid(tenantId, environment, did);
+    // ── Check 4: user lookup by (tenant, did). Column-based — this is the
+    //    form registerFaceFirstIdentity (identity.ts) writes. The metadata
+    //    findUserByDid above serves the W3 submitProof path, whose users come
+    //    from registration.ts (which backfills metadata); /v1/identity/register
+    //    writes the did + commitment COLUMNS and leaves metadata empty. ──
+    const user = await findFaceFirstUserByDid(tenantId, environment, did);
     if (!user) throw new PairingDidUnknown();
 
     // ── Check 5: publicSignals[0] === stored commitment (CT compare) ──
     const signalCommitment = parseBigIntFromSignal(publicSignals[0]);
-    const storedCommitment = parseBigIntFromSignal(user.commitment);
-    if (!timingSafeBigIntEqual(signalCommitment, storedCommitment)) {
+    if (!timingSafeBigIntEqual(signalCommitment, user.commitment)) {
       // Uniform with did-unknown for enumeration defence (A-25).
       throw new PairingDidUnknown('commitment mismatch');
     }
 
-    // ── Check 6+7: publicSignals[1] === Poseidon(storedDidHash, nonce) ──
-    const storedDidHash = parseBigIntFromSignal(user.did_hash);
+    // ── Check 6+7: publicSignals[1] === Poseidon(Poseidon(commitment), nonce).
+    //    didHash = Poseidon(commitment), derived FRESH — byte-identical to
+    //    verifyAndConsumeForClaim (the on-device-verified W3 claim path). The
+    //    server never persists did_hash; the commitment column is the single
+    //    source of truth, so no second derivation can drift out of sync. ──
+    const storedDidHash = poseidon1([user.commitment]);
     const nonceField = nonceHexToField(row.nonce_hex);
     const expectedDidHashSession = poseidon2([storedDidHash, nonceField]);
     const signalDidHashSession = parseBigIntFromSignal(publicSignals[1]);

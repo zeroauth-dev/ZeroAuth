@@ -235,6 +235,12 @@ router.post('/verify',
       res.status(400).json({ error: 'invalid_did', message: 'did is required (string).' });
       return;
     }
+    // A-02 review (Finding 4): bound the attacker-controlled DID to the same
+    // shape /register enforces, so a junk DID can't bloat the audit/log row.
+    if (!/^did:zeroauth:[a-z0-9-]+:[a-f0-9]{20,80}$/i.test(did)) {
+      res.status(400).json({ error: 'invalid_did_format', message: 'DID must match did:zeroauth:<method>:<hex>.' });
+      return;
+    }
     if (typeof challengeId !== 'string' || challengeId.length === 0) {
       res.status(400).json({
         error: 'invalid_request',
