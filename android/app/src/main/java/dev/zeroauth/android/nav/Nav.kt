@@ -36,7 +36,19 @@ import dev.zeroauth.android.ui.settings.SettingsScreen
 sealed class Screen(val route: String) {
     data object Splash : Screen("splash")
     data object Enroll : Screen("enroll")
-    data object Scan   : Screen("scan")
+
+    /**
+     * QR scanner + proof-generation flow. The optional `challenge`
+     * query param carries a pre-supplied `za:pair:1:...` challenge
+     * payload (URI-encoded) — the bank-2FA approval inbox uses it to
+     * enter the flow without a camera scan. No param = the classic
+     * camera-first scan.
+     */
+    data object Scan : Screen("scan?challenge={challenge}") {
+        const val ARG_CHALLENGE = "challenge"
+        fun build(challenge: String? = null): String =
+            if (challenge != null) "scan?challenge=${Uri.encode(challenge)}" else "scan"
+    }
     /** ADR 0023 three-QR end-user signup ceremony. */
     data object Registration : Screen("registration")
 
@@ -99,7 +111,7 @@ fun ZeroAuthNavHost() {
                 // the app rather than landing the user back on the
                 // launcher screen they already left.
                 onSignIn = {
-                    navController.navigate(Screen.Scan.route) {
+                    navController.navigate(Screen.Scan.build()) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
                 },
@@ -162,17 +174,40 @@ fun ZeroAuthNavHost() {
         composable(Screen.Enroll.route) {
             EnrollScreen(
                 onEnrolled = {
-                    navController.navigate(Screen.Scan.route) {
+                    navController.navigate(Screen.Scan.build()) {
                         popUpTo(Screen.Enroll.route) { inclusive = true }
                     }
                 },
             )
         }
 
-        composable(Screen.Scan.route) {
+        composable(
+            route     = Screen.Scan.route,
+            arguments = listOf(
+                navArgument(Screen.Scan.ARG_CHALLENGE) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { backStackEntry ->
+            // Pre-supplied challenge from the bank-2FA approval inbox.
+            // Same decode convention as Screen.Done below.
+            val rawChallenge = backStackEntry.arguments?.getString(Screen.Scan.ARG_CHALLENGE)
             ScanScreen(
+                challenge = rawChallenge?.let { Uri.decode(it) },
                 onQrDecoded = { payload ->
                     navController.navigate(Screen.Done.build(payload))
+                },
+                onClose = {
+                    // Push-approval entry came from Home — land back
+                    // there. Fall back to Home explicitly if the
+                    // back-stack is empty (deep-link entry).
+                    if (!navController.popBackStack()) {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
                 },
             )
         }
@@ -190,6 +225,11 @@ fun ZeroAuthNavHost() {
                 },
                 onOpenSettings = {
                     navController.navigate(Screen.Settings.route)
+                },
+                // Bank-2FA approval inbox: Approve routes the request's
+                // za:pair challenge into the scan flow — no camera scan.
+                onApproveRequest = { qrPayload ->
+                    navController.navigate(Screen.Scan.build(challenge = qrPayload))
                 },
             )
         }
@@ -234,7 +274,7 @@ fun ZeroAuthNavHost() {
         composable(Screen.Settings.route) {
             SettingsScreen(
                 onViewIdentity = { navController.navigate(Screen.Identity.route) },
-                onScanSignIn = { navController.navigate(Screen.Scan.route) },
+                onScanSignIn = { navController.navigate(Screen.Scan.build()) },
                 onBack = { navController.popBackStack() },
             )
         }

@@ -76,6 +76,34 @@ interface DemoPortalApi {
 
     @POST("api/demo-portal/submit-proof")
     suspend fun submitProof(@Body body: SubmitProofRequest): SubmitProofResponse
+
+    /**
+     * The app's approval inbox (UPI-collect style) — bank 2FA push.
+     *
+     * POST /api/demo-portal/device/pending with the device's PUBLIC
+     * DID; the server returns the DID-pinned `proof_pairing_sessions`
+     * rows still awaiting approval, each carrying the exact same
+     * `za:pair:1:<sessionId>:<nonce62hex>:<domain>:<tag4>` challenge a
+     * desktop QR would have shown. The app feeds [PendingRequestDto.qrPayload]
+     * into the existing scan→face→prove→authorize flow — approval still
+     * requires the enrolled face (threat model A-47), this listing only
+     * reveals that a login is pending.
+     *
+     * The server body duplicates every field in camelCase AND
+     * snake_case; we bind the camelCase names and rely on the factory's
+     * `ignoreUnknownKeys = true` Json to drop the snake_case twins.
+     *
+     * Contract (server side — src/routes/demo-portal.ts):
+     *
+     *   POST /api/demo-portal/device/pending
+     *     body:  { did }
+     *     200:   { requests: [{ sessionId, qrPayload, bank, deviceHint,
+     *                           requestedAt, expiresAt, ...snake_case }] }
+     *     400:   { error: "invalid_request" }
+     *     503:   { error: "demo_portal_not_provisioned" }
+     */
+    @POST("api/demo-portal/device/pending")
+    suspend fun pendingRequests(@Body body: PendingRequestsBody): PendingRequestsResponse
 }
 
 @Serializable
@@ -96,4 +124,38 @@ data class SubmitProofSession(
     val userId: String? = null,
     val did: String? = null,
     val boundAt: String? = null,
+)
+
+/**
+ * Body for [DemoPortalApi.pendingRequests]. Carries the device's PUBLIC
+ * DID only — the DID is sent to the server on every login anyway, so
+ * this poll reveals nothing the enrolled identity hasn't already shared.
+ */
+@Serializable
+data class PendingRequestsBody(
+    val did: String,
+)
+
+@Serializable
+data class PendingRequestsResponse(
+    val requests: List<PendingRequestDto> = emptyList(),
+)
+
+/**
+ * One pending DID-pinned login approval. [qrPayload] is the exact
+ * `za:pair:1:...` challenge string [dev.zeroauth.android.util.QrPayload.parseChallenge]
+ * already handles — the Approve CTA routes it into the existing scan
+ * flow instead of a camera frame.
+ */
+@Serializable
+data class PendingRequestDto(
+    @SerialName("sessionId") val sessionId: String,
+    @SerialName("qrPayload") val qrPayload: String,
+    val bank: String? = null,
+    /** Truncated desktop User-Agent — best-effort browser hint. */
+    @SerialName("deviceHint") val deviceHint: String? = null,
+    /** ISO-8601 timestamp the desktop opened the session. */
+    @SerialName("requestedAt") val requestedAt: String? = null,
+    /** ISO-8601 timestamp the session stops being approvable. */
+    @SerialName("expiresAt") val expiresAt: String? = null,
 )

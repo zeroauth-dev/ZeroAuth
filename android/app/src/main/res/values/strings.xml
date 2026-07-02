@@ -15,8 +15,18 @@
     <string name="enroll_cta">Set up</string>
     <string name="enroll_stub_toast">Enrollment will land in the next iteration.</string>
 
+    <!-- Home — bank-2FA approval inbox (UPI-collect style) -->
+    <string name="home_requests_title">Verification requests</string>
+    <string name="home_request_kind_device">Login approval · %1$s</string>
+    <string name="home_request_unknown_device">Unknown browser</string>
+    <string name="home_request_requested_ago">Requested %1$s</string>
+    <string name="home_request_expires_in">Expires in %1$s</string>
+    <string name="home_request_expired">Expired</string>
+    <string name="home_request_approve_cta">Approve</string>
+
     <!-- Scan -->
     <string name="scan_caption">Point at the QR on your laptop</string>
+    <string name="scan_push_loading">Preparing the sign-in request…</string>
     <string name="scan_paste_fallback">Type the code instead</string>
     <string name="scan_permission_title">Camera access needed</string>
     <string name="scan_permission_body">ZeroAuth uses the camera only to read the desktop login QR. Nothing is recorded.</string>

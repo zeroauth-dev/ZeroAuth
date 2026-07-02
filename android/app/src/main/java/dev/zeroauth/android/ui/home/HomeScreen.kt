@@ -36,8 +36,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,16 +55,23 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.zeroauth.android.R
 import dev.zeroauth.android.net.ApiFactory
 import dev.zeroauth.android.sec.AttendanceStateStore
+import dev.zeroauth.android.sec.DidStore
 import dev.zeroauth.android.sec.PassStore
 import dev.zeroauth.android.sec.WifiAnchorChecker
+import kotlinx.coroutines.delay
+import java.time.Instant
 
 private val OnNetworkGreen = Color(0xFF1D9E75)
 private const val TYPE_CHECK_IN = "check_in"
 private const val TYPE_CHECK_OUT = "check_out"
+
+/** Approval-inbox poll cadence while the Home hub is STARTED. */
+private const val PENDING_POLL_MS = 3_000L
 
 /**
  * Home hub — the returning user's UPI-style landing surface. A bottom bar
@@ -75,16 +86,22 @@ fun HomeScreen(
     onJoin: () -> Unit,
     onViewIdentity: () -> Unit,
     onOpenSettings: () -> Unit,
+    onApproveRequest: (qrPayload: String) -> Unit,
     viewModel: HomeViewModel = viewModel(
         factory = HomeViewModel.Factory(
             attendanceApi = ApiFactory.createAttendanceApi(),
             wifiChecker = WifiAnchorChecker(LocalContext.current.applicationContext),
             stateStore = AttendanceStateStore(LocalContext.current.applicationContext),
             passStore = PassStore(LocalContext.current.applicationContext),
+            demoPortalApi = ApiFactory.createDemoPortalApi(),
+            didProvider = LocalContext.current.applicationContext.let { appContext ->
+                { DidStore.getOrDerive(appContext) }
+            },
         ),
     ),
 ) {
     val state by viewModel.state.collectAsState()
+    val pendingApprovals by viewModel.pendingApprovals.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -103,6 +120,19 @@ fun HomeScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Approval-inbox poll loop (UPI-collect style). Runs only while the
+    // Home hub is STARTED — repeatOnLifecycle cancels the while-loop on
+    // STOP and restarts it on the next START, so backgrounding the app
+    // stops the network chatter.
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                viewModel.pollPending()
+                delay(PENDING_POLL_MS)
+            }
+        }
     }
 
     Scaffold(
@@ -132,10 +162,17 @@ fun HomeScreen(
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 3.dp)
                     }
                 }
-                HomeUiState.Empty -> EmptyHome(onJoin = onJoin, onViewIdentity = onViewIdentity)
+                HomeUiState.Empty -> EmptyHome(
+                    pendingApprovals = pendingApprovals,
+                    onApproveRequest = onApproveRequest,
+                    onJoin = onJoin,
+                    onViewIdentity = onViewIdentity,
+                )
                 is HomeUiState.Error -> HomeErrorContent(message = s.message, onRetry = { viewModel.refresh() }, onViewIdentity = onViewIdentity)
                 is HomeUiState.Loaded -> PassesContent(
                     passes = s.passes,
+                    pendingApprovals = pendingApprovals,
+                    onApproveRequest = onApproveRequest,
                     onCheckInOut = onCheckInOut,
                     onViewIdentity = onViewIdentity,
                 )
@@ -186,12 +223,18 @@ private fun BrandHeader(onViewIdentity: () -> Unit) {
 @Composable
 private fun PassesContent(
     passes: List<PassCard>,
+    pendingApprovals: List<PendingApproval>,
+    onApproveRequest: (String) -> Unit,
     onCheckInOut: (String, String) -> Unit,
     onViewIdentity: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         BrandHeader(onViewIdentity = onViewIdentity)
         Spacer(Modifier.height(20.dp))
+        PendingApprovalsSection(
+            approvals = pendingApprovals,
+            onApprove = onApproveRequest,
+        )
         Text("Your passes", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(12.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -199,6 +242,160 @@ private fun PassesContent(
                 PassCardView(pass = pass, onCheckInOut = onCheckInOut)
             }
         }
+    }
+}
+
+// ─── Verification requests (bank-2FA approval inbox) ─────────────────
+
+/**
+ * "Verification requests" section — pending DID-pinned bank-login
+ * approvals, rendered above the passes list on both the Empty and
+ * Loaded Home states. Collapses to nothing when the inbox is empty so
+ * the hub looks unchanged outside a login. Each card shows the bank,
+ * the requesting browser, a relative "requested" time and a live expiry
+ * countdown, plus the Approve CTA that routes the request's challenge
+ * payload into the existing scan→face→prove→authorize flow.
+ */
+@Composable
+private fun PendingApprovalsSection(
+    approvals: List<PendingApproval>,
+    onApprove: (String) -> Unit,
+) {
+    if (approvals.isEmpty()) return
+
+    // 1-second wall-clock tick so the expiry countdown counts down
+    // between polls. Cheap — only runs while at least one request is
+    // on screen.
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(approvals) {
+        while (true) {
+            nowMs = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            stringResource(R.string.home_requests_title),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(12.dp))
+        approvals.forEach { approval ->
+            PendingApprovalCard(approval = approval, nowMs = nowMs, onApprove = onApprove)
+            Spacer(Modifier.height(12.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun PendingApprovalCard(
+    approval: PendingApproval,
+    nowMs: Long,
+    onApprove: (String) -> Unit,
+) {
+    val expiresInMs = approval.expiresAt?.let { parseIsoMs(it) }?.minus(nowMs)
+    val expired = expiresInMs != null && expiresInMs <= 0L
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(approval.bank, style = MaterialTheme.typography.headlineSmall)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.secondary),
+                )
+                Text(
+                    text = stringResource(
+                        R.string.home_request_kind_device,
+                        friendlyDeviceHint(approval.deviceHint)
+                            ?: stringResource(R.string.home_request_unknown_device),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            val requestedAgo = approval.requestedAt?.let { parseIsoMs(it) }
+                ?.let { friendlyAgo(nowMs - it) }
+            Text(
+                text = listOfNotNull(
+                    requestedAgo?.let { stringResource(R.string.home_request_requested_ago, it) },
+                    when {
+                        expired -> stringResource(R.string.home_request_expired)
+                        expiresInMs != null ->
+                            stringResource(R.string.home_request_expires_in, friendlyCountdown(expiresInMs))
+                        else -> null
+                    },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (expired) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Button(
+                onClick = { onApprove(approval.qrPayload) },
+                enabled = !expired,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                contentPadding = PaddingValues(horizontal = 24.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.home_request_approve_cta),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+    }
+}
+
+/** ISO-8601 → epoch millis; null when the string doesn't parse. */
+private fun parseIsoMs(iso: String): Long? =
+    runCatching { Instant.parse(iso).toEpochMilli() }.getOrNull()
+
+/** "Just now" / "42s ago" / "3m ago" relative-time label. */
+private fun friendlyAgo(deltaMs: Long): String {
+    val s = deltaMs / 1_000L
+    return when {
+        s < 10 -> "just now"
+        s < 60 -> "${s}s ago"
+        else -> "${s / 60}m ago"
+    }
+}
+
+/** "1m 42s" / "42s" countdown label. */
+private fun friendlyCountdown(remainingMs: Long): String {
+    val total = (remainingMs / 1_000L).coerceAtLeast(0L)
+    val m = total / 60
+    val s = total % 60
+    return if (m > 0) "${m}m ${s}s" else "${s}s"
+}
+
+/**
+ * Collapse the truncated desktop User-Agent into a human browser name.
+ * Order matters — Chrome's UA contains "Safari", Edge's contains both.
+ */
+private fun friendlyDeviceHint(userAgent: String?): String? {
+    val ua = userAgent?.takeIf { it.isNotBlank() } ?: return null
+    return when {
+        ua.contains("Edg", ignoreCase = true) -> "Microsoft Edge"
+        ua.contains("OPR", ignoreCase = true) || ua.contains("Opera", ignoreCase = true) -> "Opera"
+        ua.contains("Firefox", ignoreCase = true) -> "Firefox"
+        ua.contains("Chrome", ignoreCase = true) -> "Chrome"
+        ua.contains("Safari", ignoreCase = true) -> "Safari"
+        else -> ua.take(40)
     }
 }
 
@@ -256,12 +453,26 @@ private fun PassCardView(pass: PassCard, onCheckInOut: (String, String) -> Unit)
 }
 
 @Composable
-private fun EmptyHome(onJoin: () -> Unit, onViewIdentity: () -> Unit) {
+private fun EmptyHome(
+    pendingApprovals: List<PendingApproval>,
+    onApproveRequest: (String) -> Unit,
+    onJoin: () -> Unit,
+    onViewIdentity: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        BrandHeader(onViewIdentity = onViewIdentity)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            BrandHeader(onViewIdentity = onViewIdentity)
+            if (pendingApprovals.isNotEmpty()) {
+                Spacer(Modifier.height(20.dp))
+                PendingApprovalsSection(
+                    approvals = pendingApprovals,
+                    onApprove = onApproveRequest,
+                )
+            }
+        }
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,

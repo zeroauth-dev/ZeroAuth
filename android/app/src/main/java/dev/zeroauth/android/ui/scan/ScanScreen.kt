@@ -132,6 +132,22 @@ import timber.log.Timber
 @Composable
 fun ScanScreen(
     onQrDecoded: (String) -> Unit,
+    /**
+     * Pre-supplied `za:pair:1:...` challenge payload (bank-2FA push
+     * approval from the Home inbox). When non-null the screen skips the
+     * camera entirely — no permission prompt, no preview — and feeds
+     * the payload straight into the ViewModel's parse path; the
+     * existing ChallengeParsed → face → prove → authorize UI takes
+     * over. Falls back to camera scanning if the payload fails to
+     * parse.
+     */
+    challenge: String? = null,
+    /**
+     * Leave the screen (pop back to the caller). Used by the
+     * pre-supplied-challenge mode's Cancel + Done affordances — the
+     * camera flow keeps its classic reset-to-scanner behaviour.
+     */
+    onClose: () -> Unit = {},
     viewModel: ScanViewModel = viewModel(
         factory = ScanViewModel.Factory(
             // Production Keystore + Biometric — wired by MainActivity into
@@ -173,6 +189,32 @@ fun ScanScreen(
         ctx as? FragmentActivity
     }
 
+    // ─── Pre-supplied challenge (bank-2FA push approval) ─────────
+
+    // While true the camera never binds and the CAMERA permission is
+    // never requested — the challenge payload substitutes for the scan.
+    // Flips to false (camera fallback) if the payload fails to parse.
+    var challengeMode by remember { mutableStateOf(challenge != null) }
+    // Bumped by the Error card's retry so the same challenge re-feeds
+    // after viewModel.retry() resets the state machine to Idle.
+    var challengeAttempt by remember { mutableStateOf(0) }
+
+    LaunchedEffect(challenge, challengeAttempt) {
+        if (challenge != null && challengeMode) {
+            // Idle → Scanning first: onQrDetected only accepts payloads
+            // while Scanning. This does NOT touch the camera — it's a
+            // pure state transition.
+            viewModel.onPermissionGranted()
+            viewModel.onQrDetected(challenge)
+            if (viewModel.state.value is ScanState.Scanning) {
+                // Parse rejected the pre-supplied payload — fall back
+                // to the classic camera scan (permission flow below).
+                Timber.tag(TAG).w("Pre-supplied challenge failed to parse; falling back to camera")
+                challengeMode = false
+            }
+        }
+    }
+
     // ─── Camera permission plumbing ──────────────────────────────
 
     val hasInitialPermission = remember {
@@ -180,8 +222,8 @@ fun ScanScreen(
             PackageManager.PERMISSION_GRANTED
     }
 
-    LaunchedEffect(hasInitialPermission) {
-        if (hasInitialPermission) {
+    LaunchedEffect(hasInitialPermission, challengeMode) {
+        if (!challengeMode && hasInitialPermission) {
             viewModel.onPermissionGranted()
         }
     }
@@ -192,8 +234,8 @@ fun ScanScreen(
         if (granted) viewModel.onPermissionGranted() else viewModel.onPermissionDenied()
     }
 
-    LaunchedEffect(Unit) {
-        if (!hasInitialPermission) {
+    LaunchedEffect(challengeMode) {
+        if (!challengeMode && !hasInitialPermission) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
@@ -205,8 +247,15 @@ fun ScanScreen(
     ) {
         when (val s = state) {
             ScanState.Idle, ScanState.Scanning -> {
-                CameraScanLayer(viewModel)
-                ScannerOverlay(onPastedCode = viewModel::onQrDetected)
+                if (challengeMode) {
+                    // Transient — the pre-supplied challenge is parsed
+                    // synchronously in the LaunchedEffect above, so this
+                    // spinner is a single-frame flash at most.
+                    ChallengeLoadingState()
+                } else {
+                    CameraScanLayer(viewModel)
+                    ScannerOverlay(onPastedCode = viewModel::onQrDetected)
+                }
             }
             ScanState.PermissionMissing -> {
                 PermissionMissingState(
@@ -223,7 +272,12 @@ fun ScanScreen(
             is ScanState.ChallengeParsed -> {
                 // Keep the camera preview as a backdrop so the visual
                 // transition is smooth — the approval card overlays.
-                CameraScanLayer(viewModel)
+                // In challenge mode there was never a camera (and maybe
+                // no permission) — the scrim over the plain background
+                // carries the card instead.
+                if (!challengeMode) {
+                    CameraScanLayer(viewModel)
+                }
                 ChallengeApprovalCard(
                     tenantLabel = s.tenantLabel,
                     onApprove = {
@@ -248,7 +302,16 @@ fun ScanScreen(
                             viewModel.onBiometricApproved(act, DEMO_EMAIL)
                         }
                     },
-                    onCancel = { viewModel.onChallengeCancelled() },
+                    onCancel = {
+                        if (challengeMode) {
+                            // Push-approval entry — Cancel returns to the
+                            // Home inbox; the request stays pending on
+                            // the server until it expires.
+                            onClose()
+                        } else {
+                            viewModel.onChallengeCancelled()
+                        }
+                    },
                 )
             }
             is ScanState.AwaitingFaceCapture -> {
@@ -298,15 +361,57 @@ fun ScanScreen(
                 AuthorizingCard()
             }
             is ScanState.Authorized -> {
-                AuthorizedCard(onDone = { viewModel.onProofShownToWebcam() })
+                AuthorizedCard(onDone = {
+                    viewModel.onProofShownToWebcam()
+                    // Push-approval entry — Done lands back on the Home
+                    // inbox instead of resetting into the camera scanner.
+                    if (challengeMode) onClose()
+                })
             }
             is ScanState.Error -> {
                 ErrorCard(
                     code = s.code,
                     message = s.message,
-                    onRetry = { viewModel.retry() },
+                    onRetry = {
+                        viewModel.retry()
+                        // Re-feed the pre-supplied challenge after the
+                        // state machine resets to Idle.
+                        if (challengeMode) challengeAttempt++
+                    },
                 )
             }
+        }
+    }
+}
+
+// ─── Pre-supplied challenge loading (no camera) ──────────────────
+
+/**
+ * Placeholder while the pre-supplied challenge transits Idle/Scanning.
+ * The parse is synchronous, so in practice this renders for at most a
+ * frame — it exists so challenge-mode never mounts the camera preview.
+ */
+@Composable
+private fun ChallengeLoadingState() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            CircularProgressIndicator(
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 3.dp,
+            )
+            Text(
+                text  = stringResource(R.string.scan_push_loading),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

@@ -4,6 +4,8 @@ import androidx.fragment.app.FragmentActivity
 import app.cash.turbine.test
 import dev.zeroauth.android.net.DemoPortalApi
 import dev.zeroauth.android.net.PairingSession
+import dev.zeroauth.android.net.PendingRequestsBody
+import dev.zeroauth.android.net.PendingRequestsResponse
 import dev.zeroauth.android.net.SessionResponse
 import dev.zeroauth.android.net.SubmitProofRequest
 import dev.zeroauth.android.net.SubmitProofResponse
@@ -138,6 +140,9 @@ class ScanViewModelTest {
     private val okDemoPortalApi: DemoPortalApi = object : DemoPortalApi {
         override suspend fun submitProof(body: SubmitProofRequest): SubmitProofResponse =
             SubmitProofResponse(ok = true, redirect = "/dashboard")
+
+        override suspend fun pendingRequests(body: PendingRequestsBody): PendingRequestsResponse =
+            PendingRequestsResponse(requests = emptyList())
     }
 
     /**
@@ -154,6 +159,9 @@ class ScanViewModelTest {
                     retrofit2.Response.error<SubmitProofResponse>(status, rb),
                 )
             }
+
+            override suspend fun pendingRequests(body: PendingRequestsBody): PendingRequestsResponse =
+                PendingRequestsResponse(requests = emptyList())
         }
 
     private fun newViewModel(
