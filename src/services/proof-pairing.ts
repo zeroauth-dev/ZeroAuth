@@ -502,6 +502,30 @@ export async function createSession(
  * production path replaces this poll with FCM push + a bind-time
  * device token — tracked in the threat model.
  */
+/**
+ * Coarsen a raw User-Agent to a browser+OS family ("Chrome on macOS") for
+ * the approval-inbox card. The full UA version string is deliberately NOT
+ * surfaced (security review Finding 3): the inbox is authenticated only by
+ * public-DID knowledge, so it must not hand out a fingerprintable device
+ * string. The coarse family is enough for the "someone's signing in from…"
+ * demo context and reveals no more than the login-pending fact A-47 accepts.
+ */
+function coarseDeviceHint(ua: string | null): string | null {
+  if (!ua) return null;
+  const browser = /\bedg/i.test(ua) ? 'Edge'
+    : /\b(chrome|crios)/i.test(ua) ? 'Chrome'
+    : /\b(firefox|fxios)/i.test(ua) ? 'Firefox'
+    : /\bsafari/i.test(ua) ? 'Safari'
+    : 'a browser';
+  const os = /windows/i.test(ua) ? 'Windows'
+    : /(macintosh|mac os)/i.test(ua) ? 'macOS'
+    : /android/i.test(ua) ? 'Android'
+    : /(iphone|ipad|ios)/i.test(ua) ? 'iOS'
+    : /linux/i.test(ua) ? 'Linux'
+    : null;
+  return os ? `${browser} on ${os}` : browser;
+}
+
 export async function listPinnedPendingSessions(
   tenantId: string,
   environment: ApiKeyEnvironment,
@@ -511,7 +535,7 @@ export async function listPinnedPendingSessions(
   qrPayload: string;
   expiresAt: string;
   createdAt: string;
-  desktopUserAgent: string | null;
+  deviceHint: string | null;
 }>> {
   const pool = getPool();
   const result = await pool.query<{
@@ -535,7 +559,7 @@ export async function listPinnedPendingSessions(
     qrPayload: buildQrPayload(row.id, row.nonce_hex, tenantDomain),
     expiresAt: new Date(row.expires_at).toISOString(),
     createdAt: new Date(row.created_at).toISOString(),
-    desktopUserAgent: row.desktop_user_agent,
+    deviceHint: coarseDeviceHint(row.desktop_user_agent),
   }));
 }
 
@@ -595,6 +619,15 @@ export async function verifyAndConsumeForClaim(
       : new Date(row.expires_at as unknown as string).getTime();
     if (expiresMs <= Date.now()) throw new PairingSessionExpired();
 
+    // ── Pinned-session guard (bank 2FA). The claim/attendance flow NEVER
+    //    opens a DID-pinned session — only the bank password-login does —
+    //    and it has no user DID to compare against here (the commitment
+    //    comes from the request). A pinned session reaching this shared
+    //    consumer is refused outright, uniform with not-found (A-25), so a
+    //    bank-login session can't be consumed sideways. Belt to the
+    //    expected_did brace on the consume UPDATE below (security review). ──
+    if (row.expected_did) throw new PairingSessionNotFound();
+
     // ── session_bind token (A-13) ──
     if (!presentedSessionBindToken) throw new PairingSessionBindMismatch('cookie absent');
     const presentedHash = crypto.createHash('sha256').update(presentedSessionBindToken).digest();
@@ -641,7 +674,7 @@ export async function verifyAndConsumeForClaim(
     const claimed = await exec.query(
       `UPDATE proof_pairing_sessions
          SET state = 'consumed', consumed_at = NOW()
-       WHERE id = $1 AND state = 'issued'
+       WHERE id = $1 AND state = 'issued' AND expected_did IS NULL
        RETURNING id`,
       [sessionId],
     );
@@ -760,6 +793,27 @@ export async function verifyIdentityProof(
       throw new PairingProofInvalid('public signals shape');
     }
 
+    // ── Check 3b: pinned-DID enforcement (bank 2FA). A session opened by a
+    //    password login is consumable ONLY by its pinned DID — on EVERY
+    //    consumer of proof_pairing_sessions, not just submitProof (a Critical
+    //    the security review caught: /v1/identity/verify shares this table).
+    //    Uniform with did-unknown (A-25); belt to the expected_did brace on
+    //    the consume UPDATE below. ──
+    if (row.expected_did && row.expected_did !== did) {
+      await recordAuditEvent(tenantId, {
+        environment,
+        actorType: 'api_key',
+        action: 'pairing.pinned_did_mismatch',
+        entityType: 'pairing_session',
+        entityId: challengeId,
+        status: 'failure',
+        summary: 'identity verify DID does not match the session-pinned DID',
+      }).catch(err => logger.warn('proof-pairing: pinned-did audit failed', {
+        error: (err as Error).message,
+      }));
+      throw new PairingDidUnknown('pinned DID mismatch');
+    }
+
     // ── Check 4: user lookup by (tenant, did). Column-based — this is the
     //    form registerFaceFirstIdentity (identity.ts) writes. The metadata
     //    findUserByDid above serves the W3 submitProof path, whose users come
@@ -809,8 +863,9 @@ export async function verifyIdentityProof(
       `UPDATE proof_pairing_sessions
          SET state = 'consumed', consumed_user_id = $2, consumed_at = NOW()
        WHERE id = $1 AND state = 'issued'
+         AND (expected_did IS NULL OR expected_did = $3)
        RETURNING *`,
-      [challengeId, user.id],
+      [challengeId, user.id, did],
     );
     if (claim.rows.length === 0) throw new PairingSessionAlreadyBound();
 
@@ -1027,6 +1082,9 @@ export async function submitProof(
     }
 
     // ─── Check 9: atomic consume ──────────────────────────────────
+    // The expected_did brace makes the DB the single enforcement point
+    // for the pin — even if check 3b above were ever removed, no pinned
+    // session can flip to consumed for a foreign DID (security review).
     const pool = getPool();
     const claim = await pool.query<ProofPairingSession>(
       `UPDATE proof_pairing_sessions
@@ -1034,8 +1092,9 @@ export async function submitProof(
              consumed_user_id = $2,
              consumed_at = NOW()
        WHERE id = $1 AND state = 'issued'
+         AND (expected_did IS NULL OR expected_did = $3)
        RETURNING *`,
-      [sessionId, user.id],
+      [sessionId, user.id, did],
     );
     if (claim.rows.length === 0) {
       // A-14: someone else won the race.

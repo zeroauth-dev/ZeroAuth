@@ -142,7 +142,10 @@ export async function bindEnrollment(
   logger.info('demo-bank: enrollment bound to account', {
     tenantId,
     registrationSessionId,
-    did: row.did,
+    // Log only a DID prefix, matching the pairing path's did_sha256
+    // convention (security review Finding 5) — a DID is a stable,
+    // correlatable identity pointer; keep it out of operational logs.
+    didPrefix: row.did.slice(0, 24),
   });
   return { status: bound.status, did: bound.did };
 }
@@ -176,6 +179,10 @@ export async function verifyBankLogin(
   }
 
   if (account.status === 'locked' || account.failed_login_count >= MAX_FAILED_LOGINS) {
+    // Timing uniformity (security review Finding 4): pay one scrypt like the
+    // unknown-customer and wrong-password paths so a locked account is not
+    // distinguishable by response latency.
+    await verifyPassword(password, await dummyHash()).catch(() => false);
     throw new BankAccountLocked();
   }
 

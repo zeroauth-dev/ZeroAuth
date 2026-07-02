@@ -273,7 +273,7 @@ describe('POST /api/demo-portal/device/pending', () => {
     listPinnedPendingSessionsMock.mockResolvedValue([{
       id: 'sess-1', qrPayload: 'za:pair:1:sess-1:nonce:zeroauth.dev:abcd',
       expiresAt: '2030-01-01T00:00:00Z', createdAt: '2029-12-31T23:56:00Z',
-      desktopUserAgent: 'Mozilla/5.0 (Macintosh) Chrome/126',
+      deviceHint: 'Chrome on macOS',
     }]);
 
     const res = await request(app).post('/api/demo-portal/device/pending').send({ did: DID });
@@ -284,7 +284,7 @@ describe('POST /api/demo-portal/device/pending', () => {
     expect(r.sessionId).toBe('sess-1');
     expect(r.qrPayload).toContain('za:pair:1:');
     expect(r.bank).toBe('NeoBank');
-    expect(r.deviceHint).toContain('Chrome');
+    expect(r.deviceHint).toBe('Chrome on macOS');
     expect(listPinnedPendingSessionsMock).toHaveBeenCalledWith(DEMO_TENANT_ID, 'live', DID);
   });
 

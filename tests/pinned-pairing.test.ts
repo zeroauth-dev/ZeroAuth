@@ -16,7 +16,13 @@ jest.mock('../src/services/db', () => ({ getPool: () => ({ query: queryMock }) }
 jest.mock('../src/services/platform', () => ({ recordAuditEvent: jest.fn(() => Promise.resolve()) }));
 jest.mock('../src/services/zkp', () => ({ verifyProofOffChain: jest.fn(() => true) }));
 
-import { submitProof, PairingDidUnknown } from '../src/services/proof-pairing';
+import {
+  submitProof,
+  verifyIdentityProof,
+  verifyAndConsumeForClaim,
+  PairingDidUnknown,
+  PairingSessionNotFound,
+} from '../src/services/proof-pairing';
 
 const TENANT = 'tenant-demo';
 const PINNED_DID = 'did:zeroauth:face:' + 'aa'.repeat(20);
@@ -83,5 +89,51 @@ describe('submitProof — expected_did pinning (bank 2FA step-up)', () => {
       submitProof(SESSION, TENANT, 'live', OTHER_DID, PROOF, ['1', '2', '3'], {}, BIND_TOKEN),
     ).rejects.toBeInstanceOf(PairingDidUnknown);
     expect(userLookupRan(calls)).toBe(true); // reached the lookup — no pin gate
+  });
+});
+
+// The Critical the security review caught: proof_pairing_sessions has THREE
+// consume functions and the pin must hold on every one, not just submitProof.
+
+describe('verifyIdentityProof — pin holds (shared-table Critical)', () => {
+  function consumeRan(calls: string[]): boolean {
+    return calls.some(sql => sql.includes('UPDATE proof_pairing_sessions') && sql.includes("state = 'consumed'"));
+  }
+
+  it('REJECTS a foreign DID on a pinned challenge BEFORE the user lookup, never consuming', async () => {
+    const calls = wirePool(PINNED_DID);
+    await expect(
+      verifyIdentityProof(SESSION, TENANT, 'live', OTHER_DID, PROOF, ['1', '2', '3']),
+    ).rejects.toBeInstanceOf(PairingDidUnknown);
+    expect(userLookupRan(calls)).toBe(false);
+    expect(consumeRan(calls)).toBe(false);
+  });
+
+  it('lets the pinned DID through to the user lookup', async () => {
+    const calls = wirePool(PINNED_DID);
+    await expect(
+      verifyIdentityProof(SESSION, TENANT, 'live', PINNED_DID, PROOF, ['1', '2', '3']),
+    ).rejects.toBeInstanceOf(PairingDidUnknown); // user lookup empty → still unknown
+    expect(userLookupRan(calls)).toBe(true);
+  });
+});
+
+describe('verifyAndConsumeForClaim — refuses any pinned session outright', () => {
+  it('a pinned session is uniform not-found (the claim flow never pins)', async () => {
+    const calls = wirePool(PINNED_DID);
+    await expect(
+      verifyAndConsumeForClaim(SESSION, TENANT, 'live', 123n, PROOF, ['1', '2', '3'], BIND_TOKEN),
+    ).rejects.toBeInstanceOf(PairingSessionNotFound);
+    // never reaches the consume UPDATE
+    expect(calls.some(sql => sql.includes("state = 'consumed'"))).toBe(false);
+  });
+
+  it('an unpinned session proceeds past the pin guard (to the bind check)', async () => {
+    // expected_did NULL → the guard is skipped; a missing bind token then
+    // fails at the A-13 check, proving the guard let it through.
+    wirePool(null);
+    await expect(
+      verifyAndConsumeForClaim(SESSION, TENANT, 'live', 123n, PROOF, ['1', '2', '3'], undefined),
+    ).rejects.not.toBeInstanceOf(PairingSessionNotFound);
   });
 });

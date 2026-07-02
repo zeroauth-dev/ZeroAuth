@@ -65,6 +65,7 @@ import {
   PlayIntegrityInsufficient,
 } from '../services/proof-pairing';
 import { DEMO_PORTAL_TENANT_ID } from '../services/demo-portal-seed';
+import { pgRateLimit } from '../middleware/rate-limit';
 import { recordAuditEvent } from '../services/platform';
 import { ApiKeyEnvironment, Groth16Proof } from '../types';
 import {
@@ -1592,6 +1593,12 @@ router.get('/signup/:id', async (req: Request, res: Response) => {
 const BANK_EMAIL_PATTERN = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/;
 const BANK_DID_PATTERN = /^did:zeroauth:[a-z0-9-]+:[a-f0-9]{20,80}$/i;
 
+// Per-IP throttles on the public bank endpoints (security review Finding 3):
+// the global app limiter is coarse; these bound password-guessing on /login
+// and inbox-enumeration on /device/pending independent of overall traffic.
+const bankLoginLimiter = pgRateLimit({ route: 'demo:bank:login', windowMs: 60_000, max: 20, keyBy: 'ip' });
+const bankPendingLimiter = pgRateLimit({ route: 'demo:device:pending', windowMs: 60_000, max: 60, keyBy: 'ip' });
+
 /**
  * POST /api/demo-portal/bank/signup
  *
@@ -1739,7 +1746,7 @@ router.get('/bank/signup/:id', async (req: Request, res: Response) => {
  * 401 invalid_credentials (uniform) · 409 enrollment_pending ·
  * 423 account_locked · 429 too_many_pending_sessions
  */
-router.post('/bank/login', async (req: Request, res: Response) => {
+router.post('/bank/login', bankLoginLimiter, async (req: Request, res: Response) => {
   try {
     const tenantId = await resolveDemoPortalTenantId();
     if (!tenantId) {
@@ -1828,7 +1835,7 @@ router.post('/bank/login', async (req: Request, res: Response) => {
  * 200 { requests: [{ sessionId, qrPayload, bank, deviceHint,
  *                    requestedAt, expiresAt }] }
  */
-router.post('/device/pending', async (req: Request, res: Response) => {
+router.post('/device/pending', bankPendingLimiter, async (req: Request, res: Response) => {
   try {
     const tenantId = await resolveDemoPortalTenantId();
     if (!tenantId) {
@@ -1848,8 +1855,8 @@ router.post('/device/pending', async (req: Request, res: Response) => {
         qr_payload: s.qrPayload,
         qrPayload: s.qrPayload,
         bank: 'NeoBank',
-        device_hint: s.desktopUserAgent ? s.desktopUserAgent.slice(0, 120) : null,
-        deviceHint: s.desktopUserAgent ? s.desktopUserAgent.slice(0, 120) : null,
+        device_hint: s.deviceHint,
+        deviceHint: s.deviceHint,
         requested_at: s.createdAt,
         requestedAt: s.createdAt,
         expires_at: s.expiresAt,
