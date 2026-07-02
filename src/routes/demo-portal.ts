@@ -1960,11 +1960,13 @@ router.post('/bank/transfer', bankLoginLimiter, async (req: Request, res: Respon
     }
     const rupees = Number(req.body?.amount);
     const payeeName = typeof req.body?.payeeName === 'string' ? req.body.payeeName.trim().slice(0, 60) : '';
-    const payeeHandle = typeof req.body?.payeeHandle === 'string' ? req.body.payeeHandle.trim().slice(0, 80) : null;
     const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 140) : null;
 
-    if (!Number.isFinite(rupees) || rupees <= 0 || !Number.isInteger(rupees)) {
-      res.status(400).json({ error: 'invalid_request', message: 'amount must be a positive whole number of rupees.' });
+    // Safe-integer + a sane ₹10 crore ceiling (security review Finding 2):
+    // above MAX_SAFE_INTEGER the paise math loses precision, which would
+    // garble the approval label the user consents to and the audit trail.
+    if (!Number.isSafeInteger(rupees) || rupees <= 0 || rupees > 10_00_00_000) {
+      res.status(400).json({ error: 'invalid_request', message: 'amount must be a positive whole number of rupees, up to ₹10,00,00,000.' });
       return;
     }
     if (payeeName.length < 2) {
@@ -1979,7 +1981,7 @@ router.post('/bank/transfer', bankLoginLimiter, async (req: Request, res: Respon
       return;
     }
 
-    const input = { amountPaise, payeeName, payeeHandle, note };
+    const input = { amountPaise, payeeName, note };
 
     if (amountPaise >= STEP_UP_THRESHOLD_PAISE) {
       // Step-up: pinned, labelled approval session.

@@ -360,7 +360,6 @@ export async function getBankOverview(
 export interface TransferInput {
   amountPaise: number;
   payeeName: string;
-  payeeHandle?: string | null;
   note?: string | null;
 }
 
@@ -430,10 +429,19 @@ export async function commitTransferIfApproved(
   const row = (await pool.query<{
     id: string; status: string; bank_account_id: string; amount_paise: string;
     counterparty: string; session_state: string | null; session_expires: Date | null;
+    session_did: string | null; session_label: string | null; account_did: string | null;
   }>(
+    // JOIN the account so the gate can RE-ASSERT the pin it depends on
+    // (security review Finding 1): money settles only when the linked
+    // session was a payment session (context_label present) pinned to THIS
+    // account's DID — the gate owns its invariant instead of inheriting it
+    // transitively from how the session was created.
     `SELECT t.id, t.status, t.bank_account_id, t.amount_paise, t.counterparty,
-            s.state AS session_state, s.expires_at AS session_expires
+            s.state AS session_state, s.expires_at AS session_expires,
+            s.expected_did AS session_did, s.context_label AS session_label,
+            a.did AS account_did
        FROM demo_bank_transactions t
+       JOIN demo_bank_accounts a ON a.id = t.bank_account_id
        LEFT JOIN proof_pairing_sessions s ON s.id = t.pairing_session_id
       WHERE t.id = $1 AND t.bank_account_id = $2`,
     [transferId, bankAccountId],
@@ -449,6 +457,19 @@ export async function commitTransferIfApproved(
   const expired = row.session_expires ? new Date(row.session_expires).getTime() <= Date.now() : false;
 
   if (row.session_state === 'consumed') {
+    // The session must be a PAYMENT session (labelled) pinned to this
+    // account's DID. A consumed login session, an unlabelled session, or one
+    // pinned to a different DID must NOT settle money — decline the anomaly.
+    if (!row.session_label || !row.account_did || row.session_did !== row.account_did) {
+      logger.warn('demo-bank: consumed session failed the payment-pin re-check; declining', {
+        transferId, hasLabel: !!row.session_label, didMatch: row.session_did === row.account_did,
+      });
+      await pool.query(
+        `UPDATE demo_bank_transactions SET status = 'declined' WHERE id = $1 AND status = 'pending_approval'`,
+        [transferId],
+      );
+      return { status: 'declined', ...base, balancePaise: null };
+    }
     // Approved. Flip to completed (single-winner), then debit (guarded).
     const flip = await pool.query<{ amount_paise: string }>(
       `UPDATE demo_bank_transactions SET status = 'completed', settled_at = NOW()

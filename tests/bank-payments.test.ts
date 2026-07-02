@@ -17,7 +17,6 @@ import { config } from '../src/config';
 const mockQuery = jest.fn();
 jest.mock('../src/services/db', () => ({ getPool: () => ({ query: mockQuery }) }));
 
-const DEMO_TENANT_ID = '67ef58b3-683b-4033-83be-0b90d6dee38c';
 jest.mock('../src/services/tenants', () => ({
   getTenantById: jest.fn().mockResolvedValue({ id: '67ef58b3-683b-4033-83be-0b90d6dee38c', status: 'active' }),
   getTenantByEmail: jest.fn(),
@@ -131,8 +130,10 @@ describe('POST /api/demo-portal/bank/transfer', () => {
     expect(res.status).toBe(401);
   });
 
-  it('400 on a non-positive / non-integer amount', async () => {
-    for (const amount of [0, -5, 12.5]) {
+  it('400 on a non-positive / non-integer / over-ceiling amount', async () => {
+    // 0/neg/float rejected; > ₹10cr rejected (Finding 2 — precision guard);
+    // MAX_SAFE_INTEGER+1 rejected (not a safe integer).
+    for (const amount of [0, -5, 12.5, 20_00_00_000, Number.MAX_SAFE_INTEGER + 1]) {
       const res = await request(app).post('/api/demo-portal/bank/transfer').set('Cookie', COOKIE).send({ amount, payeeName: 'Priya' });
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('invalid_request');

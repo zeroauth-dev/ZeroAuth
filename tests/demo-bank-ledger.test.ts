@@ -44,19 +44,24 @@ describe('executeImmediateTransfer', () => {
 });
 
 describe('commitTransferIfApproved — money moves only on a consumed session', () => {
+  const DID = 'did:zeroauth:face:' + 'cc'.repeat(20);
   function wire(opts: {
     txnStatus?: string; sessionState?: string | null; sessionExpires?: Date | null;
     flipRows?: unknown[]; debitRows?: unknown[];
+    sessionDid?: string | null; sessionLabel?: string | null; accountDid?: string | null;
   }) {
     const calls: string[] = [];
     queryMock.mockImplementation(async (sql: string) => {
       calls.push(sql);
-      if (sql.includes('FROM demo_bank_transactions t') && sql.includes('LEFT JOIN')) {
+      if (sql.includes('FROM demo_bank_transactions t') && sql.includes('proof_pairing_sessions')) {
         return { rows: [{
           id: 'txn-1', status: opts.txnStatus ?? 'pending_approval', bank_account_id: ACCT,
           amount_paise: '2500000', counterparty: 'Priya',
           session_state: opts.sessionState ?? 'issued',
           session_expires: opts.sessionExpires ?? new Date(Date.now() + 60_000),
+          session_did: opts.sessionDid !== undefined ? opts.sessionDid : DID,
+          session_label: opts.sessionLabel !== undefined ? opts.sessionLabel : 'Pay ₹25,000 to Priya',
+          account_did: opts.accountDid !== undefined ? opts.accountDid : DID,
         }] };
       }
       if (sql.includes("UPDATE demo_bank_transactions SET status = 'completed'")) {
@@ -119,6 +124,21 @@ describe('commitTransferIfApproved — money moves only on a consumed session', 
     queryMock.mockResolvedValueOnce({ rows: [] });
     const r = await commitTransferIfApproved(ACCT, 'nope');
     expect(r.status).toBe('not_found');
+  });
+
+  // Security review Finding 1: the gate re-asserts the pin it depends on.
+  it('consumed session pinned to a DIFFERENT did → declined, NO debit', async () => {
+    const calls = wire({ sessionState: 'consumed', sessionDid: 'did:zeroauth:face:' + 'ff'.repeat(20) });
+    const r = await commitTransferIfApproved(ACCT, 'txn-1');
+    expect(r.status).toBe('declined');
+    expect(debitRan(calls)).toBe(false);
+  });
+
+  it('consumed session with NO label (a login session, not a payment) → declined, NO debit', async () => {
+    const calls = wire({ sessionState: 'consumed', sessionLabel: null });
+    const r = await commitTransferIfApproved(ACCT, 'txn-1');
+    expect(r.status).toBe('declined');
+    expect(debitRan(calls)).toBe(false);
   });
 });
 
