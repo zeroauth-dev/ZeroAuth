@@ -67,6 +67,9 @@ import kotlinx.coroutines.delay
 import java.time.Instant
 
 private val OnNetworkGreen = Color(0xFF1D9E75)
+
+/** Accent dot for a payment approval — amber, distinct from the login accent. */
+private val PaymentAmber = Color(0xFFF0A020)
 private const val TYPE_CHECK_IN = "check_in"
 private const val TYPE_CHECK_OUT = "check_out"
 
@@ -309,23 +312,52 @@ private fun PendingApprovalCard(
             modifier = Modifier.fillMaxWidth().padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(approval.bank, style = MaterialTheme.typography.headlineSmall)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.secondary),
-                )
+            val browser = friendlyDeviceHint(approval.deviceHint)
+                ?: stringResource(R.string.home_request_unknown_device)
+            if (approval.isPayment) {
+                // Payment approval: "Payment approval" title, the server's
+                // contextLabel ("Pay ₹5,000 to Priya") as the prominent
+                // line, an amber accent dot so it reads distinct from a
+                // login, and the browser demoted to a secondary line.
                 Text(
-                    text = stringResource(
-                        R.string.home_request_kind_device,
-                        friendlyDeviceHint(approval.deviceHint)
-                            ?: stringResource(R.string.home_request_unknown_device),
-                    ),
+                    stringResource(R.string.home_request_payment_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(PaymentAmber),
+                    )
+                    Text(
+                        text = approval.contextLabel
+                            ?: stringResource(R.string.home_request_payment_generic),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.home_request_via_device, browser),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            } else {
+                // Login approval: unchanged rendering.
+                Text(approval.bank, style = MaterialTheme.typography.headlineSmall)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.secondary),
+                    )
+                    Text(
+                        text = stringResource(R.string.home_request_kind_device, browser),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             val requestedAgo = approval.requestedAt?.let { parseIsoMs(it) }
                 ?.let { friendlyAgo(nowMs - it) }

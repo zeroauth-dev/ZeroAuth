@@ -70,6 +70,8 @@ class HomeViewModel(
                     deviceHint = r.deviceHint,
                     requestedAt = r.requestedAt,
                     expiresAt = r.expiresAt,
+                    contextLabel = r.contextLabel,
+                    kind = r.kind,
                 )
             }
         } catch (t: Throwable) {
@@ -155,7 +157,18 @@ data class PendingApproval(
     /** ISO-8601, nullable — server always sends it today. */
     val requestedAt: String?,
     val expiresAt: String?,
-)
+    /**
+     * Human-readable payment line — e.g. "Pay ₹5,000 to Priya". Null for
+     * a plain bank LOGIN, which keeps the original login rendering.
+     */
+    val contextLabel: String? = null,
+    /** "login" | "payment" — drives the payment-vs-login card styling. */
+    val kind: String? = null,
+) {
+    /** A payment approval reads distinctly from a login in the inbox. */
+    val isPayment: Boolean
+        get() = kind == "payment" || contextLabel != null
+}
 
 /** One claimed company on the Home hub. */
 data class PassCard(

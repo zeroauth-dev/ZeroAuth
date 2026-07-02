@@ -158,4 +158,12 @@ data class PendingRequestDto(
     @SerialName("requestedAt") val requestedAt: String? = null,
     /** ISO-8601 timestamp the session stops being approvable. */
     @SerialName("expiresAt") val expiresAt: String? = null,
+    /**
+     * Human-readable line for a payment approval — e.g. "Pay ₹5,000 to
+     * Priya". Null for a plain bank LOGIN. (Server also sends the
+     * snake_case `context_label` twin, dropped by ignoreUnknownKeys.)
+     */
+    @SerialName("contextLabel") val contextLabel: String? = null,
+    /** "login" | "payment" — lets the inbox render a payment distinctly. */
+    @SerialName("kind") val kind: String? = null,
 )

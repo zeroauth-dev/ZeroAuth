@@ -18,6 +18,9 @@
     <!-- Home — bank-2FA approval inbox (UPI-collect style) -->
     <string name="home_requests_title">Verification requests</string>
     <string name="home_request_kind_device">Login approval · %1$s</string>
+    <string name="home_request_payment_title">Payment approval</string>
+    <string name="home_request_payment_generic">Approve a payment</string>
+    <string name="home_request_via_device">via %1$s</string>
     <string name="home_request_unknown_device">Unknown browser</string>
     <string name="home_request_requested_ago">Requested %1$s</string>
     <string name="home_request_expires_in">Expires in %1$s</string>
