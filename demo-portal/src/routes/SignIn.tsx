@@ -6,20 +6,29 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { QRCodeCanvas } from 'qrcode.react';
+import { Button } from '../components/Button';
+import { ApiError, bankLogin, type BankLoginResponse } from '../lib/api';
 
 /**
- * NeoBank — Sign-in page.
+ * NeoBank — Sign-in page (bank 2FA).
  *
- * On mount we open a pairing session via POST /api/demo-portal/init-login
- * (the server-bridge wave will land that endpoint; the response shape
- * mirrors /v1/proof-pairing/sessions so this page works end-to-end the
- * moment the bridge is wired in).
+ * Password-first: the default view is a customer-id (email) + password
+ * form. POST /api/demo-portal/bank/login runs the bank's first factor;
+ * on 201 a DID-pinned pairing session is already open server-side and
+ * the ZeroAuth app on the enrolled phone receives it as an approval
+ * request (UPI-collect style). The page then sits in `awaiting_approval`
+ * with the same SSE → claim → /dashboard machinery the QR flow uses. The
+ * returned qrPayload is surfaced only behind a "phone not receiving it?"
+ * expander as the offline fallback.
  *
- * The QR is rendered locally with qrcode.react, the page subscribes to
- * /api/demo-portal/sessions/:id/stream over SSE, and on the terminal
- * `session_bound` event we navigate to /dashboard.
+ * The original QR-only flow (POST /api/demo-portal/init-login) remains
+ * reachable via the "Sign in by QR instead" link and is unchanged.
+ *
+ * Either way the page subscribes to /api/demo-portal/sessions/:id/events
+ * over SSE, and on the terminal `session_bound` event claims the desktop
+ * cookie and navigates to /dashboard.
  *
  * SSE + state-machine shape mirrors dashboard/src/routes/demo/QrProofLogin.tsx —
  * see that file for the canonical reducer; this is the customer-facing twin.
@@ -48,6 +57,7 @@ type SessionStreamEvent =
 // ─── Reducer ───────────────────────────────────────────────────
 
 type SignInPhase =
+  | { phase: 'credentials' }
   | { phase: 'idle' }
   | { phase: 'creating' }
   | {
@@ -58,6 +68,13 @@ type SignInPhase =
       expiresAt: Date;
       secondsLeft: number;
     }
+  | {
+      phase: 'awaiting_approval';
+      sessionId: string;
+      qrPayload: string;
+      expiresAt: Date;
+      secondsLeft: number;
+    }
   | { phase: 'success'; userEmail: string }
   | { phase: 'expired' | 'error'; code: string; message: string };
 
@@ -65,11 +82,17 @@ type SignInAction =
   | { type: 'create_started' }
   | { type: 'create_succeeded'; payload: InitLoginResponse }
   | { type: 'create_failed'; code: string; message: string }
+  | { type: 'login_succeeded'; payload: BankLoginResponse }
+  | { type: 'use_qr_flow' }
   | { type: 'tick' }
   | { type: 'sse_bound'; userEmail: string }
   | { type: 'sse_expired' }
   | { type: 'sse_error'; code: string; message: string }
   | { type: 'restart' };
+
+function secondsUntil(expiresAt: Date): number {
+  return Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+}
 
 function reducer(state: SignInPhase, action: SignInAction): SignInPhase {
   switch (action.type) {
@@ -77,21 +100,36 @@ function reducer(state: SignInPhase, action: SignInAction): SignInPhase {
       return { phase: 'creating' };
     case 'create_succeeded': {
       const expiresAt = new Date(action.payload.expiresAt);
-      const secondsLeft = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
       return {
         phase: 'pending',
         sessionId: action.payload.sessionId,
         qrPayload: action.payload.qrPayload,
         deeplink: action.payload.deeplink,
         expiresAt,
-        secondsLeft,
+        secondsLeft: secondsUntil(expiresAt),
       };
     }
     case 'create_failed':
       return { phase: 'error', code: action.code, message: action.message };
+    case 'login_succeeded': {
+      // Bank first factor accepted — a DID-pinned approval request is
+      // already sitting in the ZeroAuth app. Wait for it over SSE.
+      const expiresAt = new Date(action.payload.expiresAt);
+      return {
+        phase: 'awaiting_approval',
+        sessionId: action.payload.sessionId,
+        qrPayload: action.payload.qrPayload,
+        expiresAt,
+        secondsLeft: secondsUntil(expiresAt),
+      };
+    }
+    case 'use_qr_flow':
+      // 'idle' is the QR flow's bootstrap state — the mount effect
+      // fires initLogin for it.
+      return { phase: 'idle' };
     case 'tick': {
-      if (state.phase !== 'pending') return state;
-      const next = Math.max(0, Math.floor((state.expiresAt.getTime() - Date.now()) / 1000));
+      if (state.phase !== 'pending' && state.phase !== 'awaiting_approval') return state;
+      const next = secondsUntil(state.expiresAt);
       return next === state.secondsLeft ? state : { ...state, secondsLeft: next };
     }
     case 'sse_bound':
@@ -100,12 +138,12 @@ function reducer(state: SignInPhase, action: SignInAction): SignInPhase {
       return {
         phase: 'expired',
         code: 'session_expired',
-        message: 'The login QR expired before your phone finished the proof. Try again.',
+        message: 'The sign-in request expired before it was approved on your phone. Try again.',
       };
     case 'sse_error':
       return { phase: 'error', code: action.code, message: action.message };
     case 'restart':
-      return { phase: 'idle' };
+      return { phase: 'credentials' };
     default:
       return state;
   }
@@ -210,7 +248,7 @@ const PROOF_QR_PREFIX = 'za:proof:1:';
 
 export default function SignIn() {
   const navigate = useNavigate();
-  const [state, dispatch] = useReducer(reducer, { phase: 'idle' });
+  const [state, dispatch] = useReducer(reducer, { phase: 'credentials' });
   const sessionIdRef = useRef<string | null>(null);
 
   const create = useCallback(async () => {
@@ -235,8 +273,13 @@ export default function SignIn() {
   // SSE subscription — mirrors QrProofLogin.tsx. The terminal events
   // (`session_bound`, `session_expired`, `session_error`) are named so
   // the EventSource listener can dispatch directly into the reducer.
+  // Covers both the QR flow (`pending`) and the password-first push
+  // flow (`awaiting_approval`) — same pairing session either way.
   useEffect(() => {
-    const sessionId = state.phase === 'pending' ? state.sessionId : null;
+    const sessionId =
+      state.phase === 'pending' || state.phase === 'awaiting_approval'
+        ? state.sessionId
+        : null;
     if (!sessionId) return;
     if (sessionIdRef.current === sessionId) return;
     sessionIdRef.current = sessionId;
@@ -317,11 +360,15 @@ export default function SignIn() {
       if (sessionIdRef.current === sessionId) sessionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.phase === 'pending' ? state.sessionId : null]);
+  }, [
+    state.phase === 'pending' || state.phase === 'awaiting_approval'
+      ? state.sessionId
+      : null,
+  ]);
 
   // 1Hz countdown — visual only; SSE remains the source of truth.
   useEffect(() => {
-    if (state.phase !== 'pending') return;
+    if (state.phase !== 'pending' && state.phase !== 'awaiting_approval') return;
     const handle = window.setInterval(() => dispatch({ type: 'tick' }), 1000);
     return () => window.clearInterval(handle);
   }, [state.phase]);
@@ -345,9 +392,15 @@ export default function SignIn() {
         <header className="mb-6 space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">NeoBank</p>
           <h1 className="text-2xl font-semibold text-slate-900">Sign in</h1>
-          <p className="text-sm text-slate-600">Open ZeroAuth, tap Sign in, scan this code.</p>
+          <p className="text-sm text-slate-600">{subtitleFor(state.phase)}</p>
         </header>
 
+        {state.phase === 'credentials' && (
+          <CredentialsForm
+            onSuccess={(payload) => dispatch({ type: 'login_succeeded', payload })}
+            onUseQr={() => dispatch({ type: 'use_qr_flow' })}
+          />
+        )}
         {(state.phase === 'idle' || state.phase === 'creating') && <PendingState />}
         {state.phase === 'pending' && (
           <>
@@ -356,7 +409,22 @@ export default function SignIn() {
               sessionId={state.sessionId}
               onBound={() => dispatch({ type: 'sse_bound', userEmail: 'demo user' })}
             />
+            <button
+              type="button"
+              onClick={() => dispatch({ type: 'restart' })}
+              className="mt-4 text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-700"
+              data-testid="signin-use-password"
+            >
+              Use email &amp; password instead
+            </button>
           </>
+        )}
+        {state.phase === 'awaiting_approval' && (
+          <ApprovalCard
+            qrPayload={state.qrPayload}
+            secondsLeft={state.secondsLeft}
+            onCancel={() => dispatch({ type: 'restart' })}
+          />
         )}
         {state.phase === 'success' && <SuccessState userEmail={state.userEmail} />}
         {(state.phase === 'expired' || state.phase === 'error') && (
@@ -368,7 +436,11 @@ export default function SignIn() {
         )}
 
         <p className="mt-8 text-xs text-slate-500">
-          First time? You&apos;ll be prompted to create an account on your phone — takes 30 seconds.
+          First time?{' '}
+          <Link to="/signup" className="font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900">
+            Open an account
+          </Link>{' '}
+          — takes a minute with ZeroAuth.
         </p>
       </div>
     </div>
@@ -376,6 +448,256 @@ export default function SignIn() {
 }
 
 // ─── Sub-components ────────────────────────────────────────────
+
+function subtitleFor(phase: SignInPhase['phase']): string {
+  switch (phase) {
+    case 'credentials':
+      return 'Enter your email and password — then approve on your phone.';
+    case 'awaiting_approval':
+      return 'Password accepted. One approval left on your phone.';
+    case 'success':
+      return 'Verified with a zero-knowledge proof.';
+    case 'expired':
+    case 'error':
+      return 'Something interrupted the sign-in.';
+    default:
+      // idle / creating / pending — the QR ceremony.
+      return 'Open ZeroAuth, tap Sign in, scan this code.';
+  }
+}
+
+// ─── Password-first form (bank first factor) ───────────────────
+
+interface CredentialsFormProps {
+  onSuccess: (payload: BankLoginResponse) => void;
+  onUseQr: () => void;
+}
+
+type CredentialsError =
+  | { kind: 'inline'; message: string }
+  | { kind: 'enrollment_pending'; message: string };
+
+function mapLoginError(err: unknown): CredentialsError {
+  if (err instanceof ApiError) {
+    switch (err.code) {
+      case 'invalid_credentials':
+        return { kind: 'inline', message: 'Incorrect email or password.' };
+      case 'enrollment_pending':
+        return {
+          kind: 'enrollment_pending',
+          message: 'This account hasn’t finished ZeroAuth enrollment yet.',
+        };
+      case 'account_locked':
+        return {
+          kind: 'inline',
+          message: 'This account is locked after repeated failed attempts. Try again later.',
+        };
+      case 'too_many_pending_sessions':
+        return {
+          kind: 'inline',
+          message: 'Too many sign-in requests are already pending. Wait a moment, then try again.',
+        };
+      default:
+        return { kind: 'inline', message: err.message || 'Sign-in failed. Try again.' };
+    }
+  }
+  return {
+    kind: 'inline',
+    message: (err as Error)?.message || 'Sign-in failed. Try again.',
+  };
+}
+
+function CredentialsForm({ onSuccess, onUseQr }: CredentialsFormProps): ReactNode {
+  const [customerId, setCustomerId] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<CredentialsError | null>(null);
+
+  const canSubmit = customerId.trim().length > 0 && password.length > 0 && !submitting;
+
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const payload = await bankLogin({ customerId: customerId.trim(), password });
+      onSuccess(payload);
+    } catch (err) {
+      setError(mapLoginError(err));
+      setSubmitting(false);
+    }
+    // On success the component unmounts (phase → awaiting_approval);
+    // no need to reset `submitting`.
+  };
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4 text-left" data-testid="signin-credentials">
+      <Field
+        id="signin-email"
+        label="Email"
+        type="email"
+        autoComplete="username"
+        value={customerId}
+        onChange={setCustomerId}
+        placeholder="asha@example.com"
+        autoFocus
+      />
+      <Field
+        id="signin-password"
+        label="Password"
+        type="password"
+        autoComplete="current-password"
+        value={password}
+        onChange={setPassword}
+        placeholder="Your NeoBank password"
+      />
+
+      {error && (
+        <div
+          role="alert"
+          className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+          data-testid="signin-credentials-error"
+        >
+          <p>{error.message}</p>
+          {error.kind === 'enrollment_pending' && (
+            <p className="mt-1">
+              <Link to="/signup" className="font-medium underline underline-offset-2">
+                Finish opening your account
+              </Link>{' '}
+              to activate sign-in.
+            </p>
+          )}
+        </div>
+      )}
+
+      <Button
+        type="submit"
+        size="md"
+        loading={submitting}
+        disabled={!canSubmit}
+        className="w-full"
+        data-testid="signin-credentials-submit"
+      >
+        {submitting ? 'Checking…' : 'Continue'}
+      </Button>
+
+      <p className="text-center">
+        <button
+          type="button"
+          onClick={onUseQr}
+          className="text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-700"
+          data-testid="signin-use-qr"
+        >
+          Sign in by QR instead
+        </button>
+      </p>
+    </form>
+  );
+}
+
+interface FieldProps {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  placeholder?: string;
+  autoFocus?: boolean;
+  autoComplete?: string;
+}
+
+function Field({ id, label, value, onChange, type = 'text', placeholder, autoFocus, autoComplete }: FieldProps): ReactNode {
+  return (
+    <label htmlFor={id} className="block">
+      <span className="mb-1.5 block text-xs font-medium text-slate-700">{label}</span>
+      <input
+        id={id}
+        type={type}
+        value={value}
+        autoFocus={autoFocus}
+        autoComplete={autoComplete}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+      />
+    </label>
+  );
+}
+
+// ─── Awaiting approval (second factor on the phone) ────────────
+
+interface ApprovalCardProps {
+  qrPayload: string;
+  secondsLeft: number;
+  onCancel: () => void;
+}
+
+function ApprovalCard({ qrPayload, secondsLeft, onCancel }: ApprovalCardProps): ReactNode {
+  return (
+    <div className="flex flex-col items-center gap-4" data-testid="signin-awaiting-approval">
+      <div className="flex h-[180px] flex-col items-center justify-center gap-4">
+        <PhonePulseGlyph />
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">
+            Approve the sign-in in your ZeroAuth app
+          </h2>
+          <p className="mt-1 text-xs text-slate-600">
+            We sent an approval request to your enrolled phone. Verify with your
+            face there — nothing biometric touches this browser.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+        <span
+          className="size-2 animate-pulse rounded-full"
+          style={{ backgroundColor: secondsLeft > 30 ? '#10b981' : '#f59e0b' }}
+        />
+        Request expires in {formatCountdown(secondsLeft)}
+      </div>
+
+      <details className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left">
+        <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-[0.14em] text-slate-700">
+          Phone not receiving it? Scan this QR
+        </summary>
+        <div className="mt-3 flex flex-col items-center gap-2">
+          <div className="rounded-xl border border-slate-200 bg-white p-3" data-testid="signin-approval-qr">
+            <QRCodeCanvas value={qrPayload} size={192} level="M" marginSize={2} bgColor="#ffffff" fgColor="#0f172a" />
+          </div>
+          <p className="text-xs text-slate-500">
+            Open ZeroAuth, tap Sign in, and scan — same session, same approval.
+          </p>
+        </div>
+      </details>
+
+      <button
+        type="button"
+        onClick={onCancel}
+        className="text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-700"
+        data-testid="signin-approval-cancel"
+      >
+        Cancel and start over
+      </button>
+    </div>
+  );
+}
+
+/** Pulsing phone with radiating rings — "look at your handset" cue. */
+function PhonePulseGlyph(): ReactNode {
+  return (
+    <div className="relative grid size-20 place-items-center" aria-hidden="true">
+      <span className="absolute inset-0 animate-ping rounded-full bg-slate-200/70 [animation-duration:1.8s]" />
+      <span className="absolute inset-2 animate-ping rounded-full bg-slate-200 [animation-delay:0.4s] [animation-duration:1.8s]" />
+      <span className="relative grid size-12 place-items-center rounded-2xl bg-slate-900 text-white shadow-lg">
+        <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+          <path d="M11 18.5h2" />
+        </svg>
+      </span>
+    </div>
+  );
+}
 
 function PendingState(): ReactNode {
   return (

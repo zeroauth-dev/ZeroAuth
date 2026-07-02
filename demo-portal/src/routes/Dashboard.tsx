@@ -72,12 +72,17 @@ function useSession(): SessionState {
           headers: { Accept: 'application/json' },
         });
         if (!res.ok) throw new Error(`status ${res.status}`);
-        const body = (await res.json()) as Partial<DemoSession>;
+        const body = (await res.json()) as Partial<DemoSession> & {
+          user?: { displayName?: string };
+        };
         if (cancelled) return;
+        // /me sends a dual shape: flat `name` plus nested `user.displayName`
+        // (the api.ts contract). Prefer flat, fall back to nested.
+        const displayName = body.name ?? body.user?.displayName;
         setState({
           data: {
             userId: body.userId ?? MOCK_SESSION.userId,
-            name: body.name && body.name.trim().length > 0 ? body.name : MOCK_SESSION.name,
+            name: displayName && displayName.trim().length > 0 ? displayName : MOCK_SESSION.name,
             did: body.did ?? MOCK_SESSION.did,
             sessionsLast24h: body.sessionsLast24h ?? MOCK_SESSION.sessionsLast24h,
           },

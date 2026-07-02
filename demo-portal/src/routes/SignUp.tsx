@@ -1,28 +1,36 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QRCodeCanvas } from 'qrcode.react';
+import {
+  ApiError,
+  bankSignup,
+  bankSignupStatus,
+  type BankSignupState,
+} from '../lib/api';
 
 /**
- * NeoBank /signup — "open an account" → details → create ZeroAuth identity.
+ * NeoBank /signup — "open an account" → details + password → ZeroAuth 2FA.
  *
  * Two real phases, no fakes:
  *
- *   1. DETAILS — the applicant enters name, email, phone (exactly like
- *      opening any bank account). On submit we POST those to
- *      /api/demo-portal/signup-init, which opens a real registration
- *      session against the ZeroAuth tenant and stores the details on the
- *      created user's profile.
+ *   1. DETAILS — the applicant enters name, email and picks a password
+ *      (the bank's own first factor, scrypt-hashed server-side). On
+ *      submit we POST to /api/demo-portal/bank/signup, which creates the
+ *      pending bank account AND opens a real ZeroAuth enrollment
+ *      ceremony in one shot.
  *
  *   2. ZEROAUTH — the three-QR ceremony. We poll
- *      /api/demo-portal/signup/:id and render QR1→QR2→QR3 as the phone
- *      advances (pair → capture face → prove with a Groth16 proof).
- *      On `completed` the account exists; we route to sign-in.
+ *      /api/demo-portal/bank/signup/:id and render QR1→QR2→QR3 as the
+ *      phone advances (pair → capture face → prove with a Groth16
+ *      proof). On `completed` the ceremony's DID binds onto the bank
+ *      account (accountStatus → active); we show success and route to
+ *      sign-in.
  *
  * Every QR triggers a real ZeroAuth API call; the biometric never leaves
  * the phone — only zero-knowledge proofs cross the wire.
  */
 type Phase = 'details' | 'ceremony';
-type State = 'awaiting_device' | 'awaiting_commitment' | 'awaiting_verification' | 'completed' | 'failed';
+type State = BankSignupState;
 
 const ACCENT = '#0066FF';
 
@@ -30,16 +38,20 @@ const STEP_LABEL: Record<State, string> = {
   awaiting_device: 'Scan 1 of 3 — pair your phone',
   awaiting_commitment: 'Scan 2 of 3 — capture your face',
   awaiting_verification: 'Scan 3 of 3 — prove it’s you',
-  completed: 'Account created',
+  completed: 'Account created — secured by ZeroAuth',
   failed: 'Registration failed',
 };
 const STEP_HELP: Record<State, string> = {
   awaiting_device: 'Open the ZeroAuth app, tap “Create your ZeroAuth identity”, then scan the code below.',
   awaiting_commitment: 'Now scan this code — your phone captures your face locally and derives a zero-knowledge commitment.',
   awaiting_verification: 'Final scan. Your phone generates a Groth16 proof that you own your face — without revealing it.',
-  completed: 'Welcome to NeoBank. Taking you to sign in…',
+  completed: 'Your face is now the second factor on every sign-in. Taking you to sign in…',
   failed: 'Something went wrong. Refresh to start over.',
 };
+
+function passwordStrong(pw: string): boolean {
+  return pw.length >= 8 && /[a-zA-Z]/.test(pw) && /[0-9]/.test(pw);
+}
 
 export default function SignUp() {
   const navigate = useNavigate();
@@ -48,7 +60,8 @@ export default function SignUp() {
   // form
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // ceremony
@@ -58,7 +71,9 @@ export default function SignUp() {
   const [error, setError] = useState<string | null>(null);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const formValid = name.trim().length >= 2 && emailValid;
+  const passwordValid = passwordStrong(password);
+  const confirmValid = confirm === password;
+  const formValid = name.trim().length >= 2 && emailValid && passwordValid && confirmValid;
 
   async function openAccount(e: React.FormEvent) {
     e.preventDefault();
@@ -66,34 +81,35 @@ export default function SignUp() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch('/api/demo-portal/signup-init', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), email: email.trim(), phone: phone.trim() }),
+      const data = await bankSignup({
+        name: name.trim(),
+        customerId: email.trim(),
+        password,
       });
-      if (!res.ok) throw new Error(`Could not start signup (${res.status})`);
-      const data = await res.json();
-      setSessionId(data.session_id);
-      setCurrentDeeplink(data.pair_deeplink);
+      setSessionId(data.signupId);
+      setCurrentDeeplink(data.pairDeeplink);
       setState('awaiting_device');
       setPhase('ceremony');
     } catch (err) {
-      setError((err as Error).message);
+      if (err instanceof ApiError && err.code === 'customer_id_taken') {
+        setError('An account already exists for that email. Try signing in instead.');
+      } else if (err instanceof ApiError && err.code === 'weak_password') {
+        setError('Password must be 8+ characters with at least one letter and one digit.');
+      } else {
+        setError((err as Error).message || 'Could not start signup.');
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
-  // Poll session state once the ceremony begins.
+  // Poll ceremony state once the ceremony begins.
   useEffect(() => {
     if (phase !== 'ceremony' || !sessionId) return;
     let cancelled = false;
     const tick = async () => {
       try {
-        const res = await fetch(`/api/demo-portal/signup/${sessionId}`, { credentials: 'include' });
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await bankSignupStatus(sessionId);
         if (cancelled) return;
         setState(data.state);
         if (data.currentDeeplink) setCurrentDeeplink(data.currentDeeplink);
@@ -111,13 +127,20 @@ export default function SignUp() {
         <button onClick={() => navigate('/')} className="mb-8 self-start text-sm text-slate-400 hover:text-slate-600">← NeoBank</button>
         <p className="font-mono text-xs uppercase tracking-widest text-slate-500">Open an account</p>
         <h1 className="mt-3 font-display text-4xl font-medium leading-tight">A few details, then your face.</h1>
-        <p className="mt-3 text-slate-600">No password to invent. You’ll finish in seconds by verifying with ZeroAuth on your phone.</p>
+        <p className="mt-3 text-slate-600">Pick a password, then make your face the second factor — verified with ZeroAuth on your phone.</p>
 
         <form onSubmit={openAccount} className="mt-8 space-y-4">
           <Field label="Full name" value={name} onChange={setName} placeholder="Asha Sharma" autoFocus />
           <Field label="Email" type="email" value={email} onChange={setEmail} placeholder="asha@example.com"
                  invalid={email.length > 0 && !emailValid} />
-          <Field label="Phone (optional)" type="tel" value={phone} onChange={setPhone} placeholder="+91 98765 43210" />
+          <Field label="Password" type="password" value={password} onChange={setPassword} placeholder="8+ characters, letters + digits"
+                 invalid={password.length > 0 && !passwordValid}
+                 hint={password.length > 0 && !passwordValid
+                   ? 'Use 8+ characters with at least one letter and one digit.'
+                   : undefined} />
+          <Field label="Confirm password" type="password" value={confirm} onChange={setConfirm} placeholder="Same password again"
+                 invalid={confirm.length > 0 && !confirmValid}
+                 hint={confirm.length > 0 && !confirmValid ? 'Passwords don’t match.' : undefined} />
 
           {error && <p className="text-sm text-rose-600">{error}</p>}
 
@@ -186,8 +209,9 @@ export default function SignUp() {
 interface FieldProps {
   label: string; value: string; onChange: (v: string) => void;
   type?: string; placeholder?: string; autoFocus?: boolean; invalid?: boolean;
+  hint?: string;
 }
-function Field({ label, value, onChange, type = 'text', placeholder, autoFocus, invalid }: FieldProps) {
+function Field({ label, value, onChange, type = 'text', placeholder, autoFocus, invalid, hint }: FieldProps) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>
@@ -201,6 +225,7 @@ function Field({ label, value, onChange, type = 'text', placeholder, autoFocus, 
           invalid ? 'border-rose-300 focus:ring-rose-200' : 'border-slate-200 focus:border-slate-400 focus:ring-slate-100'
         }`}
       />
+      {hint && <span className="mt-1.5 block text-xs text-rose-600">{hint}</span>}
     </label>
   );
 }

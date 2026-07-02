@@ -57,6 +57,59 @@ export interface InitLoginResponse {
   expiresAt: string;
 }
 
+// ─── Bank 2FA types (contract: docs/api_contract.md, "NeoBank demo
+//     bridge — bank 2FA") ─────────────────────────────────────────
+
+/** Body for POST /api/demo-portal/bank/signup. customerId is an email. */
+export interface BankSignupRequest {
+  name: string;
+  customerId: string;
+  password: string;
+}
+
+/** 201 from POST /api/demo-portal/bank/signup — enrollment ceremony handle. */
+export interface BankSignupResponse {
+  signupId: string;
+  pairDeeplink: string;
+  expiresAt: string;
+}
+
+/** Enrollment ceremony states (same machine as /signup/:id). */
+export type BankSignupState =
+  | 'awaiting_device'
+  | 'awaiting_commitment'
+  | 'awaiting_verification'
+  | 'completed'
+  | 'failed';
+
+/** 200 from GET /api/demo-portal/bank/signup/:id — ceremony poll. */
+export interface BankSignupStatusResponse {
+  state: BankSignupState;
+  currentDeeplink: string | null;
+  currentStep: string | null;
+  /** Bank account status; populated once the ceremony completes and the
+   *  DID binds (e.g. 'active'). */
+  accountStatus: string | null;
+}
+
+/** Body for POST /api/demo-portal/bank/login (first factor). */
+export interface BankLoginRequest {
+  customerId: string;
+  password: string;
+}
+
+/**
+ * 201 from POST /api/demo-portal/bank/login. The response also sets the
+ * demo_portal_claim cookie; the desktop then follows the existing
+ * /sessions/:id/events SSE → /sessions/:id/claim flow. qrPayload is the
+ * phone-offline fallback only.
+ */
+export interface BankLoginResponse {
+  sessionId: string;
+  expiresAt: string;
+  qrPayload: string;
+}
+
 // ─── Core request helper ──────────────────────────────────────────
 
 interface RequestOpts {
@@ -131,11 +184,71 @@ export function logout(opts?: { signal?: AbortSignal }): Promise<void> {
   });
 }
 
+// ─── Bank 2FA endpoints ───────────────────────────────────────────
+
+/**
+ * POST /api/demo-portal/bank/signup — create the pending bank account
+ * (password is the bank's first factor) and open the 3-QR ZeroAuth
+ * enrollment ceremony.
+ *
+ * Throws ApiError with code 'invalid_request' | 'weak_password' (400)
+ * or 'customer_id_taken' (409).
+ */
+export function bankSignup(
+  body: BankSignupRequest,
+  opts?: { signal?: AbortSignal },
+): Promise<BankSignupResponse> {
+  return request<BankSignupResponse>('/api/demo-portal/bank/signup', {
+    method: 'POST',
+    body,
+    signal: opts?.signal,
+  });
+}
+
+/**
+ * GET /api/demo-portal/bank/signup/:id — poll the enrollment ceremony.
+ * The first poll that sees `completed` binds the ceremony DID onto the
+ * bank account server-side (accountStatus flips to 'active').
+ */
+export function bankSignupStatus(
+  signupId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<BankSignupStatusResponse> {
+  return request<BankSignupStatusResponse>(
+    `/api/demo-portal/bank/signup/${encodeURIComponent(signupId)}`,
+    { method: 'GET', signal: opts?.signal },
+  );
+}
+
+/**
+ * POST /api/demo-portal/bank/login — first factor (customer id +
+ * password). On 201 the DID-pinned approval session is open and the
+ * demo_portal_claim cookie is set; subscribe to the session's SSE
+ * stream and claim on `session_bound`.
+ *
+ * Throws ApiError with code 'invalid_credentials' (401),
+ * 'enrollment_pending' (409), 'account_locked' (423), or
+ * 'too_many_pending_sessions' (429).
+ */
+export function bankLogin(
+  body: BankLoginRequest,
+  opts?: { signal?: AbortSignal },
+): Promise<BankLoginResponse> {
+  return request<BankLoginResponse>('/api/demo-portal/bank/login', {
+    method: 'POST',
+    body,
+    signal: opts?.signal,
+  });
+}
+
 /** Grouped export — call as `api.getMe()` etc. */
 export const api = {
   initLogin,
   getMe,
   logout,
+  bankSignup,
+  bankSignupStatus,
+  bankLogin,
 } as const;
 
 export default api;
