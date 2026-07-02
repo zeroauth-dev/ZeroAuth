@@ -110,6 +110,88 @@ export interface BankLoginResponse {
   qrPayload: string;
 }
 
+// ─── Bank overview / transfer types (contract: docs/api_contract.md,
+//     "NeoBank demo bridge — bank 2FA") ─────────────────────────────
+
+/** One synthetic account row on the NeoBank overview. */
+export interface BankOverviewAccount {
+  id: string;
+  kind: 'savings' | 'current' | 'credit_card';
+  /** Last-four masked, pre-formatted server-side. e.g. "•••• 4291". */
+  maskedNumber: string;
+  balancePaise: number;
+  /** Display amount with currency symbol. e.g. "₹ 4,82,316". */
+  balanceDisplay: string;
+}
+
+/** One ledger row on the NeoBank overview. */
+export interface BankOverviewTransaction {
+  id: string;
+  direction: 'debit' | 'credit';
+  counterparty: string;
+  amountPaise: number;
+  amountDisplay: string;
+  note: string;
+  category: string;
+  status: string;
+  /** ISO-8601 timestamp. */
+  createdAt: string;
+}
+
+/** 200 from GET /api/demo-portal/bank/overview. Ledger seeded on first read. */
+export interface BankOverviewResponse {
+  fullName: string;
+  did: string;
+  primaryBalancePaise: number;
+  primaryBalanceDisplay: string;
+  stepUpThresholdDisplay: string;
+  accounts: BankOverviewAccount[];
+  transactions: BankOverviewTransaction[];
+}
+
+/** Body for POST /api/demo-portal/bank/transfer. amount is integer rupees. */
+export interface BankTransferRequest {
+  amount: number;
+  payeeName: string;
+  note?: string;
+}
+
+/** 200 from POST /api/demo-portal/bank/transfer — immediate settle (< ₹10,000). */
+export interface BankTransferImmediate {
+  requiresApproval: false;
+  status: 'completed';
+  balanceDisplay: string;
+  amountDisplay: string;
+  payeeName: string;
+}
+
+/** 201 from POST /api/demo-portal/bank/transfer — face step-up (≥ ₹10,000). */
+export interface BankTransferStepUp {
+  requiresApproval: true;
+  transferId: string;
+  sessionId: string;
+  qrPayload: string;
+  contextLabel: string;
+  amountDisplay: string;
+  payeeName: string;
+  /** ISO-8601 expiry of the pinned approval session. */
+  expiresAt: string;
+}
+
+/** Discriminated union of the two /bank/transfer success shapes. */
+export type BankTransferResponse = BankTransferImmediate | BankTransferStepUp;
+
+/** Step-up transfer lifecycle, as polled via /bank/transfer/:id. */
+export type BankTransferStatus = 'pending_approval' | 'completed' | 'declined';
+
+/** 200 from GET /api/demo-portal/bank/transfer/:id — poll. Idempotent. */
+export interface BankTransferStatusResponse {
+  status: BankTransferStatus;
+  balanceDisplay: string;
+  amountDisplay: string;
+  counterparty: string;
+}
+
 // ─── Core request helper ──────────────────────────────────────────
 
 interface RequestOpts {
@@ -241,6 +323,58 @@ export function bankLogin(
   });
 }
 
+// ─── Bank overview / transfer endpoints ───────────────────────────
+
+/**
+ * GET /api/demo-portal/bank/overview — cookie-authed dashboard payload
+ * (balance, accounts, seeded ledger). The ledger is seeded on the first
+ * read for a fresh demo account.
+ *
+ * Throws ApiError with code 'unauthorized' (401) or 'no_account' (404).
+ */
+export function bankOverview(opts?: { signal?: AbortSignal }): Promise<BankOverviewResponse> {
+  return request<BankOverviewResponse>('/api/demo-portal/bank/overview', {
+    method: 'GET',
+    signal: opts?.signal,
+  });
+}
+
+/**
+ * POST /api/demo-portal/bank/transfer — move money.
+ *
+ * Under ₹10,000 the transfer settles immediately (`200`,
+ * `requiresApproval: false`). At ₹10,000+ the server opens a DID-pinned
+ * "Payment approval" session (`201`, `requiresApproval: true`) and the
+ * money moves only once the account holder's face consumes it — poll
+ * `bankTransferStatus(transferId)` until it settles.
+ *
+ * Throws ApiError with code 'invalid_request' | 'insufficient_funds' (400).
+ */
+export function bankTransfer(
+  body: BankTransferRequest,
+  opts?: { signal?: AbortSignal },
+): Promise<BankTransferResponse> {
+  return request<BankTransferResponse>('/api/demo-portal/bank/transfer', {
+    method: 'POST',
+    body,
+    signal: opts?.signal,
+  });
+}
+
+/**
+ * GET /api/demo-portal/bank/transfer/:id — poll a step-up transfer.
+ * Settles the transfer iff its pinned session is `consumed`. Idempotent.
+ */
+export function bankTransferStatus(
+  transferId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<BankTransferStatusResponse> {
+  return request<BankTransferStatusResponse>(
+    `/api/demo-portal/bank/transfer/${encodeURIComponent(transferId)}`,
+    { method: 'GET', signal: opts?.signal },
+  );
+}
+
 /** Grouped export — call as `api.getMe()` etc. */
 export const api = {
   initLogin,
@@ -249,6 +383,9 @@ export const api = {
   bankSignup,
   bankSignupStatus,
   bankLogin,
+  bankOverview,
+  bankTransfer,
+  bankTransferStatus,
 } as const;
 
 export default api;
