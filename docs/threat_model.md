@@ -15,7 +15,6 @@
 | `https://api.zeroauth.dev/api/console/*` | Public, JWT-authenticated for everything except signup + login | Per-IP rate limit on signup/login. Password policy enforced. |
 | `https://api.zeroauth.dev/api/admin/*` | Public, `x-api-key` (single shared admin key in `.env`) | Read-only. |
 | `https://api.zeroauth.dev/api/health` | Public, unauthenticated | Health + subsystem status only. |
-| `https://api.zeroauth.dev/api/auth/saml/*`, `…/oidc/*` | Public, gated by `ENABLE_DEMO_AUTH` flag | Demo stubs; **do not** validate real SAML signatures or OIDC tokens. Off in production. |
 | `https://api.zeroauth.dev/api/leads/*` | Public, unauthenticated | Marketing forms; writes to `leads` table. |
 | Base Sepolia `DIDRegistry` | Public RPC, `onlyOwner` writes | Deployer wallet is the single owner. Rotate via `npm run wallet:rotate`. |
 | VPS SSH (`104.207.143.14:22`) | Internet, key-only | `root` (laptop key) and `zeroauth-deploy` (CI key) authorized. UFW open only on 22/80/443. |
@@ -38,33 +37,31 @@
 | | |
 |---|---|
 | **Class** | Spoofing (STRIDE: S) |
-| **Surface** | `POST /v1/identity/verify` (production); the deprecated `/v1/auth/zkp/verify` + `/api/auth/zkp/verify` (the latter now gated off in prod, K-1). |
+| **Surface** | `POST /v1/identity/verify` (production); the deprecated `/v1/auth/zkp/verify` (Sunset 2026-12-31). The legacy `/api/auth/zkp/verify` was gated off in prod (K-1) and then **removed entirely** in the June 2026 dead-API sweep. |
 | **Description** | An attacker replays a captured `(proof, publicSignals)` after the original verification, to authenticate as the victim. |
-| **Mitigation** | **CLOSED for the production surface.** `/v1/identity/verify` now converges onto the hardened proof-pairing verifier (`verifyIdentityProof`): the client first calls `/v1/identity/challenge` for a server-minted single-use nonce, the proof binds it as `publicSignals[1] = Poseidon(didHash, nonce)` (re-derived + constant-time compared server-side, A-11), and the challenge is consumed atomically (`UPDATE … WHERE state='issued' RETURNING`, A-14). A captured proof carries a spent/foreign nonce and fails. The legacy `zkp.ts` 5-minute timestamp window remains the (weaker) defence only on the deprecated `/v1/auth/zkp/verify`; `/api/auth/zkp/verify` is gated off in production (K-1). |
+| **Mitigation** | **CLOSED for the production surface.** `/v1/identity/verify` now converges onto the hardened proof-pairing verifier (`verifyIdentityProof`): the client first calls `/v1/identity/challenge` for a server-minted single-use nonce, the proof binds it as `publicSignals[1] = Poseidon(didHash, nonce)` (re-derived + constant-time compared server-side, A-11), and the challenge is consumed atomically (`UPDATE … WHERE state='issued' RETURNING`, A-14). A captured proof carries a spent/foreign nonce and fails. The 5-minute timestamp window remains the (weaker) defence only on the deprecated `/v1/auth/zkp/verify`. |
 | **Test status** | `tests/identity-verify-face.test.ts`: challenge issuance; verify requires `challengeId` (400 without); nonce-mismatch → 401; replayed/consumed challenge → 409 `challenge_already_used`; expired → 410. Inherits the proof-pairing nonce-binding + single-use consume tests (`tests/proof-pairing.test.ts`). |
 | **Audit signal** | `pairing.replay_blocked` on a `publicSignals[1]` mismatch; `identity.verify` (success/failure) per attempt. |
 
-### A-03 — Forged SAML assertion via demo callback
+### A-03 — Forged SAML assertion via demo callback — CLOSED (surface removed)
 
 | | |
 |---|---|
 | **Class** | Spoofing (STRIDE: S) |
-| **Surface** | `POST /api/auth/saml/callback`, `POST /v1/auth/saml/callback` |
-| **Description** | The route mints a session JWT from `nameID` and `email` in the request body without validating any SAML signature. Demonstrated live in the May 2026 review. |
-| **Mitigation** | `src/middleware/demo-auth-gate.ts` returns 503 unless `ENABLE_DEMO_AUTH=true`. The flag is off in production, on in dev. |
-| **Test status** | Existing `tests/saml.test.ts` covers happy-path; **missing:** "returns 503 in prod env" test. |
-| **Follow-up** | Real implementation with `@node-saml/node-saml` is required before re-enabling the route. Tracked separately. |
+| **Surface** | ~~`POST /api/auth/saml/callback`, `POST /v1/auth/saml/callback`~~ — **removed June 2026** (dead-API sweep). |
+| **Description** | The mock route minted a session JWT from `nameID` and `email` in the request body without validating any SAML signature. Demonstrated live in the May 2026 review; previously mitigated by the `ENABLE_DEMO_AUTH` 503 gate. |
+| **Mitigation** | **CLOSED.** The routes, the demo-auth gate, and the `saml` config block no longer exist. Any future SSO surface must be a real `@node-saml/node-saml` implementation behind a new ADR. |
+| **Test status** | N/A — surface deleted; `tests/saml.test.ts` removed with it. |
 
-### A-04 — Forged OIDC callback via demo route
+### A-04 — Forged OIDC callback via demo route — CLOSED (surface removed)
 
 | | |
 |---|---|
 | **Class** | Spoofing (STRIDE: S) |
-| **Surface** | `POST /api/auth/oidc/callback`, `POST /v1/auth/oidc/callback` |
-| **Description** | PKCE state lookup is real, but once a state is valid the user identity is taken from `req.body.email` without exchanging the code at the IdP token endpoint or validating the `id_token`. |
-| **Mitigation** | Same `demo-auth-gate` middleware as A-03. |
-| **Test status** | Same gap as A-03. |
-| **Follow-up** | Real implementation with `openid-client`. |
+| **Surface** | ~~`POST /api/auth/oidc/callback`, `POST /v1/auth/oidc/callback`~~ — **removed June 2026** (dead-API sweep). |
+| **Description** | The mock route took the user identity from `req.body.email` without exchanging the code at the IdP token endpoint or validating the `id_token`. |
+| **Mitigation** | **CLOSED.** Routes and `oidc` config block deleted, same as A-03. Any future implementation uses `openid-client` behind a new ADR. |
+| **Test status** | N/A — surface deleted; `tests/oidc.test.ts` removed with it. |
 
 ### A-05 — Credential stuffing / email enumeration on console signup
 

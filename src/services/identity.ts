@@ -123,16 +123,6 @@ export async function registerIdentity(
   };
 }
 
-/**
- * Compute Poseidon hash — used for generating public inputs for circuit
- */
-export function poseidonHash(inputs: bigint[]): bigint {
-  if (!poseidon || !F) {
-    throw new Error('Poseidon not initialized');
-  }
-  return F.toObject(poseidon(inputs));
-}
-
 export function isPoseidonReady(): boolean {
   return poseidon !== null;
 }

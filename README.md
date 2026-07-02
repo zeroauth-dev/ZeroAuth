@@ -148,21 +148,14 @@ npm test          # runs the 45-test jest suite
 ## API surface
 
 ```
-POST  /v1/auth/zkp/register        Register a biometric → DID, anchor on-chain
-POST  /v1/auth/zkp/verify          Verify a Groth16 proof, issue session JWT
-GET   /v1/auth/zkp/nonce           Fresh nonce for replay protection
-GET   /v1/auth/zkp/circuit-info    Circuit metadata for client-side snarkjs
-
-GET   /v1/auth/saml/login          Initiate SAML SSO
-POST  /v1/auth/saml/callback       SAML assertion callback
-GET   /v1/auth/saml/metadata       SP metadata XML
-
-GET   /v1/auth/oidc/authorize      Start OIDC authorization-code flow (PKCE)
-POST  /v1/auth/oidc/callback       Token exchange
-GET   /api/auth/oidc/.well-known/openid-configuration
-
+POST  /v1/identity/register        Face-first register: on-device (did, commitment)
+POST  /v1/identity/challenge       Single-use nonce for a replay-safe verify
+POST  /v1/identity/verify          Verify a nonce-bound Groth16 proof, issue session JWT
 GET   /v1/identity/me              Profile from session JWT
 POST  /v1/identity/logout          Revoke session
+
+POST  /v1/auth/zkp/register        DEPRECATED (Sunset 2026-12-31) — use /v1/identity/register
+POST  /v1/auth/zkp/verify          DEPRECATED (Sunset 2026-12-31) — use /v1/identity/verify
 
 POST  /api/console/signup          Create a developer account
 POST  /api/console/login           Authenticate, get a console JWT

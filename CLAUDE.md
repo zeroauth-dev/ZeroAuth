@@ -165,15 +165,14 @@ The CI workflow at [.github/workflows/ci.yml](.github/workflows/ci.yml) runs the
 │   ├── server.ts                  ← entry point (async init + graceful shutdown)
 │   ├── app.ts                     ← Express app: middleware, route mounting
 │   ├── config/                    ← env loading + parsing
-│   ├── middleware/                ← auth, tenant-auth, error-handler, demo-auth-gate
+│   ├── middleware/                ← auth, tenant-auth, error-handler
 │   ├── routes/
-│   │   ├── v1/                    ← tenant-API-key-authed endpoints (zkp, saml, oidc,
-│   │   │                            identity, devices, users, verifications, attendance, audit)
+│   │   ├── v1/                    ← tenant-API-key-authed endpoints (zkp, identity,
+│   │   │                            devices, users, verifications, attendance, audit)
 │   │   ├── console.ts             ← developer console (signup, login, keys, usage, overview)
 │   │   ├── admin.ts               ← x-api-key-authed admin endpoints
 │   │   ├── health.ts              ← unauthenticated health check
-│   │   ├── leads.ts               ← marketing forms (pilot + whitepaper)
-│   │   └── auth.ts, saml.ts, oidc.ts, zkp.ts  ← legacy /api/auth/* surface
+│   │   └── leads.ts               ← marketing forms (pilot + whitepaper)
 │   ├── services/                  ← business logic (jwt, identity, zkp, blockchain,
 │   │                                tenants, api-keys, platform, usage, db, session-store)
 │   └── types/                     ← TypeScript interfaces, enums, scope literals

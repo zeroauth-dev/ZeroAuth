@@ -118,7 +118,7 @@ interface DemoPendingCode {
 }
 const demoPendingCodes = new Map<string, DemoPendingCode>();
 
-export function cachePendingDemoCode(sessionId: string, entry: Omit<DemoPendingCode, 'expiresAt'>): void {
+function cachePendingDemoCode(sessionId: string, entry: Omit<DemoPendingCode, 'expiresAt'>): void {
   demoPendingCodes.set(sessionId, { ...entry, expiresAt: Date.now() + DEMO_CODE_TTL_MS });
 }
 
@@ -130,10 +130,6 @@ export function peekPendingDemoCode(sessionId: string): DemoPendingCode | null {
     return null;
   }
   return entry;
-}
-
-export function clearPendingDemoCode(sessionId: string): void {
-  demoPendingCodes.delete(sessionId);
 }
 
 /**

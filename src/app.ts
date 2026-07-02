@@ -11,10 +11,6 @@ import { logger } from './services/logger';
 
 // Legacy API routes (internal / backward compatible)
 import healthRoutes from './routes/health';
-import authRoutes from './routes/auth';
-import samlRoutes from './routes/saml';
-import oidcRoutes from './routes/oidc';
-import zkpRoutes from './routes/zkp';
 import adminRoutes from './routes/admin';
 import adminLogsRoutes from './routes/admin-logs';
 import leadsRoutes from './routes/leads';
@@ -35,7 +31,6 @@ import v1Routes from './routes/v1';
 import consoleRoutes from './routes/console';
 import consoleSecurityPolicyRoutes from './routes/console-security-policy';
 import consoleWebhooksRoutes from './routes/console-webhooks';
-import consoleComplianceRoutes from './routes/console-compliance';
 
 export function createApp() {
   const app = express();
@@ -128,14 +123,6 @@ export function createApp() {
   // so there is no collision with `consoleRoutes`.
   app.use('/api/console', consoleWebhooksRoutes);
 
-  // Console: per-tenant compliance evidence pack
-  // (GET /api/console/compliance/evidence-pack). Sibling router under
-  // `/api/console` so the JWT cookie path is unchanged. Render service
-  // composes the markdown cover letter, hash-chain snapshot,
-  // audit-integrity verdict, and verbatim DPDP §2(t) memo into one
-  // self-contained JSON bundle the bank's GRC tool can consume.
-  app.use('/api/console', consoleComplianceRoutes);
-
   // ═══════════════════════════════════════════════════════════
   // Legacy API routes (backward-compatible, internal use)
   // ═══════════════════════════════════════════════════════════
@@ -153,10 +140,6 @@ export function createApp() {
   app.use('/.well-known', jwksRoutes.default);
   app.use('/api', jwksRoutes.apiJwksRouter);
 
-  app.use('/api/auth', authRoutes);
-  app.use('/api/auth/saml', samlRoutes);
-  app.use('/api/auth/oidc', oidcRoutes);
-  app.use('/api/auth/zkp', zkpRoutes);
   app.use('/api/admin', adminRoutes);
   // Mounted as a sibling of /api/admin so the `authenticateAdmin`
   // gate stays inside admin-logs.ts (matching the pattern in

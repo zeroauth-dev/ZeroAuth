@@ -177,17 +177,9 @@ ADR 0017 introduced the face-first identity surface at `/v1/identity/register` +
 | `GET` | `/v1/auth/zkp/nonce` | `nonce:create` | Fresh nonce, 5-minute lifetime. |
 | `GET` | `/v1/auth/zkp/circuit-info` | `zkp:verify` | Circuit metadata for client SDKs. |
 
-### SAML + OIDC (`/v1/auth/saml/*`, `/v1/auth/oidc/*`)
+### SAML + OIDC — removed
 
-These endpoints are gated by `ENABLE_DEMO_AUTH` and currently simulate the assertion exchange — they are **not** production-quality SAML / OIDC. See A-03, A-04 in [`threat_model.md`](threat_model.md). Full implementations will land via `@node-saml/node-saml` and `openid-client` and the route signatures will not change.
-
-| Method | Path | Scope | Description |
-|---|---|---|---|
-| `GET` | `/v1/auth/saml/login` | `saml:login` | Returns the IdP redirect URL. |
-| `POST` | `/v1/auth/saml/callback` | `saml:callback` | SAML assertion → session JWT. |
-| `GET` | `/v1/auth/saml/metadata` | `saml:login` | SP metadata XML. |
-| `GET` | `/v1/auth/oidc/authorize` | `oidc:authorize` | OIDC `/authorize` redirect URL with PKCE. |
-| `POST` | `/v1/auth/oidc/callback` | `oidc:callback` | Code → session JWT. |
+The mock SAML/OIDC surface (`/v1/auth/saml/*`, `/v1/auth/oidc/*`, and the legacy `/api/auth/{saml,oidc}/*`) was **removed in June 2026** (dead-API sweep). The routes only simulated the assertion exchange (threat model A-03/A-04) and had no callers. If enterprise SSO returns to the roadmap it will be a fresh, real implementation (`@node-saml/node-saml` / `openid-client`) behind a new ADR.
 
 ### Admin (`/api/admin/*`)
 
@@ -300,26 +292,10 @@ Failure modes:
 - Verdict rank < required rank → `401 play_integrity_insufficient`.
 - Both write an `audit_events` row with action `pairing.integrity_rejected` carrying the presented verdict + the policy snapshot (no PII; never `did`).
 
-### Legacy `/api/auth/*` surface
+### Legacy `/api/auth/*` surface — removed
 
-These exist for backwards compatibility with internal tooling that pre-dates the `/v1/*` rollout. The legacy SAML and OIDC callbacks are gated by `ENABLE_DEMO_AUTH` for the same reason as their `/v1/*` counterparts. Document but plan to deprecate.
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/auth/me` | Current user from session JWT. |
-| `POST` | `/api/auth/refresh` | Refresh tokens. |
-| `POST` | `/api/auth/logout` | Invalidate a session. |
-| `POST` | `/api/auth/zkp/register` | Register identity. Same shape as `/v1/auth/zkp/register` minus tenant scoping. |
-| `POST` | `/api/auth/zkp/verify` | Verify proof. |
-| `GET` | `/api/auth/zkp/nonce` | Fresh nonce. |
-| `GET` | `/api/auth/zkp/circuit-info` | Circuit metadata. |
-| `GET` | `/api/auth/saml/login` | SAML login, demo-gated. |
-| `POST` | `/api/auth/saml/callback` | SAML callback, demo-gated. |
-| `GET` | `/api/auth/saml/metadata` | SP metadata XML. |
-| `GET` | `/api/auth/oidc/authorize` | OIDC authorize, demo-gated. |
-| `POST` | `/api/auth/oidc/callback` | OIDC callback, demo-gated. |
-| `GET` | `/api/auth/oidc/.well-known/openid-configuration` | OIDC discovery document. **Note:** `jwks_uri` is intentionally absent (HS256-only today). |
+The unversioned `/api/auth/*` surface (session endpoints, raw-biometric ZKP register/verify, mock SAML/OIDC) was **removed in June 2026** (dead-API sweep). It predated the `/v1/*` rollout, was demo-gated off in production, and had zero callers. The tenant-scoped `/v1/auth/zkp/*` surface remains the deprecated-but-contracted compatibility path (Sunset: 2026-12-31); `/v1/identity/*` is the production surface.
 
 ---
-LAST_UPDATED: 2026-05-22
+LAST_UPDATED: 2026-06-28
 OWNER: Pulkit Pareek

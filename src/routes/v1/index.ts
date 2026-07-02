@@ -1,8 +1,6 @@
 import { Router } from 'express';
 import zkpRoutes from './zkp';
 import identityRoutes from './identity';
-import samlRoutes from './saml';
-import oidcRoutes from './oidc';
 import deviceRoutes from './devices';
 import userRoutes from './users';
 import verificationRoutes from './verifications';
@@ -14,9 +12,7 @@ import registrationRoutes from './registrations';
 const router = Router();
 
 /**
- * /v1/auth/zkp/*       — ZKP biometric authentication
- * /v1/auth/saml/*      — SAML SSO integration
- * /v1/auth/oidc/*      — OIDC/OAuth2 integration
+ * /v1/auth/zkp/*       — ZKP biometric authentication (deprecated, Sunset 2026-12-31)
  * /v1/identity/*       — Identity & session management
  * /v1/devices/*        — Device registration and lifecycle
  * /v1/users/*          — User enrollment and directory
@@ -33,8 +29,6 @@ const router = Router();
  * tests/tenant-isolation.test.ts PUBLIC_ROUTE_EXCEPTIONS.
  */
 router.use('/auth/zkp', zkpRoutes);
-router.use('/auth/saml', samlRoutes);
-router.use('/auth/oidc', oidcRoutes);
 router.use('/identity', identityRoutes);
 router.use('/devices', deviceRoutes);
 router.use('/users', userRoutes);

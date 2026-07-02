@@ -33,7 +33,7 @@ export interface SessionStore {
 
 // ─── In-memory + Postgres backend (default) ────────────────────────
 
-export class InMemorySessionStore implements SessionStore {
+class InMemorySessionStore implements SessionStore {
   private sessions = new Map<string, UserSession>();
   private verificationCount = { saml: 0, oidc: 0, zkp: 0 };
   private startTime = Date.now();
@@ -214,7 +214,7 @@ interface IoRedisClient {
 
 const REDIS_KEY_PREFIX = 'zeroauth:session:';
 
-export class RedisSessionStore implements SessionStore {
+class RedisSessionStore implements SessionStore {
   private client: IoRedisClient | null = null;
   private url: string;
   private cache = new Map<string, UserSession>();
@@ -375,7 +375,7 @@ export class RedisSessionStore implements SessionStore {
  * Called once at module load; `src/server.ts` then calls
  * `sessionStore.init()` like before.
  */
-export function createSessionStore(): SessionStore {
+function createSessionStore(): SessionStore {
   const url = process.env.REDIS_URL;
   const enabled = process.env.USE_REDIS_SESSIONS === 'true';
   if (enabled && url && url.length > 0) {

@@ -137,7 +137,6 @@ jobs:
           JWT_SECRET: ci-e2e-jwt-secret-not-used-in-production-environments-only
           SESSION_SECRET: ci-e2e-session-secret-not-used-in-production-environments-only
           ADMIN_API_KEY: ci-e2e-admin-key
-          ENABLE_DEMO_AUTH: 'false'
           LOG_LEVEL: warn
           BLOCKCHAIN_RPC_URL: https://sepolia.base.org
           BLOCKCHAIN_CHAIN_ID: '84532'

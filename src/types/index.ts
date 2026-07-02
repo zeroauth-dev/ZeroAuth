@@ -110,15 +110,6 @@ export interface AdminStats {
   };
 }
 
-export interface SAMLProfile {
-  nameID: string;
-  nameIDFormat?: string;
-  issuer?: string;
-  email?: string;
-  firstName?: string;
-  lastName?: string;
-}
-
 export interface OIDCTokenSet {
   access_token?: string;
   id_token?: string;

@@ -49,7 +49,6 @@ Some responses carry extra fields (`docs`, `retryAfterSeconds`, `currentScopes`,
 | `invalid_result` / `invalid_result_filter` | `/v1/verifications` / `/v1/attendance` — `result` outside the allowed enum. |
 | `invalid_type` / `invalid_type_filter` | `/v1/attendance` — `type` outside `check_in,check_out`. |
 | `invalid_battery_level` | `/v1/devices` — `batteryLevel` not an integer in [0, 100]. |
-| `missing_saml_response` | `/v1/auth/saml/callback` — body missing `SAMLResponse`. |
 
 ## Conflict (`409 Conflict`)
 
@@ -75,12 +74,6 @@ Some responses carry extra fields (`docs`, `retryAfterSeconds`, `currentScopes`,
 | `monthly_quota_exceeded` | Tenant exceeded its monthly quota. Response includes `plan`, `used`, `limit`, `upgradeUrl`. |
 | `too_many_attempts` | `/api/console/signup` or `/login` — per-IP limit (10 / 15 min) tripped. |
 | `key_limit_reached` | `/api/console/keys` POST — max 10 active keys per tenant. |
-
-## Service unavailable (`503 Service Unavailable`)
-
-| Code | When |
-|---|---|
-| `demo_auth_disabled` | Legacy `/api/auth/saml/*` and `/api/auth/oidc/*` routes when `ENABLE_DEMO_AUTH` is off (production default). |
 
 ## Server error (`500 Internal Server Error`)
 

@@ -148,26 +148,6 @@ export async function registerIdentityOnChain(
   }, 'registerIdentityOnChain');
 }
 
-export async function verifyIdentityOnChain(biometricIDHash: string): Promise<string> {
-  if (!didRegistryContract) {
-    throw new Error('DIDRegistry contract not initialized');
-  }
-
-  return withRetry(async () => {
-    return await didRegistryContract!.verifyIdentity(biometricIDHash);
-  }, 'verifyIdentityOnChain');
-}
-
-export async function isRegisteredOnChain(biometricIDHash: string): Promise<boolean> {
-  if (!didRegistryContract) {
-    return false;
-  }
-
-  return withRetry(async () => {
-    return await didRegistryContract!.isRegistered(biometricIDHash);
-  }, 'isRegisteredOnChain');
-}
-
 export async function verifyProofOnChain(
   pA: [string, string],
   pB: [[string, string], [string, string]],
@@ -183,7 +163,7 @@ export async function verifyProofOnChain(
   }, 'verifyProofOnChain');
 }
 
-export async function getIdentityCount(): Promise<number> {
+async function getIdentityCount(): Promise<number> {
   if (!didRegistryContract) return 0;
   try {
     const count = await didRegistryContract.identityCount();

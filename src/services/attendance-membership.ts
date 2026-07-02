@@ -180,19 +180,6 @@ export async function getPrimaryCompanyForTenant(
   return r.rows[0] ?? null;
 }
 
-export async function listCompanies(
-  tenantId: string,
-  environment: ApiKeyEnvironment,
-): Promise<AttendanceCompanyRow[]> {
-  const pool = getPool();
-  const r = await pool.query<AttendanceCompanyRow>(
-    `SELECT * FROM attendance_companies
-       WHERE tenant_id = $1 AND environment = $2 ORDER BY created_at ASC`,
-    [tenantId, environment],
-  );
-  return r.rows;
-}
-
 export async function updateCompanyWifi(
   companyId: string,
   tenantId: string,

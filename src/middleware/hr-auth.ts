@@ -11,7 +11,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyHrAdminToken, HrAdminTokenPayload } from '../services/jwt';
 
-export const HR_JWT_COOKIE = 'zeroauth_hr_jwt';
+const HR_JWT_COOKIE = 'zeroauth_hr_jwt';
 
 function isProductionEnv(): boolean {
   return (process.env.NODE_ENV ?? 'development') === 'production';

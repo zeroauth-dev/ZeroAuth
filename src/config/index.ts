@@ -28,17 +28,6 @@ function parseCorsOrigins(): string[] {
   return ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5050'];
 }
 
-// Demo-auth gate: the legacy SAML/OIDC routes are not real protocol
-// implementations — they only simulate the assertion exchange. They are off
-// by default in production and must be opted into with ENABLE_DEMO_AUTH=true.
-// In development the gate defaults to on so the existing tests keep running.
-function resolveDemoAuthFlag(): boolean {
-  const raw = process.env.ENABLE_DEMO_AUTH;
-  if (raw === 'true') return true;
-  if (raw === 'false') return false;
-  return process.env.NODE_ENV !== 'production';
-}
-
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
@@ -58,7 +47,6 @@ export const config = {
   landingBaseUrl: process.env.LANDING_BASE_URL ?? (process.env.NODE_ENV === 'production' ? 'https://zeroauth.dev' : 'http://localhost:3000'),
   corsOrigins: parseCorsOrigins(),
   trustProxy: process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production',
-  enableDemoAuth: resolveDemoAuthFlag(),
 
   jwt: {
     secret: requireEnv('JWT_SECRET', 'dev-secret-change-me'),
@@ -108,20 +96,6 @@ export const config = {
       process.env.JWT_KID ??
       process.env.JWT_RS256_KID ??
       'zeroauth-rs256-1',
-  },
-
-  saml: {
-    entryPoint: process.env.SAML_ENTRY_POINT ?? 'https://idp.example.com/sso/saml',
-    issuer: process.env.SAML_ISSUER ?? 'zeroauth-sp',
-    callbackUrl: process.env.SAML_CALLBACK_URL ?? 'http://localhost:3000/api/auth/saml/callback',
-    cert: process.env.SAML_CERT ?? '',
-  },
-
-  oidc: {
-    issuer: process.env.OIDC_ISSUER ?? 'https://accounts.google.com',
-    clientId: process.env.OIDC_CLIENT_ID ?? '',
-    clientSecret: process.env.OIDC_CLIENT_SECRET ?? '',
-    redirectUri: process.env.OIDC_REDIRECT_URI ?? 'http://localhost:3000/api/auth/oidc/callback',
   },
 
   session: {
