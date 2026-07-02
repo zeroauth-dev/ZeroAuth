@@ -99,6 +99,12 @@ Some responses carry extra fields (`docs`, `retryAfterSeconds`, `currentScopes`,
 | `commitment_mismatch` | `/api/attendance/claim` — `publicSignals[0]` does not equal the submitted commitment. |
 | `proof_verification_failed` | `/api/attendance/claim` — the Groth16 face proof failed. |
 | `attendance_claim_failed`, `company_not_found` | Claim/company route exceptions. |
+| `customer_id_taken` | `/api/demo-portal/bank/signup` (409) — a bank account already exists for that email. |
+| `weak_password` | `/api/demo-portal/bank/signup` (400) — password under 8 chars or missing letter/digit. |
+| `invalid_credentials` | `/api/demo-portal/bank/login` (401) — uniform for unknown customer AND wrong password. |
+| `enrollment_pending` | `/api/demo-portal/bank/login` (409) — password OK but the ZeroAuth enrollment bind never completed. |
+| `account_locked` | `/api/demo-portal/bank/login` (423) — 10+ failed password attempts. |
+| `bank_signup_failed`, `bank_login_failed`, `pending_poll_failed` | `/api/demo-portal/bank/*` + `/device/pending` route exceptions. |
 | `email_taken` | `/api/hr/signup` — an HR admin already exists for that email. |
 | `invalid_credentials` | `/api/hr/login` — wrong email or password. |
 | `weak_password`, `invalid_email`, `employee_exists`, `no_company`, `invalid_status` | `/api/hr/*` validation / provisioning errors. |

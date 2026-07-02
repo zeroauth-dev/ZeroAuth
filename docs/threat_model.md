@@ -535,6 +535,17 @@
 | **Test status** | `tests/attendance-membership.test.ts`: company-scoped record for a claimed member → 201 (scoped to the company's tenant); non-member → `403 not_a_member`, no event written. |
 | **Audit signal** | `attendance.recorded` under the company's own tenant; non-member attempts return 403 without a row. |
 
+### A-47 — Bank 2FA: approval-inbox poll + pinned-session integrity
+
+| | |
+|---|---|
+| **Class** | Spoofing / Information disclosure (STRIDE: S + I) |
+| **Surface** | `POST /api/demo-portal/bank/login` (opens a pinned session), `POST /api/demo-portal/device/pending` (the app's inbox poll), `POST /api/demo-portal/submit-proof` (the approval). |
+| **Description** | Two risks. (1) *Approval hijack:* a different enrolled user (or an attacker with a captured proof) tries to approve someone else's password-initiated login. (2) *Inbox enumeration:* the pending poll is authenticated only by DID knowledge, so anyone holding a victim's public DID can observe that a login is pending (+ coarse browser hint) — a privacy/notification-spam vector, not an auth bypass. |
+| **Mitigation** | (1) **CLOSED by DID pinning:** the login-opened session carries `expected_did`; `submitProof` rejects any other DID with the uniform `pairing_did_unknown` *before* the user lookup, and the pinned identity's proof still passes the full chain (commitment CT-compare, `Poseidon(didHash, nonce)` binding, Groth16 verify, atomic single-use consume). The password (first factor, scrypt, uniform 401, lockout at 10 failures) and the face proof (second factor) are owned by different parties — the bank and the phone. (2) *Accepted for the demo:* the inbox listing leaks only "a login is pending" for a known DID; approval is impossible without the enrolled face. Production path: FCM push + a bind-time device token authenticating the poll — the endpoint's contract note marks it. |
+| **Test status** | `tests/pinned-pairing.test.ts` (pin enforced pre-lookup; unpinned back-compat), `tests/bank-2fa.test.ts` (uniform 401, lockout, pinning arg threaded, inbox shape), `tests/demo-bank.test.ts` (scrypt at rest, timing-uniform unknown-customer path, counter reset). |
+| **Audit signal** | `pairing.pinned_did_mismatch` on a wrong-identity approval attempt; `bank.account_opened`, `bank.login_password_ok` on the bank flow. |
+
 ## Open items (no `A-NN` yet)
 
 - The session store is in-memory; restart wipes session continuity. Not exploitable today (JWTs are stateless), but consumers of `/v1/identity/me` will see false 401s on restart.

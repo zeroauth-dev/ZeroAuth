@@ -361,6 +361,11 @@ const SCHEMA = `
     desktop_ip INET,
     desktop_user_agent VARCHAR(512),
     failure_count SMALLINT NOT NULL DEFAULT 0,
+    -- Bank 2FA step-up: when a password-first login opens the session,
+    -- it is PINNED to the account's bound DID — only a proof presenting
+    -- this DID may consume it (enforced in proof-pairing.submitProof).
+    -- NULL = unpinned (the original QR-scan flow, any enrolled DID).
+    expected_did TEXT,
     expires_at TIMESTAMPTZ NOT NULL,
     consumed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -370,6 +375,42 @@ const SCHEMA = `
     ON proof_pairing_sessions(tenant_id, environment, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_pps_state_expires
     ON proof_pairing_sessions(state, expires_at) WHERE state = 'issued';
+  -- Additive migration for deployments whose table predates the column
+  -- (the bootstrap create is a no-op on existing tables).
+  ALTER TABLE proof_pairing_sessions
+    ADD COLUMN IF NOT EXISTS expected_did TEXT;
+  -- The app's approval-inbox poll: issued sessions pinned to a DID.
+  CREATE INDEX IF NOT EXISTS idx_pps_expected_did
+    ON proof_pairing_sessions(tenant_id, environment, expected_did)
+    WHERE state = 'issued' AND expected_did IS NOT NULL;
+
+  -- ─── NeoBank demo accounts (bank 2FA showcase) ─────────────
+  -- The demo bank's OWN user store: id + password stay with the bank;
+  -- ZeroAuth is the verification layer it delegates step-up to. The
+  -- bound did column is a POINTER to the ZeroAuth identity — no
+  -- biometric data, no commitment, nothing derivable lives here.
+  CREATE TABLE IF NOT EXISTS demo_bank_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    environment VARCHAR(10) NOT NULL
+      CHECK (environment IN ('live', 'test')),
+    customer_id VARCHAR(160) NOT NULL,          -- the bank login id (email)
+    password_hash TEXT NOT NULL,                -- scrypt salt:hex
+    full_name VARCHAR(120) NOT NULL,
+    did TEXT,                                   -- bound ZeroAuth identity
+    tenant_user_id UUID REFERENCES tenant_users(id) ON DELETE SET NULL,
+    registration_session_id UUID REFERENCES registration_sessions(id) ON DELETE SET NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'pending_enrollment'
+      CHECK (status IN ('pending_enrollment', 'active', 'locked')),
+    failed_login_count SMALLINT NOT NULL DEFAULT 0,
+    last_login_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, environment, customer_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_demo_bank_did
+    ON demo_bank_accounts(tenant_id, environment, did) WHERE did IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_demo_bank_reg_session
+    ON demo_bank_accounts(registration_session_id);
 
   -- ─── Registration Sessions (ADR 0023) ─────────────────────
   -- The end-user signup ceremony: a tenant SDK calls

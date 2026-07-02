@@ -414,6 +414,10 @@ export async function createSession(
   apiKeyId: string | null,
   desktopIp: string | null,
   desktopUserAgent: string | null,
+  // Bank 2FA step-up (nullable, default = the original unpinned QR
+  // flow): when set, ONLY a proof presenting this DID may consume the
+  // session — enforced in submitProof before the user lookup.
+  expectedDid: string | null = null,
 ): Promise<CreateSessionResult> {
   const pool = getPool();
 
@@ -443,8 +447,8 @@ export async function createSession(
   await pool.query(
     `INSERT INTO proof_pairing_sessions
       (id, tenant_id, environment, api_key_id, nonce_hex, session_bind_token_hash,
-       state, desktop_ip, desktop_user_agent, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'issued', $7::inet, $8, $9)`,
+       state, desktop_ip, desktop_user_agent, expected_did, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'issued', $7::inet, $8, $9, $10)`,
     [
       id,
       tenantId,
@@ -454,6 +458,7 @@ export async function createSession(
       bindHash,
       desktopIp,
       desktopUserAgent ? desktopUserAgent.slice(0, 512) : null,
+      expectedDid,
       expiresAt.toISOString(),
     ],
   );
@@ -482,6 +487,56 @@ export async function createSession(
     expiresAt: expiresAt.toISOString(),
     qrPayload,
   };
+}
+
+/**
+ * The phone app's approval inbox (bank 2FA): every ISSUED, unexpired
+ * session pinned to [did]. Each entry carries the SAME `za:pair:1:`
+ * challenge payload the desktop QR would have shown — the app feeds it
+ * straight into its existing scan→prove→authorize flow, no camera.
+ *
+ * Deliberately NOT authenticated beyond DID knowledge: the DID is a
+ * public identifier, the listed metadata is low-sensitivity (a login
+ * is pending + coarse browser hint), and APPROVAL still requires the
+ * enrolled face (pinned DID + commitment + nonce binding). The
+ * production path replaces this poll with FCM push + a bind-time
+ * device token — tracked in the threat model.
+ */
+export async function listPinnedPendingSessions(
+  tenantId: string,
+  environment: ApiKeyEnvironment,
+  did: string,
+): Promise<Array<{
+  id: string;
+  qrPayload: string;
+  expiresAt: string;
+  createdAt: string;
+  desktopUserAgent: string | null;
+}>> {
+  const pool = getPool();
+  const result = await pool.query<{
+    id: string;
+    nonce_hex: string;
+    expires_at: Date;
+    created_at: Date;
+    desktop_user_agent: string | null;
+  }>(
+    `SELECT id, nonce_hex, expires_at, created_at, desktop_user_agent
+       FROM proof_pairing_sessions
+      WHERE tenant_id = $1 AND environment = $2 AND expected_did = $3
+        AND state = 'issued' AND expires_at > NOW()
+      ORDER BY created_at DESC
+      LIMIT 5`,
+    [tenantId, environment, did],
+  );
+  const tenantDomain = tenantDomainFromConfig();
+  return result.rows.map(row => ({
+    id: row.id,
+    qrPayload: buildQrPayload(row.id, row.nonce_hex, tenantDomain),
+    expiresAt: new Date(row.expires_at).toISOString(),
+    createdAt: new Date(row.created_at).toISOString(),
+    desktopUserAgent: row.desktop_user_agent,
+  }));
 }
 
 /**
@@ -894,6 +949,29 @@ export async function submitProof(
         error: (err as Error).message,
       }));
       throw new PairingSessionBindMismatch();
+    }
+
+    // ─── Check 3b: pinned-DID enforcement (bank 2FA step-up) ────────
+    //
+    // A password-first bank login opens the session with expected_did
+    // set to the account's bound DID. ANY other identity — even a
+    // fully-enrolled one with a valid proof — is rejected here, before
+    // the user lookup, with the uniform PairingDidUnknown (A-25) so a
+    // probing phone can't distinguish "wrong account" from "not
+    // enrolled". NULL expected_did = the original unpinned QR flow.
+    if (row.expected_did && row.expected_did !== did) {
+      await recordAuditEvent(tenantId, {
+        environment,
+        actorType: 'api_key',
+        action: 'pairing.pinned_did_mismatch',
+        entityType: 'pairing_session',
+        entityId: sessionId,
+        status: 'failure',
+        summary: 'submit DID does not match the session-pinned DID',
+      }).catch(err => logger.warn('proof-pairing: pinned-did audit failed', {
+        error: (err as Error).message,
+      }));
+      throw new PairingDidUnknown('pinned DID mismatch');
     }
 
     // ─── Check 4: user lookup by (tenant, did) ─────────────────────

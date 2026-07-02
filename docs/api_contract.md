@@ -292,6 +292,17 @@ Failure modes:
 - Verdict rank < required rank → `401 play_integrity_insufficient`.
 - Both write an `audit_events` row with action `pairing.integrity_rejected` carrying the presented verdict + the policy snapshot (no PII; never `did`).
 
+### NeoBank demo bridge — bank 2FA (`/api/demo-portal/bank/*`, `/api/demo-portal/device/*`)
+
+ZeroAuth as the bank's verification layer. The bank owns the first factor (customer id + password in `demo_bank_accounts`, scrypt at rest); ZeroAuth is the second: account creation binds the enrolled DID onto the bank account, and every login opens a **DID-pinned** proof-pairing session (`proof_pairing_sessions.expected_did`) that lands in the ZeroAuth app as an approval request (UPI-collect style). `submitProof` rejects any other identity — even a fully-enrolled one — with the uniform `pairing_did_unknown` before the user lookup. All endpoints public same-process bridge (like the rest of `/api/demo-portal/*`), demo tenant only.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/demo-portal/bank/signup` | `{ name, customerId (email), password }` → creates the pending bank account + opens the 3-QR enrollment ceremony. `201 { signupId, pairDeeplink, expiresAt }` · `400 invalid_request / weak_password` · `409 customer_id_taken`. |
+| `GET` | `/api/demo-portal/bank/signup/:id` | Ceremony poll; the first poll that sees `completed` binds the ceremony DID onto the account (`accountStatus: 'active'`). |
+| `POST` | `/api/demo-portal/bank/login` | `{ customerId, password }` → first factor. Success opens the pinned session + sets the desktop claim cookie. `201 { sessionId, expiresAt, qrPayload }` (QR = phone-offline fallback) · `401 invalid_credentials` (uniform) · `409 enrollment_pending` · `423 account_locked` · `429 too_many_pending_sessions`. Desktop then follows the existing `/sessions/:id/events` SSE → `/sessions/:id/claim` flow. |
+| `POST` | `/api/demo-portal/device/pending` | `{ did }` → the app's approval inbox: issued sessions pinned to that DID, each carrying the same `za:pair:1:` challenge a QR would (`requests[]`). Approval still requires the enrolled face (A-47). |
+
 ### Legacy `/api/auth/*` surface — removed
 
 The unversioned `/api/auth/*` surface (session endpoints, raw-biometric ZKP register/verify, mock SAML/OIDC) was **removed in June 2026** (dead-API sweep). It predated the `/v1/*` rollout, was demo-gated off in production, and had zero callers. The tenant-scoped `/v1/auth/zkp/*` surface remains the deprecated-but-contracted compatibility path (Sunset: 2026-12-31); `/v1/identity/*` is the production surface.

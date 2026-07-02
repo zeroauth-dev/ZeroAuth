@@ -207,6 +207,11 @@ describe('schema-purity (tenant-scoped tables)', () => {
     // it has no `environment` column, like user_sessions/tenant_webhooks.)
     'attendance_companies',
     'attendance_memberships',
+    // Bank 2FA showcase: the demo bank's own account store. Holds the
+    // bank's first factor (customer_id + scrypt password_hash) and a
+    // bound public DID pointer — never a biometric-derived value, so
+    // the biometric-name guard runs on it like every scoped table.
+    'demo_bank_accounts',
   ];
 
   for (const table of TENANT_SCOPED_TABLES) {
@@ -312,6 +317,11 @@ describe('schema-purity (tenant-scoped tables)', () => {
       'attendance_companies',
       'attendance_memberships',
       'hr_admins',
+      // Bank 2FA showcase: the demo bank's own account store
+      // (customer_id + scrypt password_hash + bound public DID).
+      // Tenant+environment scoped and in TENANT_SCOPED_TABLES above,
+      // so the biometric-column-name guard runs on it.
+      'demo_bank_accounts',
     ]);
     const createTableRe = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)/gi;
     const tables = new Set<string>();

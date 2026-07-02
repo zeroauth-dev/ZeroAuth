@@ -50,6 +50,7 @@ import { getTenantById, getTenantByEmail } from '../services/tenants';
 import {
   createSession as pairingCreateSession,
   submitProof as pairingSubmitProof,
+  listPinnedPendingSessions,
   PairingSessionNotFound,
   PairingSessionExpired,
   PairingSessionAlreadyBound,
@@ -66,6 +67,15 @@ import {
 import { DEMO_PORTAL_TENANT_ID } from '../services/demo-portal-seed';
 import { recordAuditEvent } from '../services/platform';
 import { ApiKeyEnvironment, Groth16Proof } from '../types';
+import {
+  createBankAccount,
+  bindEnrollment,
+  verifyBankLogin,
+  BankCustomerIdTaken,
+  BankInvalidCredentials,
+  BankEnrollmentPending,
+  BankAccountLocked,
+} from '../services/demo-bank';
 
 const router = Router();
 
@@ -1565,6 +1575,290 @@ router.get('/signup/:id', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('demo-portal: signup poll failed', { error: (err as Error).message });
     res.status(500).json({ error: 'signup_poll_failed' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Bank 2FA — ZeroAuth as the bank's verification layer.
+//
+// The bank owns the first factor (customer id + password, stored in
+// demo_bank_accounts). ZeroAuth is the second factor: account creation
+// binds the customer's enrolled DID onto the bank account, and every
+// login opens a DID-PINNED pairing session that lands as an approval
+// request in the ZeroAuth app (UPI-collect style) — only a face proof
+// from THAT identity can consume it.
+// ═══════════════════════════════════════════════════════════════════════
+
+const BANK_EMAIL_PATTERN = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/;
+const BANK_DID_PATTERN = /^did:zeroauth:[a-z0-9-]+:[a-f0-9]{20,80}$/i;
+
+/**
+ * POST /api/demo-portal/bank/signup
+ *
+ * Body: { name, customerId (email), password }
+ *
+ * Creates the bank's own account row (password scrypt-hashed, status
+ * pending_enrollment) AND opens the ZeroAuth enrollment ceremony. The
+ * desktop drives the 3-QR ceremony via GET /bank/signup/:id; the
+ * account activates when the ceremony's DID binds.
+ *
+ * 201 { signupId, pairDeeplink, expiresAt } · 400 invalid_request /
+ * weak_password · 409 customer_id_taken · 503 demo_portal_not_provisioned
+ */
+router.post('/bank/signup', async (req: Request, res: Response) => {
+  try {
+    const tenantId = await resolveDemoPortalTenantId();
+    if (!tenantId) {
+      res.status(503).json({ error: 'demo_portal_not_provisioned' });
+      return;
+    }
+
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 120) : '';
+    const customerId = typeof req.body?.customerId === 'string'
+      ? req.body.customerId.trim().toLowerCase().slice(0, 160) : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+
+    if (name.length < 2) {
+      res.status(400).json({ error: 'invalid_request', message: 'name is required (2+ chars).' });
+      return;
+    }
+    if (!BANK_EMAIL_PATTERN.test(customerId)) {
+      res.status(400).json({ error: 'invalid_request', message: 'customerId must be an email address.' });
+      return;
+    }
+    if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+      res.status(400).json({
+        error: 'weak_password',
+        message: 'Password must be 8+ characters with at least one letter and one digit.',
+      });
+      return;
+    }
+
+    // Open the enrollment ceremony first — its session id is the
+    // signup handle the account row references.
+    const ceremony = await startRegistration(
+      tenantId,
+      DEMO_ENVIRONMENT,
+      { profile: { name, email: customerId } },
+      { type: 'api_key', id: null, email: null },
+    );
+
+    await createBankAccount({
+      tenantId,
+      environment: DEMO_ENVIRONMENT,
+      customerId,
+      password,
+      fullName: name,
+      registrationSessionId: ceremony.session.id,
+    });
+
+    // Audit: bank account opened (no password material in metadata).
+    void recordAuditEvent(tenantId, {
+      environment: DEMO_ENVIRONMENT,
+      actorType: 'system',
+      action: 'bank.account_opened',
+      entityType: 'registration_session',
+      entityId: ceremony.session.id,
+      status: 'success',
+      summary: 'NeoBank demo account opened; ZeroAuth enrollment started',
+    }).catch(err => logger.warn('demo-portal: bank signup audit failed', {
+      error: (err as Error).message,
+    }));
+
+    res.status(201).json({
+      signup_id: ceremony.session.id,
+      signupId: ceremony.session.id,
+      pair_deeplink: ceremony.pairDeeplink,
+      pairDeeplink: ceremony.pairDeeplink,
+      expires_at: ceremony.pairCodeExpiresAt,
+      expiresAt: ceremony.pairCodeExpiresAt,
+    });
+  } catch (err) {
+    if (err instanceof BankCustomerIdTaken) {
+      res.status(409).json({ error: 'customer_id_taken', message: err.message });
+      return;
+    }
+    logger.error('demo-portal: bank signup failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'bank_signup_failed' });
+  }
+});
+
+/**
+ * GET /api/demo-portal/bank/signup/:id
+ *
+ * Ceremony poll (SPA, ~1s cadence). Same contract as /signup/:id plus
+ * the bank bind: the first poll that sees `completed` stamps the
+ * ceremony's DID onto the bank account and activates it.
+ *
+ * 200 { state, currentDeeplink, currentStep, accountStatus }
+ */
+router.get('/bank/signup/:id', async (req: Request, res: Response) => {
+  try {
+    const tenantId = await resolveDemoPortalTenantId();
+    if (!tenantId) {
+      res.status(503).json({ error: 'demo_portal_not_provisioned' });
+      return;
+    }
+    const sessionId = String(req.params.id);
+    const session = await getRegistrationSession(tenantId, DEMO_ENVIRONMENT, sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'session_not_found' });
+      return;
+    }
+    let accountStatus: string | null = null;
+    if (session.state === 'completed') {
+      const bound = await bindEnrollment(tenantId, DEMO_ENVIRONMENT, sessionId);
+      accountStatus = bound?.status ?? null;
+    }
+    const pending = peekPendingDemoCode(sessionId);
+    res.status(200).json({
+      state: session.state,
+      currentDeeplink: pending?.deeplink ?? null,
+      currentStep: pending?.step ?? null,
+      accountStatus,
+    });
+  } catch (err) {
+    logger.error('demo-portal: bank signup poll failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'signup_poll_failed' });
+  }
+});
+
+/**
+ * POST /api/demo-portal/bank/login
+ *
+ * Body: { customerId, password }
+ *
+ * First factor: password (scrypt, uniform 401 on unknown/wrong). On
+ * success the SECOND factor starts: a pairing session PINNED to the
+ * account's bound DID is opened, and the ZeroAuth app on the enrolled
+ * phone picks it up as an approval request. The desktop response gets
+ * the claim cookie + session id for the existing SSE→/claim flow. The
+ * QR payload is included only as the "phone offline?" fallback.
+ *
+ * 201 { sessionId, expiresAt, qrPayload } · 400 invalid_request ·
+ * 401 invalid_credentials (uniform) · 409 enrollment_pending ·
+ * 423 account_locked · 429 too_many_pending_sessions
+ */
+router.post('/bank/login', async (req: Request, res: Response) => {
+  try {
+    const tenantId = await resolveDemoPortalTenantId();
+    if (!tenantId) {
+      res.status(503).json({ error: 'demo_portal_not_provisioned' });
+      return;
+    }
+    const customerId = typeof req.body?.customerId === 'string'
+      ? req.body.customerId.trim().toLowerCase().slice(0, 160) : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!customerId || !password) {
+      res.status(400).json({ error: 'invalid_request', message: 'customerId and password are required.' });
+      return;
+    }
+
+    const account = await verifyBankLogin(tenantId, DEMO_ENVIRONMENT, customerId, password);
+
+    // Second factor: DID-pinned pairing session → the app's inbox.
+    const result = await pairingCreateSession(
+      tenantId,
+      DEMO_ENVIRONMENT,
+      null,
+      req.ip ?? null,
+      (req.headers['user-agent'] as string | undefined) ?? null,
+      account.did,
+    );
+    rememberBindToken(result.id, result.sessionBindToken);
+    const claimToken = mintClaimToken(result.id);
+    res.setHeader('Set-Cookie', buildClaimCookieHeader(claimToken));
+
+    void recordAuditEvent(tenantId, {
+      environment: DEMO_ENVIRONMENT,
+      actorType: 'system',
+      action: 'bank.login_password_ok',
+      entityType: 'pairing_session',
+      entityId: result.id,
+      status: 'success',
+      summary: 'Bank password accepted; ZeroAuth approval requested (pinned session)',
+    }).catch(err => logger.warn('demo-portal: bank login audit failed', {
+      error: (err as Error).message,
+    }));
+
+    res.status(201).json({
+      session_id: result.id,
+      sessionId: result.id,
+      expires_at: result.expiresAt,
+      expiresAt: result.expiresAt,
+      qr_payload: result.qrPayload,
+      qrPayload: result.qrPayload,
+      approval: 'push',
+    });
+  } catch (err) {
+    if (err instanceof BankInvalidCredentials) {
+      res.status(401).json({ error: 'invalid_credentials', message: 'Customer id or password is incorrect.' });
+      return;
+    }
+    if (err instanceof BankEnrollmentPending) {
+      res.status(409).json({ error: 'enrollment_pending', message: 'Finish ZeroAuth enrollment to activate this account.' });
+      return;
+    }
+    if (err instanceof BankAccountLocked) {
+      res.status(423).json({ error: 'account_locked', message: 'Account locked after repeated failures.' });
+      return;
+    }
+    if (err instanceof TooManyPendingSessions) {
+      res.status(429).json({ error: 'too_many_pending_sessions', message: 'Too many open sign-in sessions. Try again shortly.' });
+      return;
+    }
+    logger.error('demo-portal: bank login failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'bank_login_failed' });
+  }
+});
+
+/**
+ * POST /api/demo-portal/device/pending
+ *
+ * Body: { did }
+ *
+ * The ZeroAuth app's approval inbox (UPI-collect style): pending
+ * DID-pinned login requests for this identity. Each entry carries the
+ * same `za:pair:1:` challenge a desktop QR would have shown — the app
+ * feeds it into its existing prove→authorize flow. Approval still
+ * requires the enrolled face; this listing only reveals that a login
+ * is pending (see threat model A-27; FCM + device token is the
+ * production path).
+ *
+ * 200 { requests: [{ sessionId, qrPayload, bank, deviceHint,
+ *                    requestedAt, expiresAt }] }
+ */
+router.post('/device/pending', async (req: Request, res: Response) => {
+  try {
+    const tenantId = await resolveDemoPortalTenantId();
+    if (!tenantId) {
+      res.status(503).json({ error: 'demo_portal_not_provisioned' });
+      return;
+    }
+    const did = typeof req.body?.did === 'string' ? req.body.did.trim() : '';
+    if (!BANK_DID_PATTERN.test(did)) {
+      res.status(400).json({ error: 'invalid_request', message: 'did must be a did:zeroauth identifier.' });
+      return;
+    }
+    const sessions = await listPinnedPendingSessions(tenantId, DEMO_ENVIRONMENT, did);
+    res.status(200).json({
+      requests: sessions.map(s => ({
+        session_id: s.id,
+        sessionId: s.id,
+        qr_payload: s.qrPayload,
+        qrPayload: s.qrPayload,
+        bank: 'NeoBank',
+        device_hint: s.desktopUserAgent ? s.desktopUserAgent.slice(0, 120) : null,
+        deviceHint: s.desktopUserAgent ? s.desktopUserAgent.slice(0, 120) : null,
+        requested_at: s.createdAt,
+        requestedAt: s.createdAt,
+        expires_at: s.expiresAt,
+        expiresAt: s.expiresAt,
+      })),
+    });
+  } catch (err) {
+    logger.error('demo-portal: device pending poll failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'pending_poll_failed' });
   }
 });
 
