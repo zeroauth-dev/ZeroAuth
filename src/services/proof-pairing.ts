@@ -418,6 +418,9 @@ export async function createSession(
   // flow): when set, ONLY a proof presenting this DID may consume the
   // session — enforced in submitProof before the user lookup.
   expectedDid: string | null = null,
+  // Human label for the approval inbox ("Pay ₹5,000 to Priya"); NULL = a
+  // plain login approval. Surfaced by listPinnedPendingSessions.
+  contextLabel: string | null = null,
 ): Promise<CreateSessionResult> {
   const pool = getPool();
 
@@ -447,8 +450,8 @@ export async function createSession(
   await pool.query(
     `INSERT INTO proof_pairing_sessions
       (id, tenant_id, environment, api_key_id, nonce_hex, session_bind_token_hash,
-       state, desktop_ip, desktop_user_agent, expected_did, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'issued', $7::inet, $8, $9, $10)`,
+       state, desktop_ip, desktop_user_agent, expected_did, context_label, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'issued', $7::inet, $8, $9, $10, $11)`,
     [
       id,
       tenantId,
@@ -459,6 +462,7 @@ export async function createSession(
       desktopIp,
       desktopUserAgent ? desktopUserAgent.slice(0, 512) : null,
       expectedDid,
+      contextLabel ? contextLabel.slice(0, 160) : null,
       expiresAt.toISOString(),
     ],
   );
@@ -536,6 +540,7 @@ export async function listPinnedPendingSessions(
   expiresAt: string;
   createdAt: string;
   deviceHint: string | null;
+  contextLabel: string | null;
 }>> {
   const pool = getPool();
   const result = await pool.query<{
@@ -544,8 +549,9 @@ export async function listPinnedPendingSessions(
     expires_at: Date;
     created_at: Date;
     desktop_user_agent: string | null;
+    context_label: string | null;
   }>(
-    `SELECT id, nonce_hex, expires_at, created_at, desktop_user_agent
+    `SELECT id, nonce_hex, expires_at, created_at, desktop_user_agent, context_label
        FROM proof_pairing_sessions
       WHERE tenant_id = $1 AND environment = $2 AND expected_did = $3
         AND state = 'issued' AND expires_at > NOW()
@@ -560,6 +566,7 @@ export async function listPinnedPendingSessions(
     expiresAt: new Date(row.expires_at).toISOString(),
     createdAt: new Date(row.created_at).toISOString(),
     deviceHint: coarseDeviceHint(row.desktop_user_agent),
+    contextLabel: row.context_label,
   }));
 }
 

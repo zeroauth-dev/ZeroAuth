@@ -273,7 +273,7 @@ describe('POST /api/demo-portal/device/pending', () => {
     listPinnedPendingSessionsMock.mockResolvedValue([{
       id: 'sess-1', qrPayload: 'za:pair:1:sess-1:nonce:zeroauth.dev:abcd',
       expiresAt: '2030-01-01T00:00:00Z', createdAt: '2029-12-31T23:56:00Z',
-      deviceHint: 'Chrome on macOS',
+      deviceHint: 'Chrome on macOS', contextLabel: null,
     }]);
 
     const res = await request(app).post('/api/demo-portal/device/pending').send({ did: DID });

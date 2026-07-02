@@ -72,10 +72,18 @@ import {
   createBankAccount,
   bindEnrollment,
   verifyBankLogin,
+  getBankOverview,
+  resolveBankAccountByUser,
+  executeImmediateTransfer,
+  insertPendingTransfer,
+  commitTransferIfApproved,
+  formatPaise,
+  STEP_UP_THRESHOLD_PAISE,
   BankCustomerIdTaken,
   BankInvalidCredentials,
   BankEnrollmentPending,
   BankAccountLocked,
+  BankInsufficientFunds,
 } from '../services/demo-bank';
 
 const router = Router();
@@ -1857,6 +1865,9 @@ router.post('/device/pending', bankPendingLimiter, async (req: Request, res: Res
         bank: 'NeoBank',
         device_hint: s.deviceHint,
         deviceHint: s.deviceHint,
+        context_label: s.contextLabel,
+        contextLabel: s.contextLabel,
+        kind: s.contextLabel ? 'payment' : 'login',
         requested_at: s.createdAt,
         requestedAt: s.createdAt,
         expires_at: s.expiresAt,
@@ -1866,6 +1877,218 @@ router.post('/device/pending', bankPendingLimiter, async (req: Request, res: Res
   } catch (err) {
     logger.error('demo-portal: device pending poll failed', { error: (err as Error).message });
     res.status(500).json({ error: 'pending_poll_failed' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// NeoBank dashboard — real ledger + payments with face step-up.
+//
+// A transfer >= STEP_UP_THRESHOLD opens a DID-pinned pairing session
+// labelled with the amount + payee; it lands in the ZeroAuth app inbox as
+// a "Payment approval" and money moves ONLY when the account holder's own
+// face consumes it (same pin invariant as login). Below the threshold the
+// transfer settles instantly.
+// ═══════════════════════════════════════════════════════════════════════
+
+/** Cookie-auth guard for the bank dashboard routes. Returns the resolved
+ *  { tenantId, userId } or null (the caller replies 401). */
+async function requireBankSession(
+  req: Request,
+): Promise<{ tenantId: string; userId: string } | null> {
+  const payload = decodeCookie(readDemoCookie(req));
+  if (!payload) return null;
+  const tenantId = await resolveDemoPortalTenantId();
+  if (!tenantId) return null;
+  return { tenantId, userId: payload.userId };
+}
+
+/**
+ * GET /api/demo-portal/bank/overview — the dashboard payload: the
+ * customer's balance + recent transactions (seeded on first read).
+ * 200 { fullName, did, primaryBalanceDisplay, accounts[], transactions[] }
+ * · 401 not_authenticated · 404 no_account
+ */
+router.get('/bank/overview', async (req: Request, res: Response) => {
+  try {
+    const session = await requireBankSession(req);
+    if (!session) {
+      res.status(401).json({ error: 'not_authenticated' });
+      return;
+    }
+    const overview = await getBankOverview(session.tenantId, DEMO_ENVIRONMENT, session.userId);
+    if (!overview) {
+      res.status(404).json({ error: 'no_account', message: 'No bank account for this session.' });
+      return;
+    }
+    res.status(200).json({
+      fullName: overview.fullName,
+      did: overview.did,
+      primaryBalancePaise: overview.primaryBalancePaise,
+      primaryBalanceDisplay: formatPaise(overview.primaryBalancePaise),
+      stepUpThresholdPaise: STEP_UP_THRESHOLD_PAISE,
+      stepUpThresholdDisplay: formatPaise(STEP_UP_THRESHOLD_PAISE),
+      accounts: overview.accounts.map(a => ({
+        ...a, balanceDisplay: formatPaise(a.balancePaise),
+      })),
+      transactions: overview.transactions.map(t => ({
+        ...t, amountDisplay: formatPaise(t.amountPaise),
+      })),
+    });
+  } catch (err) {
+    logger.error('demo-portal: bank overview failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'overview_failed' });
+  }
+});
+
+/**
+ * POST /api/demo-portal/bank/transfer — send money.
+ * Body: { amount (rupees), payeeName, payeeHandle?, note? }
+ *
+ * < step-up threshold: debits + settles immediately.
+ * >= threshold: opens a DID-pinned "Payment approval" session and returns
+ *   { requiresApproval: true, transferId, sessionId, qrPayload, ... }; the
+ *   desktop polls /bank/transfer/:id while the phone approves with a face.
+ *
+ * 200/201 · 400 invalid_request / insufficient_funds · 401 · 404 no_account
+ */
+router.post('/bank/transfer', bankLoginLimiter, async (req: Request, res: Response) => {
+  try {
+    const session = await requireBankSession(req);
+    if (!session) {
+      res.status(401).json({ error: 'not_authenticated' });
+      return;
+    }
+    const rupees = Number(req.body?.amount);
+    const payeeName = typeof req.body?.payeeName === 'string' ? req.body.payeeName.trim().slice(0, 60) : '';
+    const payeeHandle = typeof req.body?.payeeHandle === 'string' ? req.body.payeeHandle.trim().slice(0, 80) : null;
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 140) : null;
+
+    if (!Number.isFinite(rupees) || rupees <= 0 || !Number.isInteger(rupees)) {
+      res.status(400).json({ error: 'invalid_request', message: 'amount must be a positive whole number of rupees.' });
+      return;
+    }
+    if (payeeName.length < 2) {
+      res.status(400).json({ error: 'invalid_request', message: 'payeeName is required.' });
+      return;
+    }
+    const amountPaise = rupees * 100;
+
+    const account = await resolveBankAccountByUser(session.tenantId, DEMO_ENVIRONMENT, session.userId);
+    if (!account || account.status !== 'active' || !account.did) {
+      res.status(404).json({ error: 'no_account', message: 'No active bank account for this session.' });
+      return;
+    }
+
+    const input = { amountPaise, payeeName, payeeHandle, note };
+
+    if (amountPaise >= STEP_UP_THRESHOLD_PAISE) {
+      // Step-up: pinned, labelled approval session.
+      const label = `Pay ${formatPaise(amountPaise)} to ${payeeName}`;
+      const pairing = await pairingCreateSession(
+        session.tenantId,
+        DEMO_ENVIRONMENT,
+        null,
+        req.ip ?? null,
+        (req.headers['user-agent'] as string | undefined) ?? null,
+        account.did,
+        label,
+      );
+      rememberBindToken(pairing.id, pairing.sessionBindToken);
+      const { transferId } = await insertPendingTransfer(account.id, input, pairing.id);
+
+      void recordAuditEvent(session.tenantId, {
+        environment: DEMO_ENVIRONMENT,
+        actorType: 'system',
+        action: 'bank.transfer_stepup_requested',
+        entityType: 'pairing_session',
+        entityId: pairing.id,
+        status: 'success',
+        summary: `Step-up requested for a ${formatPaise(amountPaise)} transfer`,
+      }).catch(() => undefined);
+
+      res.status(201).json({
+        requiresApproval: true,
+        transferId,
+        sessionId: pairing.id,
+        expiresAt: pairing.expiresAt,
+        qrPayload: pairing.qrPayload,
+        contextLabel: label,
+        amountDisplay: formatPaise(amountPaise),
+        payeeName,
+      });
+      return;
+    }
+
+    // Under the threshold — settle immediately.
+    const { transferId, balancePaise } = await executeImmediateTransfer(account.id, input);
+    res.status(200).json({
+      requiresApproval: false,
+      transferId,
+      status: 'completed',
+      balancePaise,
+      balanceDisplay: formatPaise(balancePaise),
+      amountDisplay: formatPaise(amountPaise),
+      payeeName,
+    });
+  } catch (err) {
+    if (err instanceof BankInsufficientFunds) {
+      res.status(400).json({ error: 'insufficient_funds', message: 'Insufficient balance for this transfer.' });
+      return;
+    }
+    if (err instanceof TooManyPendingSessions) {
+      res.status(429).json({ error: 'too_many_pending_sessions', message: 'Too many open approvals. Try again shortly.' });
+      return;
+    }
+    logger.error('demo-portal: bank transfer failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'transfer_failed' });
+  }
+});
+
+/**
+ * GET /api/demo-portal/bank/transfer/:id — poll a step-up transfer. Money
+ * moves here, and only when the linked pinned session is `consumed` (the
+ * account holder's face approved it). Idempotent.
+ * 200 { status: pending_approval|completed|declined, balanceDisplay? }
+ */
+router.get('/bank/transfer/:id', bankPendingLimiter, async (req: Request, res: Response) => {
+  try {
+    const session = await requireBankSession(req);
+    if (!session) {
+      res.status(401).json({ error: 'not_authenticated' });
+      return;
+    }
+    const account = await resolveBankAccountByUser(session.tenantId, DEMO_ENVIRONMENT, session.userId);
+    if (!account) {
+      res.status(404).json({ error: 'no_account' });
+      return;
+    }
+    const transferId = String(req.params.id);
+    const result = await commitTransferIfApproved(account.id, transferId);
+    if (result.status === 'not_found') {
+      res.status(404).json({ error: 'transfer_not_found' });
+      return;
+    }
+    if (result.status === 'completed' && result.balancePaise != null) {
+      void recordAuditEvent(session.tenantId, {
+        environment: DEMO_ENVIRONMENT,
+        actorType: 'system',
+        action: 'bank.transfer_settled',
+        entityType: 'demo_bank_transaction',
+        entityId: transferId,
+        status: 'success',
+        summary: `Transfer of ${formatPaise(result.amountPaise ?? 0)} settled after face approval`,
+      }).catch(() => undefined);
+    }
+    res.status(200).json({
+      status: result.status,
+      transferId: result.transferId,
+      counterparty: result.counterparty,
+      amountDisplay: result.amountPaise != null ? formatPaise(result.amountPaise) : null,
+      balanceDisplay: result.balancePaise != null ? formatPaise(result.balancePaise) : null,
+    });
+  } catch (err) {
+    logger.error('demo-portal: bank transfer poll failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'transfer_poll_failed' });
   }
 });
 

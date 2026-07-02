@@ -45,6 +45,14 @@ export class BankAccountLocked extends Error {
   readonly code = 'account_locked';
   constructor(message = 'Account locked after repeated failed logins') { super(message); }
 }
+export class BankNoAccount extends Error {
+  readonly code = 'no_account';
+  constructor(message = 'No active bank account for this session') { super(message); }
+}
+export class BankInsufficientFunds extends Error {
+  readonly code = 'insufficient_funds';
+  constructor(message = 'Insufficient balance for this transfer') { super(message); }
+}
 
 /** Failed password attempts before the account locks. */
 export const MAX_FAILED_LOGINS = 10;
@@ -219,4 +227,265 @@ export async function verifyBankLogin(
     fullName: account.full_name,
     tenantUserId: account.tenant_user_id,
   };
+}
+
+// ─── NeoBank dashboard: ledger + step-up transfers ──────────────────────
+
+/** Transfers at or above this move behind a face step-up. ₹10,000. */
+export const STEP_UP_THRESHOLD_PAISE = 10_000_00;
+/** Starting savings balance seeded at account activation. ₹4,82,316. */
+const STARTING_BALANCE_PAISE = 4_82_316_00;
+
+/** Deterministic starter history so the dashboard feels lived-in. */
+const STARTER_TXNS: Array<{
+  dir: 'debit' | 'credit'; cp: string; amt: number; note: string; cat: string; hoursAgo: number;
+}> = [
+  { dir: 'credit', cp: 'Salary — Acme Corp', amt: 85_000_00, note: 'Monthly salary', cat: 'salary', hoursAgo: 48 },
+  { dir: 'debit', cp: 'Landlord — rent', amt: 32_000_00, note: 'July rent', cat: 'rent', hoursAgo: 120 },
+  { dir: 'debit', cp: 'BESCOM', amt: 2_450_00, note: 'Electricity', cat: 'utility', hoursAgo: 168 },
+  { dir: 'debit', cp: 'Mutual fund SIP', amt: 10_000_00, note: 'Monthly SIP', cat: 'investment', hoursAgo: 170 },
+  { dir: 'debit', cp: 'Swiggy', amt: 284_00, note: 'Dinner', cat: 'food', hoursAgo: 2 },
+  { dir: 'debit', cp: 'Amazon', amt: 1_899_00, note: 'Order', cat: 'shopping', hoursAgo: 336 },
+  { dir: 'credit', cp: 'Refund — Myntra', amt: 1_299_00, note: 'Return refund', cat: 'transfer', hoursAgo: 672 },
+];
+
+export interface BankTransactionView {
+  id: string;
+  direction: 'debit' | 'credit';
+  counterparty: string;
+  amountPaise: number;
+  note: string | null;
+  category: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface BankOverview {
+  fullName: string;
+  did: string | null;
+  primaryBalancePaise: number;
+  accounts: Array<{ id: string; kind: string; maskedNumber: string; balancePaise: number }>;
+  transactions: BankTransactionView[];
+}
+
+/** Resolve the active bank account behind the demo session's tenant_user. */
+export async function resolveBankAccountByUser(
+  tenantId: string,
+  environment: ApiKeyEnvironment,
+  tenantUserId: string,
+): Promise<BankAccountRow & { balance_paise: number; ledger_seeded: boolean } | null> {
+  const pool = getPool();
+  const result = await pool.query<BankAccountRow & { balance_paise: number; ledger_seeded: boolean }>(
+    `SELECT * FROM demo_bank_accounts
+      WHERE tenant_id = $1 AND environment = $2 AND tenant_user_id = $3
+      ORDER BY created_at ASC LIMIT 1`,
+    [tenantId, environment, tenantUserId],
+  );
+  return result.rows[0] ?? null;
+}
+
+/** One-shot ledger seed (single-winner via the ledger_seeded flag). */
+async function seedLedger(bankAccountId: string): Promise<void> {
+  const pool = getPool();
+  const claimed = await pool.query(
+    `UPDATE demo_bank_accounts
+        SET balance_paise = $2, ledger_seeded = TRUE
+      WHERE id = $1 AND ledger_seeded = FALSE
+      RETURNING id`,
+    [bankAccountId, STARTING_BALANCE_PAISE],
+  );
+  if (claimed.rows.length === 0) return; // already seeded by a concurrent call
+  for (const t of STARTER_TXNS) {
+    await pool.query(
+      `INSERT INTO demo_bank_transactions
+         (bank_account_id, direction, counterparty, amount_paise, note, category, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'completed', NOW() - ($7 || ' hours')::interval)`,
+      [bankAccountId, t.dir, t.cp, t.amt, t.note, t.cat, t.hoursAgo],
+    ).catch(err => logger.warn('demo-bank: starter txn insert failed', { error: (err as Error).message }));
+  }
+}
+
+/** The dashboard payload: the customer's balance + recent transactions. */
+export async function getBankOverview(
+  tenantId: string,
+  environment: ApiKeyEnvironment,
+  tenantUserId: string,
+): Promise<BankOverview | null> {
+  const pool = getPool();
+  const account = await resolveBankAccountByUser(tenantId, environment, tenantUserId);
+  if (!account) return null;
+
+  let balance = Number(account.balance_paise);
+  if (!account.ledger_seeded) {
+    await seedLedger(account.id);
+    balance = STARTING_BALANCE_PAISE;
+  }
+
+  const txns = await pool.query<{
+    id: string; direction: 'debit' | 'credit'; counterparty: string;
+    amount_paise: string; note: string | null; category: string; status: string; created_at: Date;
+  }>(
+    `SELECT id, direction, counterparty, amount_paise, note, category, status, created_at
+       FROM demo_bank_transactions
+      WHERE bank_account_id = $1
+      ORDER BY created_at DESC
+      LIMIT 25`,
+    [account.id],
+  );
+
+  // The savings account is the real, spendable one; the other two are
+  // static display so the dashboard reads like a full bank.
+  return {
+    fullName: account.full_name,
+    did: account.did,
+    primaryBalancePaise: balance,
+    accounts: [
+      { id: 'sav', kind: 'savings', maskedNumber: '•••• 4421', balancePaise: balance },
+      { id: 'cur', kind: 'current', maskedNumber: '•••• 8810', balancePaise: 1_12_940_00 },
+      { id: 'cc', kind: 'credit_card', maskedNumber: '•••• 3377', balancePaise: -18_420_00 },
+    ],
+    transactions: txns.rows.map(r => ({
+      id: r.id,
+      direction: r.direction,
+      counterparty: r.counterparty,
+      amountPaise: Number(r.amount_paise),
+      note: r.note,
+      category: r.category,
+      status: r.status,
+      createdAt: new Date(r.created_at).toISOString(),
+    })),
+  };
+}
+
+export interface TransferInput {
+  amountPaise: number;
+  payeeName: string;
+  payeeHandle?: string | null;
+  note?: string | null;
+}
+
+/** Debit + record a sub-threshold transfer atomically (guarded on funds). */
+export async function executeImmediateTransfer(
+  bankAccountId: string,
+  input: TransferInput,
+): Promise<{ transferId: string; balancePaise: number }> {
+  const pool = getPool();
+  const debit = await pool.query<{ balance_paise: string }>(
+    `UPDATE demo_bank_accounts
+        SET balance_paise = balance_paise - $2
+      WHERE id = $1 AND balance_paise >= $2
+      RETURNING balance_paise`,
+    [bankAccountId, input.amountPaise],
+  );
+  if (debit.rows.length === 0) throw new BankInsufficientFunds();
+
+  const txn = await pool.query<{ id: string }>(
+    `INSERT INTO demo_bank_transactions
+       (bank_account_id, direction, counterparty, amount_paise, note, category, status, settled_at)
+     VALUES ($1, 'debit', $2, $3, $4, 'transfer', 'completed', NOW())
+     RETURNING id`,
+    [bankAccountId, input.payeeName, input.amountPaise, input.note ?? null],
+  );
+  return { transferId: txn.rows[0].id, balancePaise: Number(debit.rows[0].balance_paise) };
+}
+
+/** Record a step-up transfer as pending, linked to its pinned session. No
+ *  money moves until commitTransferIfApproved sees the session consumed. */
+export async function insertPendingTransfer(
+  bankAccountId: string,
+  input: TransferInput,
+  pairingSessionId: string,
+): Promise<{ transferId: string }> {
+  const pool = getPool();
+  const txn = await pool.query<{ id: string }>(
+    `INSERT INTO demo_bank_transactions
+       (bank_account_id, direction, counterparty, amount_paise, note, category, status, pairing_session_id)
+     VALUES ($1, 'debit', $2, $3, $4, 'transfer', 'pending_approval', $5)
+     RETURNING id`,
+    [bankAccountId, input.payeeName, input.amountPaise, input.note ?? null, pairingSessionId],
+  );
+  return { transferId: txn.rows[0].id };
+}
+
+export interface TransferStatus {
+  status: 'pending_approval' | 'completed' | 'declined' | 'not_found';
+  transferId?: string;
+  counterparty?: string;
+  amountPaise?: number;
+  balancePaise?: number | null;
+}
+
+/**
+ * Poll + settle a step-up transfer. Money moves ONLY when the linked
+ * pinned session is `consumed` — i.e. the account's own face approved it.
+ * Idempotent: the completed status-flip is a single-winner UPDATE, and the
+ * debit is guarded on funds. An expired/failed session declines the
+ * transfer. This is the money-movement gate — mirrors the pin invariant.
+ */
+export async function commitTransferIfApproved(
+  bankAccountId: string,
+  transferId: string,
+): Promise<TransferStatus> {
+  const pool = getPool();
+  const row = (await pool.query<{
+    id: string; status: string; bank_account_id: string; amount_paise: string;
+    counterparty: string; session_state: string | null; session_expires: Date | null;
+  }>(
+    `SELECT t.id, t.status, t.bank_account_id, t.amount_paise, t.counterparty,
+            s.state AS session_state, s.expires_at AS session_expires
+       FROM demo_bank_transactions t
+       LEFT JOIN proof_pairing_sessions s ON s.id = t.pairing_session_id
+      WHERE t.id = $1 AND t.bank_account_id = $2`,
+    [transferId, bankAccountId],
+  )).rows[0];
+
+  if (!row) return { status: 'not_found' };
+
+  const base = { transferId: row.id, counterparty: row.counterparty, amountPaise: Number(row.amount_paise) };
+  if (row.status !== 'pending_approval') {
+    return { status: row.status as TransferStatus['status'], ...base, balancePaise: null };
+  }
+
+  const expired = row.session_expires ? new Date(row.session_expires).getTime() <= Date.now() : false;
+
+  if (row.session_state === 'consumed') {
+    // Approved. Flip to completed (single-winner), then debit (guarded).
+    const flip = await pool.query<{ amount_paise: string }>(
+      `UPDATE demo_bank_transactions SET status = 'completed', settled_at = NOW()
+        WHERE id = $1 AND status = 'pending_approval'
+        RETURNING amount_paise`,
+      [transferId],
+    );
+    if (flip.rows.length === 0) return { status: 'completed', ...base, balancePaise: null };
+    const debit = await pool.query<{ balance_paise: string }>(
+      `UPDATE demo_bank_accounts SET balance_paise = balance_paise - $2
+        WHERE id = $1 AND balance_paise >= $2
+        RETURNING balance_paise`,
+      [row.bank_account_id, Number(flip.rows[0].amount_paise)],
+    );
+    if (debit.rows.length === 0) {
+      await pool.query(`UPDATE demo_bank_transactions SET status = 'declined' WHERE id = $1`, [transferId]);
+      return { status: 'declined', ...base, balancePaise: null };
+    }
+    return { status: 'completed', ...base, balancePaise: Number(debit.rows[0].balance_paise) };
+  }
+
+  if (row.session_state === 'failed' || row.session_state === 'expired' || expired) {
+    await pool.query(
+      `UPDATE demo_bank_transactions SET status = 'declined'
+        WHERE id = $1 AND status = 'pending_approval'`,
+      [transferId],
+    );
+    return { status: 'declined', ...base, balancePaise: null };
+  }
+
+  return { status: 'pending_approval', ...base, balancePaise: null };
+}
+
+/** ₹ display for a paise amount, Indian grouping. */
+export function formatPaise(paise: number): string {
+  const rupees = Math.round(paise / 100);
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency', currency: 'INR', maximumFractionDigits: 0,
+  }).format(rupees);
 }

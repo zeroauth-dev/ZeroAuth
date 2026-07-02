@@ -322,6 +322,11 @@ describe('schema-purity (tenant-scoped tables)', () => {
       // Tenant+environment scoped and in TENANT_SCOPED_TABLES above,
       // so the biometric-column-name guard runs on it.
       'demo_bank_accounts',
+      // NeoBank dashboard ledger (fake-money transaction history + the
+      // step-up payment record). Keyed by bank_account_id (which is
+      // tenant-scoped), so KNOWN-only like user_sessions; holds only
+      // counterparty/note/amount — never a biometric-derived value.
+      'demo_bank_transactions',
     ]);
     const createTableRe = /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)/gi;
     const tables = new Set<string>();

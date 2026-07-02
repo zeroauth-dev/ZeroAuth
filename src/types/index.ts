@@ -444,6 +444,8 @@ export interface ProofPairingSession {
   failure_count: number;
   /** Bank 2FA: DID the session is pinned to; NULL = unpinned QR flow. */
   expected_did: string | null;
+  /** Human label for the approval inbox ("Pay ₹5,000 to Priya"); NULL = login. */
+  context_label: string | null;
   expires_at: Date;
   consumed_at: Date | null;
   created_at: Date;

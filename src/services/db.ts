@@ -366,6 +366,9 @@ const SCHEMA = `
     -- this DID may consume it (enforced in proof-pairing.submitProof).
     -- NULL = unpinned (the original QR-scan flow, any enrolled DID).
     expected_did TEXT,
+    -- Human label for the approval inbox ("Pay Rs 5,000 to Priya"); NULL =
+    -- a plain login approval.
+    context_label VARCHAR(160),
     expires_at TIMESTAMPTZ NOT NULL,
     consumed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -379,6 +382,10 @@ const SCHEMA = `
   -- (the bootstrap create is a no-op on existing tables).
   ALTER TABLE proof_pairing_sessions
     ADD COLUMN IF NOT EXISTS expected_did TEXT;
+  -- Human label for what a pinned session authorizes, shown in the app's
+  -- approval inbox ("Pay Rs 5,000 to Priya"). NULL = a plain login approval.
+  ALTER TABLE proof_pairing_sessions
+    ADD COLUMN IF NOT EXISTS context_label VARCHAR(160);
   -- The app's approval-inbox poll: issued sessions pinned to a DID.
   CREATE INDEX IF NOT EXISTS idx_pps_expected_did
     ON proof_pairing_sessions(tenant_id, environment, expected_did)
@@ -403,6 +410,10 @@ const SCHEMA = `
     status VARCHAR(24) NOT NULL DEFAULT 'pending_enrollment'
       CHECK (status IN ('pending_enrollment', 'active', 'locked')),
     failed_login_count SMALLINT NOT NULL DEFAULT 0,
+    -- Spendable savings balance in paise (integer money). Seeded at
+    -- activation; debited by /bank/transfer. Fake money — demo only.
+    balance_paise BIGINT NOT NULL DEFAULT 0,
+    ledger_seeded BOOLEAN NOT NULL DEFAULT FALSE,
     last_login_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, environment, customer_id)
@@ -411,6 +422,32 @@ const SCHEMA = `
     ON demo_bank_accounts(tenant_id, environment, did) WHERE did IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_demo_bank_reg_session
     ON demo_bank_accounts(registration_session_id);
+  ALTER TABLE demo_bank_accounts ADD COLUMN IF NOT EXISTS balance_paise BIGINT NOT NULL DEFAULT 0;
+  ALTER TABLE demo_bank_accounts ADD COLUMN IF NOT EXISTS ledger_seeded BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- Demo bank ledger: transaction history for the NeoBank dashboard, and
+  -- the step-up payment record. A transfer >= the step-up threshold is
+  -- inserted 'pending_approval' + linked to a DID-pinned pairing session;
+  -- it commits (debits balance) only when that session is consumed by the
+  -- account's own face proof. Fake money; no real settlement.
+  CREATE TABLE IF NOT EXISTS demo_bank_transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bank_account_id UUID NOT NULL REFERENCES demo_bank_accounts(id) ON DELETE CASCADE,
+    direction VARCHAR(8) NOT NULL CHECK (direction IN ('debit', 'credit')),
+    counterparty VARCHAR(120) NOT NULL,
+    amount_paise BIGINT NOT NULL CHECK (amount_paise > 0),
+    note VARCHAR(140),
+    category VARCHAR(24) NOT NULL DEFAULT 'transfer',
+    status VARCHAR(20) NOT NULL DEFAULT 'completed'
+      CHECK (status IN ('completed', 'pending_approval', 'declined')),
+    pairing_session_id UUID REFERENCES proof_pairing_sessions(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    settled_at TIMESTAMPTZ
+  );
+  CREATE INDEX IF NOT EXISTS idx_demo_bank_txn_account
+    ON demo_bank_transactions(bank_account_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_demo_bank_txn_session
+    ON demo_bank_transactions(pairing_session_id) WHERE pairing_session_id IS NOT NULL;
 
   -- ─── Registration Sessions (ADR 0023) ─────────────────────
   -- The end-user signup ceremony: a tenant SDK calls

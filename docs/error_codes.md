@@ -105,6 +105,10 @@ Some responses carry extra fields (`docs`, `retryAfterSeconds`, `currentScopes`,
 | `enrollment_pending` | `/api/demo-portal/bank/login` (409) — password OK but the ZeroAuth enrollment bind never completed. |
 | `account_locked` | `/api/demo-portal/bank/login` (423) — 10+ failed password attempts. |
 | `bank_signup_failed`, `bank_login_failed`, `pending_poll_failed` | `/api/demo-portal/bank/*` + `/device/pending` route exceptions. |
+| `no_account` | `/api/demo-portal/bank/overview` + `/bank/transfer` (404) — the demo session has no active bank account. |
+| `insufficient_funds` | `/api/demo-portal/bank/transfer` (400) — the debit would overdraw the savings balance. |
+| `transfer_not_found` | `/api/demo-portal/bank/transfer/:id` (404) — no such transfer for this account. |
+| `overview_failed`, `transfer_failed`, `transfer_poll_failed` | NeoBank dashboard route exceptions. |
 | `email_taken` | `/api/hr/signup` — an HR admin already exists for that email. |
 | `invalid_credentials` | `/api/hr/login` — wrong email or password. |
 | `weak_password`, `invalid_email`, `employee_exists`, `no_company`, `invalid_status` | `/api/hr/*` validation / provisioning errors. |
