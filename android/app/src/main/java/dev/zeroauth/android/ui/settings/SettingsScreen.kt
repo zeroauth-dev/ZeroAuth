@@ -20,23 +20,14 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.zeroauth.android.BuildConfig
-import dev.zeroauth.android.sec.AttendanceStateStore
-import dev.zeroauth.android.sec.PassStore
 
 /**
- * Settings / "Me" surface. Read-only identity link, the list of joined
- * companies (with a local "Leave" — the server membership persists), the
- * app version, and a clear-local-data affordance. No new network calls;
- * passes + last-event are device-local caches (no did-keyed server read).
+ * Settings / "Me" surface for the authenticator: the read-only identity
+ * link, a web sign-in entry, and app info. No network calls.
  */
 @Composable
 fun SettingsScreen(
@@ -44,11 +35,6 @@ fun SettingsScreen(
     onScanSignIn: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val passStore = remember { PassStore(context.applicationContext) }
-    val stateStore = remember { AttendanceStateStore(context.applicationContext) }
-    var passes by remember { mutableStateOf(passStore.list()) }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -84,59 +70,11 @@ fun SettingsScreen(
             }
         }
 
-        // ── Companies ──
-        SettingsCard(title = "Your companies") {
-            if (passes.isEmpty()) {
-                Text(
-                    "You haven't joined any companies yet. Scan an invite from the Home screen.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                passes.forEachIndexed { index, pass ->
-                    if (index > 0) Spacer(Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(pass.companyName, style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                pass.employeeId,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        TextButton(onClick = {
-                            passStore.remove(pass.companyId)
-                            passes = passStore.list()
-                        }) {
-                            Text("Leave", color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                }
-            }
-        }
-
         // ── About ──
         SettingsCard(title = "About") {
             SettingsRow(label = "App version", value = BuildConfig.VERSION_NAME)
             Spacer(Modifier.height(8.dp))
             SettingsRow(label = "Identity layer", value = "ZeroAuth · ZK face")
-        }
-
-        OutlinedButton(
-            onClick = {
-                // Local caches only — passes + the in/out hint. The server's
-                // memberships + attendance_events stay authoritative.
-                passStore.clear()
-                stateStore.clearAll()
-                passes = emptyList()
-            },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-        ) {
-            Text("Clear local data", color = MaterialTheme.colorScheme.error)
         }
     }
 }
