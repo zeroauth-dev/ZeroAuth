@@ -21,7 +21,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -90,12 +89,12 @@ fun HomeScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        bottomBar = { HomeBottomBar(onOpenSettings = onOpenSettings) },
     ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
+                .navigationBarsPadding()
                 .padding(horizontal = 24.dp, vertical = 16.dp),
         ) {
             BrandHeader(onViewIdentity = onViewIdentity)
@@ -139,26 +138,16 @@ fun HomeScreen(
             ) {
                 Text("Scan to sign in", style = MaterialTheme.typography.labelLarge)
             }
-        }
-    }
-}
-
-@Composable
-private fun HomeBottomBar(onOpenSettings: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 28.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = {}) {
-                Text("Home", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            }
-            TextButton(onClick = onOpenSettings) {
-                Text("Me", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Low-key settings entry — keeps the surface clean, no bottom bar.
+            TextButton(
+                onClick = onOpenSettings,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "Settings",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
