@@ -15,8 +15,6 @@ import adminRoutes from './routes/admin';
 import adminLogsRoutes from './routes/admin-logs';
 import leadsRoutes from './routes/leads';
 import demoPortalRoutes from './routes/demo-portal';
-import attendanceBridgeRoutes from './routes/attendance-bridge';
-import hrAdminRoutes from './routes/hr-admin';
 
 // Side-effect import: wires an in-memory ring buffer into Winston so
 // the /api/admin/logs/stream SSE route has something to replay + tail.
@@ -154,16 +152,6 @@ export function createApp() {
   // anything that didn't match an /api/* prefix.
   app.use('/api/demo-portal', demoPortalRoutes);
 
-  // Face-first attendance bridge — the employee's own phone marks
-  // attendance against the production proof-pairing verifier without
-  // holding a tenant API key. Same public-bridge posture as
-  // /api/demo-portal/* above; the phone hits api.zeroauth.dev directly.
-  app.use('/api/attendance', attendanceBridgeRoutes);
-
-  // Standalone HR attendance admin portal API. Cookie-/JWT-authed with
-  // the zeroauth-hr-admin audience — never the console or /v1 surface.
-  app.use('/api/hr', hrAdminRoutes);
-
   // Host-aware gate. Anything on api.zeroauth.dev that didn't match an
   // API route stops here (JSON 404) instead of being served the
   // landing-page index.html by the static handlers below.
@@ -189,15 +177,6 @@ export function createApp() {
   app.get(['/demo-portal', '/demo-portal/*'], (req, res) => {
     const suffix = req.originalUrl.slice('/demo-portal'.length);
     res.redirect(301, `/bank-demo${suffix}`);
-  });
-
-  // Serve the standalone HR attendance admin portal at /admin (mirrors the
-  // /dashboard + /bank-demo mounts). The SPA's Vite `base` and react-router
-  // `basename` are both pinned to `/admin/`. Its API is the same-origin
-  // /api/hr/* surface mounted above.
-  app.use('/admin', express.static(path.join(__dirname, '../admin-portal/dist'), { fallthrough: true }));
-  app.get('/admin/*', (_req, res) => {
-    res.sendFile(path.join(__dirname, '../admin-portal/dist/index.html'));
   });
 
   // Serve Docusaurus documentation

@@ -155,53 +155,6 @@ export function decodeToken(token: string): JWTPayload | null {
   return jwt.decode(token) as JWTPayload | null;
 }
 
-// ─── HR-admin session token (standalone attendance admin portal) ────
-//
-// Mirrors the console JWT (HS256, 24h) but with a distinct
-// issuer/audience `zeroauth-hr-admin`, so an HR token is NEVER accepted
-// on `/v1/*` (issuer 'zeroauth') or `/api/console/*` (audience
-// 'zeroauth-console'), and vice-versa. Carries the bound tenant so every
-// HR action is tenant-isolated.
-
-const HR_ADMIN_JWT_ISSUER = 'zeroauth-hr-admin';
-const HR_ADMIN_JWT_AUDIENCE = 'zeroauth-hr-admin';
-
-export interface HrAdminTokenPayload {
-  hrAdminId: string;
-  tenantId: string;
-  email: string;
-  jti?: string;
-}
-
-export function issueHrAdminToken(hrAdminId: string, tenantId: string, email: string): string {
-  return jwt.sign(
-    { hrAdminId, tenantId, email, type: 'hr-admin' },
-    config.jwt.secret,
-    {
-      expiresIn: '24h',
-      issuer: HR_ADMIN_JWT_ISSUER,
-      audience: HR_ADMIN_JWT_AUDIENCE,
-      jwtid: uuidv4(),
-    },
-  );
-}
-
-export function verifyHrAdminToken(token: string): HrAdminTokenPayload {
-  const payload = jwt.verify(token, config.jwt.secret, {
-    issuer: HR_ADMIN_JWT_ISSUER,
-    audience: HR_ADMIN_JWT_AUDIENCE,
-  }) as { hrAdminId?: string; tenantId?: string; email?: string; type?: string; jti?: string };
-  if (payload.type !== 'hr-admin' || !payload.hrAdminId || !payload.tenantId) {
-    throw new Error('Not an hr-admin token');
-  }
-  return {
-    hrAdminId: payload.hrAdminId,
-    tenantId: payload.tenantId,
-    email: payload.email ?? '',
-    jti: payload.jti,
-  };
-}
-
 // ─── JWKS support (ADR 0021) ────────────────────────────────────────
 //
 // Exposes the RS256 public key in JSON Web Key Set format. There are

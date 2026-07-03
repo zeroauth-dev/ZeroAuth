@@ -144,8 +144,10 @@ describe('schema-purity (tenant-scoped tables)', () => {
       ...(unionMatch as RegExpMatchArray)[1].matchAll(/'([a-z_]+)'/g),
     ].map(m => m[1]).sort();
 
+    // The inline CHECK on the audit_events.actor_type column (there is now a
+    // single actor_type CHECK in db.ts — the HR-widen ALTER was removed).
     const checkMatch = dbSrc.match(
-      /audit_events_actor_type_check\s+CHECK\s*\(actor_type IN \(([^)]+)\)\)/i,
+      /CHECK\s*\(actor_type IN \(([^)]+)\)\)/i,
     );
     expect(checkMatch).not.toBeNull();
     const checkValues = [
@@ -201,12 +203,6 @@ describe('schema-purity (tenant-scoped tables)', () => {
     'api_keys',
     'usage_logs',
     'usage_monthly',
-    // Slice-2 attendance: per-company config + provision-then-claim
-    // memberships. Tenant + environment scoped; org PII only (name/email/
-    // employee_id), never biometric-derived. (hr_admins is KNOWN-only —
-    // it has no `environment` column, like user_sessions/tenant_webhooks.)
-    'attendance_companies',
-    'attendance_memberships',
     // Bank 2FA showcase: the demo bank's own account store. Holds the
     // bank's first factor (customer_id + scrypt password_hash) and a
     // bound public DID pointer — never a biometric-derived value, so
@@ -309,14 +305,6 @@ describe('schema-purity (tenant-scoped tables)', () => {
       // not load-bearing here. The biometric-name guard would pass
       // trivially.
       'tenant_webhooks',
-      // Slice-2 attendance. attendance_companies + attendance_memberships
-      // are tenant+environment scoped (in TENANT_SCOPED_TABLES above, so
-      // the biometric-name guard runs on them). hr_admins holds the
-      // standalone HR portal login (tenant-scoped but no `environment`
-      // column) — KNOWN-only, like user_sessions. All store org PII only.
-      'attendance_companies',
-      'attendance_memberships',
-      'hr_admins',
       // Bank 2FA showcase: the demo bank's own account store
       // (customer_id + scrypt password_hash + bound public DID).
       // Tenant+environment scoped and in TENANT_SCOPED_TABLES above,

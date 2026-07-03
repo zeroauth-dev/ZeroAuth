@@ -469,71 +469,9 @@
 | **Test status** | **Required before merge.** `tests/console-logs-sse-limits.test.ts`: (i) 6th concurrent connection per tenant → 429, (ii) slow client where reads are throttled → connection closed after buffer threshold, (iii) idle-timeout fires after 30 s of no heartbeat ack. |
 | **Audit signal** | `audit_events.action = 'console.logs_stream_capacity_rejected'` for 429s; Prometheus alert for capacity-exhaustion. |
 
-### A-41 — Attendance buddy-punch / off-site check-in
+### A-41..A-46 — Attendance + HR admin surface — REMOVED
 
-| | |
-|---|---|
-| **Class** | Spoofing / repudiation (STRIDE: S + R) |
-| **Surface** | `POST /api/attendance/record` — the employee's own phone marks attendance |
-| **Description** | An employee who is not physically at the office wants to be marked present. In the own-phone model the face proof is genuinely theirs, so identity is not the gap — *presence* is. (1) The employee opens the app at home and tries to check in. (2) A colleague at the office tries to mark an absent employee present from the colleague's phone — but that fails the face proof (it is bound to the absent employee's secret on the absent employee's device). |
-| **Mitigation** | (a) Presence is gated by a WiFi anchor: the phone reports the connected BSSID + signal %, and the server **re-checks** both against the company's configured anchor (`verifyWifiAgainstAnchor`) before accepting — a home check-in fails `outside_anchor` because the office router is out of radio range. (b) The face proof binds the event to one enrolled identity on one device, so a colleague cannot punch for an absent employee. (c) An off-network attempt with a valid face is still verified and written as a `result:'rejected'` row (+ audit), so HR sees the attempt rather than a silent drop. (d) **Residual risk:** WiFi-range only — a relay/wormhole (someone physically at the door tethering the absent employee onto the office network) is out of scope for slice 1; NFC-tap / BLE-beacon relay-proof presence is the documented hardening follow-up. |
-| **Test status** | `tests/attendance-bridge.test.ts`: BSSID mismatch → `403 outside_anchor` + `rejected` row; weak signal → `403`; happy path on-anchor → `201 accepted`. |
-| **Audit signal** | `audit_events.action = 'attendance.recorded'`, `status='failure'` for the `rejected` (off-anchor) rows; `metadata.wifi_reason ∈ {bssid_mismatch, weak_signal, missing_reading, no_anchor_configured}`. |
-
-### A-42 — Spoofed WiFi presence attestation (mock BSSID)
-
-| | |
-|---|---|
-| **Class** | Spoofing (STRIDE: S) |
-| **Surface** | `POST /api/attendance/record` — the `wifi: { bssid, signal }` attestation is computed on-device |
-| **Description** | The phone self-reports the network it is on. A rooted device or a patched APK could report the office BSSID + a strong signal while physically elsewhere, defeating the presence gate. |
-| **Mitigation** | (a) The server holds the authoritative anchor config and only ever trusts a BSSID that matches it — an attacker must know the exact office BSSID, not merely any value. (b) The same proof-pairing Play-Integrity policy that gates sign-in (`allow_play_integrity_absent`, `require_*_integrity`) applies to attendance verification, so a tenant can require a hardware-attested, non-rooted device before any check-in is accepted. (c) **Residual risk:** on a permissive (demo) tenant a determined attacker with a modified client can still forge the BSSID; closing this fully requires either device-attested location (Play Integrity + a trusted location provider) or a co-presence channel (NFC/BLE). Documented, not yet mitigated for permissive tenants. |
-| **Test status** | `tests/attendance-bridge.test.ts` pins the server-side re-check (`verifyWifiAgainstAnchor`); Play-Integrity enforcement is covered by `tests/proof-pairing.test.ts` (shared verifier). |
-| **Audit signal** | `audit_events.metadata` carries only the WiFi **verdict** — `wifi_ok` + `wifi_reason` + `wifi_signal` — never the raw office BSSID, so no location identifier is persisted to the immutable audit trail (data-minimisation). |
-
-### A-43 — Attendance proof replay / session reuse
-
-| | |
-|---|---|
-| **Class** | Spoofing / EoP (STRIDE: S + E) |
-| **Surface** | `POST /api/attendance/init` → `POST /api/attendance/record` |
-| **Description** | An attacker captures a valid `(did, proof, publicSignals)` for one check-in and replays it — either to the same session twice or to a new session — to forge additional attendance events. |
-| **Mitigation** | (a) Each `record` is bound to a single proof-pairing session whose nonce the proof commits to via `publicSignals[1] = Poseidon(didHash, nonce)`; a proof minted for one nonce fails the binding on any other session (A-11, inherited). (b) The session bind token is stashed server-side at `init` and **consumed single-use** at `record`, so a second `record` for the same session id returns `410 attendance_session_expired` before any crypto runs. (c) The underlying `submitProof` atomic `UPDATE … WHERE state='issued'` makes the consume race-safe (A-14, inherited). |
-| **Test status** | `tests/attendance-bridge.test.ts`: a second `record` on the same session id → `410 attendance_session_expired`, `submitProof` invoked exactly once. Inherited nonce-binding + atomic-consume coverage in `tests/proof-pairing.test.ts`. |
-| **Audit signal** | Inherited `pairing.replay_blocked` / `pairing.race_lost` from the proof-pairing verifier. |
-
-### A-44 — HR admin portal session / surface isolation
-
-| | |
-|---|---|
-| **Class** | Spoofing / EoP (STRIDE: S + E) |
-| **Surface** | `/api/hr/*` — the standalone attendance admin portal |
-| **Description** | (1) An HR-admin JWT is replayed on `/v1/*` or `/api/console/*` to escalate into the platform or developer console; or a console/`/v1` token is replayed on `/api/hr/*`. (2) An HR admin reads/writes another tenant's roster or attendance by tampering with a request. |
-| **Mitigation** | (a) The HR JWT carries issuer **and** audience `zeroauth-hr-admin` (distinct from `zeroauth-console` and the `/v1` `zeroauth` issuer); `verifyHrAdminToken` rejects any other audience, and `requireConsoleAuth`/`/v1` verifiers reject the HR audience. (b) Every `/api/hr/*` query is scoped to `req.hrAdmin.tenantId` (from the verified token) — never a client-supplied tenant/company. (c) The cookie is HttpOnly, `SameSite=Strict`, path `/api/hr`. (d) Scrypt password hashing (reused from `tenants.ts`); write routes are rate-limited per admin id. |
-| **Test status** | `tests/hr-admin.test.ts`: an HR token → 401 on `/api/console/keys`; a console-audience token → 401 on `/api/hr/account`; auth required; signup/login/provision happy paths. |
-| **Audit signal** | `audit_events.actor_type='hr_admin'` for company/member writes. |
-
-### A-45 — Provision-then-claim invite abuse
-
-| | |
-|---|---|
-| **Class** | Spoofing (STRIDE: S) |
-| **Surface** | `POST /api/hr/employees` (provision) → `POST /api/attendance/claim` |
-| **Description** | (1) A captured `(did, commitment, proof)` tuple (observable on every prior sign-in) is replayed into an open invite to drive the binding / deny onboarding. (2) A stolen invite code lets a third party complete the ceremony. (3) An invite is reused for multiple identities. |
-| **Mitigation** | (a) **Server-nonce freshness (primary).** The claim is bound to a fresh `/init` session: `proof-pairing.verifyAndConsumeForClaim` enforces `publicSignals[1] = Poseidon(Poseidon(commitment), nonce)` (the SAME A-11 binding as check-in), runs the Groth16 verifier loopback rejecting `structuralFallback`, and consumes the session single-use. A captured proof carries the prior session's nonce fold and fails → `400 pairing_nonce_mismatch`. (b) **Single-use invite** — SHA-256-hashed at rest, consumed atomically (`FOR UPDATE` + `invite_code_hash=NULL`) inside the claim transaction, **48-hour** TTL; a replayed claim finds no live invite → `410`. (c) `commitmentsEqual(publicSignals[0], commitment)` is gated before the proof verify, so `did_hash = Poseidon(commitment)` binds the value the proof committed to. (d) `UNIQUE(company_id, did)` prevents two memberships sharing a DID. See ADR 0025. **Residual:** the invite is a bearer secret delivered out-of-band, so the proof binds *freshness + control of the committed secret*, not *that the claimer is the named employee* — that trust flows through invite delivery. Documented; future hardening = deliver the code to the employee's verified channel + bake the nonce into the circuit's public inputs. |
-| **Test status** | `tests/attendance-membership.test.ts`: claim requires `sessionId` (400 without); valid claim → 200; expired/used invite → 410; bad proof → 401. `tests/attendance-membership-service.test.ts`: real `did_hash = Poseidon(commitment)` derivation; `commitment_mismatch` before proof; rollback (invite unconsumed) on nonce/proof failure. |
-| **Audit signal** | `attendance.member_provisioned` / `attendance.membership_claimed`. |
-
-### A-46 — Cross-company attendance leakage
-
-| | |
-|---|---|
-| **Class** | Information disclosure / EoP (STRIDE: I + E) |
-| **Surface** | `POST /api/attendance/record` with a `companyId` |
-| **Description** | A verified employee of company A submits a check-in against company B's `companyId` to forge presence there, or to probe B's WiFi anchor. |
-| **Mitigation** | (a) `record` resolves the company's own tenant and gates on `findClaimedMembership(companyId, did)` → `403 not_a_member` unless the DID is a **claimed** member of *that* company. (b) The WiFi anchor returned by `/company` is non-sensitive config (the BSSID is required to be matched, not secret); the real gate is the server-side re-check + membership. (c) The demo (`companyId` absent) keeps the slice-1 any-registered-user behaviour and is isolated to the demo tenant. |
-| **Test status** | `tests/attendance-membership.test.ts`: company-scoped record for a claimed member → 201 (scoped to the company's tenant); non-member → `403 not_a_member`, no event written. |
-| **Audit signal** | `attendance.recorded` under the company's own tenant; non-member attempts return 403 without a row. |
+The workforce-attendance vertical was **removed in July 2026** as off-goal — ZeroAuth is the auth layer for the app + neobank + console, not a workforce-attendance product. Retired with the surface: the public `/api/attendance/*` bridge, the `/api/hr/*` admin portal + `hr_admins` table, the provision-then-claim membership layer (`attendance_companies`/`attendance_memberships`), and the `admin-portal` SPA. The corresponding attack entries — A-41 (buddy-punch), A-42 (spoofed WiFi anchor), A-43 (attendance proof replay), A-44 (HR portal isolation), A-45 (provision-then-claim invite abuse), A-46 (cross-company leakage) — are retired too. Their load-bearing crypto mitigations (nonce binding, single-use atomic consume, Groth16 verify) live on unchanged in the **kept** proof-pairing verifier (A-11/A-14) that powers the neobank + identity flows. The generic `/v1/attendance` central-API endpoint + `attendance_events` table remain as part of the tenant product API.
 
 ### A-47 — Bank 2FA: approval-inbox poll + pinned-session integrity
 

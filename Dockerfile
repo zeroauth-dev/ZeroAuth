@@ -64,16 +64,6 @@ RUN npm ci --ignore-scripts
 COPY demo-portal/ ./
 RUN npm run build
 
-# ── Build Stage — Admin portal (HR attendance, served at /admin) ──
-# Vite `base` + react-router `basename` are pinned to /admin/ so the
-# built asset URLs resolve under the Express mount in src/app.ts.
-FROM node:20-alpine AS admin-portal-build
-WORKDIR /app/admin-portal
-COPY admin-portal/package.json admin-portal/package-lock.json* ./
-RUN npm install --ignore-scripts --no-audit --no-fund
-COPY admin-portal/ ./
-RUN npm run build
-
 # ── Build Stage — Documentation ───────────────
 FROM node:20-alpine AS docs-build
 WORKDIR /app/website

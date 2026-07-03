@@ -156,7 +156,7 @@ export type VerificationMethod =
 export type VerificationResult = 'pass' | 'fail' | 'challenge';
 export type AttendanceEventType = 'check_in' | 'check_out';
 export type AttendanceResult = 'accepted' | 'rejected';
-export type AuditActorType = 'api_key' | 'console' | 'device' | 'system' | 'hr_admin';
+export type AuditActorType = 'api_key' | 'console' | 'device' | 'system';
 export type AuditStatus = 'success' | 'failure';
 
 export type ApiScope =
