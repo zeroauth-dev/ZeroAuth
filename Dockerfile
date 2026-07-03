@@ -177,9 +177,6 @@ COPY --from=dashboard-build /app/dashboard/dist ./dashboard/dist
 # Copy demo-portal build (served at /bank-demo by src/app.ts)
 COPY --from=demo-portal-build /app/demo-portal/dist ./demo-portal/dist
 
-# Copy admin-portal build (served at /admin by src/app.ts)
-COPY --from=admin-portal-build /app/admin-portal/dist ./admin-portal/dist
-
 # Copy built documentation site
 COPY --from=docs-build /app/website/build ./website/build
 

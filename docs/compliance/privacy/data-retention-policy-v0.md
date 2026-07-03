@@ -21,7 +21,7 @@ This policy establishes the **canonical retention rules** for every data element
 
 The policy is enforced by a nightly cleanup job (Phase 1 sprint 4 implementation; this document is the spec). Bank-tenants that require longer retention pass it through their per-tenant policy JSON; bank-tenants that require shorter retention than the default pass it the same way, subject to a sanity floor (no retention shorter than the regulator-mandated minimum on any audit-touching surface).
 
-The right-to-erasure flow (DPDP §13) operates orthogonally: a data-principal request triggers an admin-portal action that cascades a `DELETE` and writes an audit row, regardless of whether the retention timer has elapsed.
+The right-to-erasure flow (DPDP §13) operates orthogonally: a data-principal request triggers an operator erasure action that cascades a `DELETE` and writes an audit row, regardless of whether the retention timer has elapsed. (The admin-portal that once automated this was retired in July 2026; erasure is currently an operator DB action, with a console-side erasure endpoint as the planned replacement.)
 
 ---
 
@@ -48,7 +48,7 @@ The table below resolves the default-by-classification rules against the specifi
 
 | Table | Retention (days) | Rule source | Notes |
 |---|---|---|---|
-| `leads` | 1095 (3 years) | PII default | Marketing lead capture; deleted on data-principal request via the admin portal. |
+| `leads` | 1095 (3 years) | PII default | Marketing lead capture; deleted on data-principal request via an operator erasure action. |
 | `tenants` | -1 (lifetime of business relationship) | Service-relationship retention | Deleted on tenant offboarding; cascades to `api_keys`, `usage_logs`, `usage_monthly`, `devices`, `tenant_users`, `verification_events`, `attendance_events`, `audit_events`. |
 | `pending_signups` | 1 (24 hours TTL) | Operational TTL | Hard TTL; rows older than 24h that have not been consumed are deleted by the cleanup job. |
 | `api_keys` | -1 (lifetime of tenant) | Service-relationship retention | Revoked keys are retained for audit purposes; `revoked_at` is the operational timer for any policy that prunes revoked keys after 1 year (not yet enabled). |
@@ -112,8 +112,8 @@ The implementation lands in Phase 1 sprint 4; the C-IDs are reserved as `C-141..
 
 Per DPDP §13, a data principal may request erasure of their personal data. The flow:
 
-1. **Request capture.** The data principal writes to the bank-tenant's grievance officer (per the bank's DPDP §6 notice). The grievance officer files an admin-portal request keyed by `did` or by `external_id` (depending on which the bank operates with).
-2. **Lookup.** The admin portal locates the `tenant_users` row by `tenant_id + environment + external_id` (or by `tenant_id + environment + did` once the Phase 1 PII-strip lands).
+1. **Request capture.** The data principal writes to the bank-tenant's grievance officer (per the bank's DPDP §6 notice). The grievance officer files an erasure request keyed by `did` or by `external_id` (depending on which the bank operates with).
+2. **Lookup.** An operator locates the `tenant_users` row by `tenant_id + environment + external_id` (or by `tenant_id + environment + did` once the Phase 1 PII-strip lands).
 3. **Cascade.** The system performs a transactional delete:
    - Delete the `tenant_users` row.
    - Cascade-null the `verification_events.user_id` and `attendance_events.user_id` FKs (set to NULL by the existing `ON DELETE SET NULL`).
@@ -185,7 +185,7 @@ The `/api/admin/privacy-audit` endpoint (already shipped) surfaces these rows fo
 - **Q-RET-02.** Does the `pending_signups` 24-hour TTL satisfy DPDP §6 storage-limitation, or should we shorten to 1 hour after the verify link is consumed? Operational impact is minor; security upside is small. Decision deferred to Phase 1 sprint 3.
 - **Q-RET-03.** Should `usage_logs.ip_address` be hashed after 90 days (preserving abuse-defence histograms but losing the raw IP for re-identification)? Referred to Agent #6 + Agent #39; ADR target Phase 1 sprint 4.
 - **Q-RET-04.** The right-to-erasure cascade currently leaves orphan rows in `verification_events` (FK `SET NULL`). Is this consistent with DPDP §13 erasure, or must we delete the `verification_events` row outright? Referred to counsel via memo v1.
-- **Q-RET-05.** The `audit_events.metadata.actor_email` field — captured during console actions — is a PII surface on what is otherwise a NON-PII / OPAQUE row. Should the email be replaced with a `console_user_id` UUID lookup on a separate table, with the email queryable only via the admin portal? Referred to Agent #14 + Agent #39 for Phase 1 sprint 2 design.
+- **Q-RET-05.** The `audit_events.metadata.actor_email` field — captured during console actions — is a PII surface on what is otherwise a NON-PII / OPAQUE row. Should the email be replaced with a `console_user_id` UUID lookup on a separate table, with the email queryable only via a restricted operator lookup? Referred to Agent #14 + Agent #39 for Phase 1 sprint 2 design.
 
 ---
 
